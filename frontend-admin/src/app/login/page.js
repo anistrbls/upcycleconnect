@@ -3,7 +3,33 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const getApiBaseUrl = () => {
+    const fallback = "/api";
+    const rawValue = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+    const cleanedValue = rawValue.replace(/^['\"]|['\"]$/g, "").replace(/\/+$/, "");
+
+    if (!cleanedValue) {
+        return fallback;
+    }
+
+    if (/^https?:\/\//i.test(cleanedValue) || cleanedValue.startsWith("/")) {
+        return cleanedValue;
+    }
+
+    return fallback;
+};
+
+const API_BASE_URL = getApiBaseUrl();
+const apiUrl = (path) => {
+    const normalizedBase = API_BASE_URL.replace(/\/+$/, "");
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+    if (normalizedBase.endsWith("/api")) {
+        return `${normalizedBase}${normalizedPath}`;
+    }
+
+    return `${normalizedBase}/api${normalizedPath}`;
+};
 const TOKEN_KEY = "uc_admin_token";
 
 export default function LoginPage() {
@@ -20,7 +46,7 @@ export default function LoginPage() {
             return;
         }
 
-        fetch(`${API_URL}/api/auth/me`, {
+        fetch(apiUrl("/auth/me"), {
             method: "GET",
             headers: {
                 Authorization: `Bearer ${existingToken}`,
@@ -39,13 +65,30 @@ export default function LoginPage() {
         setError("");
         setIsLoading(true);
 
+        const normalizedEmail = email.trim();
+        const normalizedPassword = password.trim();
+
+        if (!normalizedEmail || !normalizedPassword) {
+            setError("Veuillez renseigner votre email et votre mot de passe.");
+            setIsLoading(false);
+            return;
+        }
+
+        // Basic email sanity check to avoid browser-specific pattern errors.
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(normalizedEmail)) {
+            setError("Format d'email invalide.");
+            setIsLoading(false);
+            return;
+        }
+
         try {
-            const response = await fetch(`${API_URL}/api/auth/login`, {
+            const response = await fetch(apiUrl("/auth/login"), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({ email: normalizedEmail, password: normalizedPassword }),
             });
 
             const data = await response.json();
@@ -56,7 +99,7 @@ export default function LoginPage() {
             window.localStorage.setItem(TOKEN_KEY, data.token);
             router.replace("/");
         } catch (err) {
-            setError(err.message || "Erreur de connexion");
+            setError(String(err?.message || "Erreur de connexion"));
         } finally {
             setIsLoading(false);
         }
@@ -71,10 +114,6 @@ export default function LoginPage() {
                         <span className="visual-brand-name">UpcycleConnect</span>
                     </div>
 
-                    <div className="visual-orb visual-orb-a"></div>
-                    <div className="visual-orb visual-orb-b"></div>
-                    <div className="visual-orb visual-orb-c"></div>
-
                     <div className="visual-copy">
                         <p className="visual-eyebrow">Console de gestion</p>
                         <h2>Pilotez l'ecosysteme UpcycleConnect avec clarte.</h2>
@@ -82,56 +121,73 @@ export default function LoginPage() {
                 </section>
 
                 <section className="login-form-panel">
-                    <div className="form-star">✶</div>
-                    <h1>Connexion</h1>
-                    <p className="login-subtitle">Accedez a l'espace administrateur UpcycleConnect en toute securite.</p>
-
-                    <form className="login-form" onSubmit={handleSubmit}>
-                        <label className="form-label">
-                            Votre email
-                            <input
-                                type="email"
-                                placeholder="nom@exemple.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                required
-                                autoComplete="email"
-                            />
-                        </label>
-
-                        <div className="password-head">
-                            <span className="form-label-text">Mot de passe</span>
-                            <button type="button" className="password-link">Mot de passe oublie ?</button>
+                    <div className="login-form-inner">
+                        <div className="star-wrap">
+                            <div className="form-star">✶</div>
                         </div>
 
-                        <div className="password-wrap">
-                            <input
-                                type={showPassword ? "text" : "password"}
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                autoComplete="current-password"
-                            />
-                            <button
-                                type="button"
-                                className="password-toggle"
-                                onClick={() => setShowPassword((prev) => !prev)}
-                                aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M2.06 12.35a1 1 0 0 1 0-.7C3.43 8.6 7.18 6 12 6s8.57 2.6 9.94 5.65a1 1 0 0 1 0 .7C20.57 15.4 16.82 18 12 18s-8.57-2.6-9.94-5.65z" />
-                                    <circle cx="12" cy="12" r="3" />
-                                </svg>
-                            </button>
+                        <div className="login-head-block">
+                            <h1>Connexion</h1>
+                            <p className="login-subtitle">Entrez vos informations pour acceder a votre espace, n'importe ou et a tout moment.</p>
                         </div>
 
-                        {error ? <p className="login-error">{error}</p> : null}
+                        <form className="login-form" onSubmit={handleSubmit} noValidate>
+                            <div className="form-fields-wrap">
+                                <label className="form-label">
+                                    Votre email
+                                    <input
+                                        type="text"
+                                        inputMode="email"
+                                        placeholder="nom@exemple.com"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        required
+                                        autoComplete="email"
+                                    />
+                                </label>
 
-                        <button className="login-submit" type="submit" disabled={isLoading}>
-                            {isLoading ? "Connexion..." : "Se connecter"}
-                        </button>
-                    </form>
+                                <div className="form-label password-field">
+                                    <div className="password-head">
+                                        <span className="form-label-text">Mot de passe</span>
+                                        <button type="button" className="password-link">Mot de passe oublie ?</button>
+                                    </div>
+
+                                    <div className="password-wrap">
+                                        <input
+                                            type={showPassword ? "text" : "password"}
+                                            placeholder="••••••••"
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            required
+                                            autoComplete="current-password"
+                                        />
+                                        <button
+                                            type="button"
+                                            className="password-toggle"
+                                            onClick={() => setShowPassword((prev) => !prev)}
+                                            aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                                                <path d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7s-8.268-2.943-9.542-7z" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {error ? <p className="login-error">{error}</p> : null}
+
+                            <div className="submit-wrap">
+                                <button className="login-submit" type="submit" disabled={isLoading}>
+                                    <span>{isLoading ? "Connexion..." : "Se connecter"}</span>
+                                    <svg className="submit-arrow" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                        <path d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </section>
             </div>
         </main>

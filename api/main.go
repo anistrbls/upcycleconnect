@@ -68,8 +68,8 @@ func main() {
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /ping", pingHandler)
 	mux.HandleFunc("GET /api/status", statusHandler)
-	mux.HandleFunc("POST /api/auth/login", loginHandler)
-	mux.Handle("GET /api/auth/me", authMiddleware(http.HandlerFunc(meHandler)))
+	mux.HandleFunc("/api/auth/login", loginHandler)
+	mux.Handle("/api/auth/me", authMiddleware(http.HandlerFunc(meHandler)))
 
 	port := getEnv("API_PORT", "8080")
 
@@ -255,6 +255,11 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
 	type loginRequest struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -306,6 +311,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func meHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
 	claimsValue := r.Context().Value(authClaimsKey)
 	claims, ok := claimsValue.(jwt.MapClaims)
 	if !ok {

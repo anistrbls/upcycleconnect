@@ -37,7 +37,33 @@ const SidebarUsers = "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 
 const SidebarBox = "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12.01l8.73-5.05 M12 22.08V12";
 const SidebarSettings = "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.731.73a2 2 0 0 1-2-.18v-.18a2 2 0 0 0-2 2l-.22.38a2 2 0 0 0 .73 2.731.73a2 2 0 0 1 0 2l-1.73 1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.731.73a2 2 0 0 1 2 01.73a2 2 0 0 1 .18 2v.18a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.731.73a2 2 0 0 1 2 .18v.18a2 2 0 0 0 2-2l.22-.38a2 2 0 0 0-.73-2.731.73 0 0 1 0-2l1.73-1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.731.73 0 0 1-2 01.73 0 0 1-.18-2V4a2 2 0 0 0-2-2z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const getApiBaseUrl = () => {
+    const fallback = "/api";
+    const rawValue = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+    const cleanedValue = rawValue.replace(/^['\"]|['\"]$/g, "").replace(/\/+$/, "");
+
+    if (!cleanedValue) {
+        return fallback;
+    }
+
+    if (/^https?:\/\//i.test(cleanedValue) || cleanedValue.startsWith("/")) {
+        return cleanedValue;
+    }
+
+    return fallback;
+};
+
+const API_BASE_URL = getApiBaseUrl();
+const apiUrl = (path) => {
+    const normalizedBase = API_BASE_URL.replace(/\/+$/, "");
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+    if (normalizedBase.endsWith("/api")) {
+        return `${normalizedBase}${normalizedPath}`;
+    }
+
+    return `${normalizedBase}/api${normalizedPath}`;
+};
 const TOKEN_KEY = "uc_admin_token";
 
 const DISTINCT = {
@@ -98,7 +124,7 @@ export default function Home() {
             }
 
             try {
-                const response = await fetch(`${API_URL}/api/auth/me`, {
+                const response = await fetch(apiUrl("/auth/me"), {
                     method: "GET",
                     headers: {
                         Authorization: `Bearer ${token}`,
