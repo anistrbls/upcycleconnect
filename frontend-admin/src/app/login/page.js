@@ -54,7 +54,7 @@ export default function LoginPage() {
         })
             .then((res) => {
                 if (res.ok) {
-                    router.replace("/");
+                    router.replace("/vue-globale/vue-generale");
                 }
             })
             .catch(() => {});
@@ -97,7 +97,7 @@ export default function LoginPage() {
             }
 
             window.localStorage.setItem(TOKEN_KEY, data.token);
-            router.replace("/");
+            router.replace("/vue-globale/vue-generale");
         } catch (err) {
             setError(String(err?.message || "Erreur de connexion"));
         } finally {
