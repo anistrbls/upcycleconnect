@@ -95,6 +95,121 @@ const LEVEL_COLORS = {
     faible: DISTINCT.violet,
 };
 
+const NAV_MODULES = [
+    {
+        key: "vue-globale",
+        label: "Vue globale",
+        shortLabel: "Vue",
+        icon: SidebarGrid,
+        subNav: [
+            { key: "vue-generale", label: "Vue générale", shortLabel: "Générale" },
+            { key: "kpis-stats", label: "KPIs & statistiques", shortLabel: "KPIs" },
+            { key: "activite-temps-reel", label: "Activité temps réel", shortLabel: "Temps réel" },
+            { key: "alertes", label: "Alertes", shortLabel: "Alertes" },
+        ],
+    },
+    {
+        key: "utilisateurs",
+        label: "Utilisateurs",
+        shortLabel: "Users",
+        icon: SidebarUsers,
+        subNav: [
+            { key: "tous-utilisateurs", label: "Tous les utilisateurs", shortLabel: "Tous" },
+            { key: "particuliers", label: "Particuliers", shortLabel: "Particuliers" },
+            { key: "prestataires", label: "Prestataires / Artisans", shortLabel: "Prestataires" },
+            { key: "admins", label: "Admins", shortLabel: "Admins" },
+            { key: "validations", label: "Validations", shortLabel: "Validations" },
+        ],
+    },
+    {
+        key: "offres-prestations",
+        label: "Offres & prestations",
+        shortLabel: "Offres",
+        icon: SidebarBox,
+        subNav: [
+            { key: "vue-ensemble", label: "Vue d'ensemble", shortLabel: "Vue" },
+            { key: "prestations", label: "Prestations", shortLabel: "Prestations" },
+            { key: "categories-prestations", label: "Catégories de prestations", shortLabel: "Catégories" },
+            { key: "reservations", label: "Réservations", shortLabel: "Réservations" },
+            { key: "tarification", label: "Tarification", shortLabel: "Tarifs" },
+        ],
+    },
+    {
+        key: "evenements",
+        label: "Événements",
+        shortLabel: "Événements",
+        icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2",
+        subNav: [
+            { key: "tous-evenements", label: "Tous les événements", shortLabel: "Tous" },
+            { key: "categories-evenements", label: "Catégories", shortLabel: "Catégories" },
+            { key: "inscriptions", label: "Inscriptions", shortLabel: "Inscriptions" },
+            { key: "intervenants", label: "Intervenants", shortLabel: "Intervenants" },
+            { key: "planning", label: "Planning", shortLabel: "Planning" },
+        ],
+    },
+    {
+        key: "finances",
+        label: "Finances",
+        shortLabel: "Finances",
+        icon: "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
+        subNav: [
+            { key: "vue-financiere", label: "Vue financière", shortLabel: "Vue" },
+            { key: "abonnements", label: "Abonnements", shortLabel: "Abonnements" },
+            { key: "commissions", label: "Commissions", shortLabel: "Commissions" },
+            { key: "paiements", label: "Paiements", shortLabel: "Paiements" },
+            { key: "factures", label: "Factures", shortLabel: "Factures" },
+        ],
+    },
+    {
+        key: "operations",
+        label: "Opérations",
+        shortLabel: "Ops",
+        icon: "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3",
+        subNav: [
+            { key: "conteneurs", label: "Conteneurs", shortLabel: "Conteneurs" },
+            { key: "validations-ops", label: "Validations", shortLabel: "Validations" },
+            { key: "moderations", label: "Modérations", shortLabel: "Modérations" },
+            { key: "notifications", label: "Notifications", shortLabel: "Notif." },
+            { key: "documents", label: "Documents", shortLabel: "Docs" },
+        ],
+    },
+    {
+        key: "parametres",
+        label: "Paramètres",
+        shortLabel: "Paramètres",
+        icon: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+        subNav: [
+            { key: "general", label: "Général", shortLabel: "Général" },
+            { key: "roles-permissions", label: "Rôles & permissions", shortLabel: "Rôles" },
+            { key: "configuration", label: "Configuration", shortLabel: "Config" },
+            { key: "integrations", label: "Intégrations", shortLabel: "Intégrations" },
+            { key: "journal-systeme", label: "Journal système", shortLabel: "Journal" },
+        ],
+    },
+];
+
+const ModulePlaceholder = ({ moduleLabel, subLabel }) => (
+    <>
+        <div className="header-section">
+            <div className="title-area">
+                <span className="activities-label">Module principal</span>
+                <h1>{moduleLabel}</h1>
+            </div>
+        </div>
+
+        <div className="panel" style={{ maxWidth: "920px" }}>
+            <div className="section-header">
+                <span className="section-title">{subLabel}</span>
+                <span className="db-badge">Structure prête</span>
+            </div>
+            <p style={{ fontSize: "0.92rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                Cette section est prête pour intégrer les écrans métier. La sidebar reste la navigation principale,
+                et la navbar du haut pilote les sous-pages contextuelles du module actif.
+            </p>
+        </div>
+    </>
+);
+
 const AlertRow = ({ title, desc, count, level, action }) => (
     <div className="alert-row">
         <div className="alert-level-dot" style={{ background: LEVEL_COLORS[level] || "#ccc" }}></div>
@@ -114,6 +229,16 @@ const AlertRow = ({ title, desc, count, level, action }) => (
 export default function Home() {
     const router = useRouter();
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const [activeModuleKey, setActiveModuleKey] = useState("vue-globale");
+    const [activeSubKey, setActiveSubKey] = useState("vue-generale");
+
+    const activeModule = NAV_MODULES.find((module) => module.key === activeModuleKey) || NAV_MODULES[0];
+    const activeSub = activeModule.subNav.find((subItem) => subItem.key === activeSubKey) || activeModule.subNav[0];
+    const isGlobalModule = activeModule.key === "vue-globale";
+    const showGlobalAll = isGlobalModule && activeSubKey === "vue-generale";
+    const showGlobalKpis = isGlobalModule && (activeSubKey === "vue-generale" || activeSubKey === "kpis-stats");
+    const showGlobalRealtime = isGlobalModule && (activeSubKey === "vue-generale" || activeSubKey === "activite-temps-reel");
+    const showGlobalAlerts = isGlobalModule && (activeSubKey === "vue-generale" || activeSubKey === "alertes");
 
     useEffect(() => {
         const verifyToken = async () => {
@@ -150,6 +275,16 @@ export default function Home() {
         router.replace("/login");
     };
 
+    const handleModuleChange = (moduleKey) => {
+        const nextModule = NAV_MODULES.find((module) => module.key === moduleKey);
+        if (!nextModule) {
+            return;
+        }
+
+        setActiveModuleKey(moduleKey);
+        setActiveSubKey(nextModule.subNav[0].key);
+    };
+
     if (isCheckingAuth) {
         return (
             <div className="auth-loading-screen">
@@ -167,15 +302,21 @@ export default function Home() {
                     </div>
                     <span style={{ marginLeft: "0.5rem" }}>UpcycleConnect</span>
                     <span className="slash">|</span>
-                    <span style={{ color: "var(--text-muted)" }}>Admin Hub</span>
+                    <span style={{ color: "var(--text-muted)" }}>{activeModule.label}</span>
                 </div>
 
                 <div className="topbar-center">
-                    <button className="action-btn primary"><span className="action-label-long">Vue Globale</span><span className="action-label-short">Vue</span></button>
-                    <button className="action-btn"><span className="action-label-long">Membres & Artisans</span><span className="action-label-short">Membres</span></button>
-                    <button className="action-btn"><span className="action-label-long">Gestion Conteneurs (Check)</span><span className="action-label-short">Conteneurs</span></button>
-                    <button className="action-btn"><span className="action-label-long">Trésorerie & Abonnements</span><span className="action-label-short">Trésorerie</span></button>
-                    <button className="action-btn"><span className="action-label-long">Plannings Ateliers</span><span className="action-label-short">Ateliers</span></button>
+                    {activeModule.subNav.map((subItem) => (
+                        <button
+                            key={subItem.key}
+                            className={`action-btn ${activeSub.key === subItem.key ? "primary" : ""}`}
+                            onClick={() => setActiveSubKey(subItem.key)}
+                            type="button"
+                        >
+                            <span className="action-label-long">{subItem.label}</span>
+                            <span className="action-label-short">{subItem.shortLabel || subItem.label}</span>
+                        </button>
+                    ))}
                 </div>
 
                 <div className="topbar-right">
@@ -185,24 +326,40 @@ export default function Home() {
 
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 <aside className="sidebar">
-                    <div className="sidebar-icon active" style={{ background: "var(--black)", color: "white" }}><Icon path={SidebarGrid} /></div>
-                    <div className="sidebar-icon"><Icon path={SidebarUsers} /></div>
-                    <div className="sidebar-icon"><Icon path={SidebarBox} /></div>
-                    <div className="sidebar-icon"><Icon path="M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3" /></div>
-                    <div className="sidebar-icon"><Icon path="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></div>
-                    <div className="sidebar-icon"><Icon path="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></div>
-                    <div className="sidebar-icon"><Icon path="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></div>
+                    <nav className="sidebar-nav" aria-label="Navigation principale backoffice">
+                        {NAV_MODULES.map((module) => {
+                            const isActive = activeModule.key === module.key;
+
+                            return (
+                                <button
+                                    key={module.key}
+                                    className={`sidebar-item ${isActive ? "active" : ""}`}
+                                    onClick={() => handleModuleChange(module.key)}
+                                    type="button"
+                                >
+                                    <span className={`sidebar-icon ${isActive ? "active" : ""}`}>
+                                        <Icon path={module.icon} />
+                                    </span>
+                                    <span className="sidebar-label">{module.label}</span>
+                                </button>
+                            );
+                        })}
+                    </nav>
                 </aside>
 
                 <main className="main-content">
+                    {activeModule.key === "vue-globale" ? (
+                    <>
 
                     <div className="header-section">
                         <div className="title-area">
                             <span className="activities-label">Tableau de bord de gestion</span>
-                            <h1>Vue Générale des Activités</h1>
+                            <h1>{activeSub.label}</h1>
                         </div>
                     </div>
 
+                    {showGlobalKpis ? (
+                    <>
                     {/* SECTION 1 — KPIs & STATS */}
                     <div className="db-section-label">KPIs & Statistiques</div>
 
@@ -323,7 +480,11 @@ export default function Home() {
                             </div>
                         </div>
                     </div>
+                    </>
+                    ) : null}
 
+                    {showGlobalRealtime ? (
+                    <>
                     {/* SECTION 2 — ACTIVITÉ TEMPS RÉEL */}
                     <div className="db-section-label" style={{marginTop:"2rem"}}>Activité Temps Réel</div>
 
@@ -418,7 +579,11 @@ export default function Home() {
                             </div>
                         </div>
                     </div>
+                    </>
+                    ) : null}
 
+                    {showGlobalAlerts ? (
+                    <>
                     {/* SECTION 3 — ALERTES */}
                     <div className="db-section-label" style={{marginTop:"2rem"}}>Alertes & Priorités</div>
 
@@ -580,6 +745,14 @@ export default function Home() {
                             ))}
                         </div>
                     </div>
+                    </>
+                    ) : null}
+
+                    </>
+
+                    ) : (
+                        <ModulePlaceholder moduleLabel={activeModule.label} subLabel={activeSub.label} />
+                    )}
 
                 </main>
             </div>
