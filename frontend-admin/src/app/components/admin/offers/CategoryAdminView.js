@@ -187,38 +187,45 @@ export default function CategoryAdminView({ categories, loading, errorMessage, o
                 </form>
             </AdminModal>
 
-            <div style={{ display: "grid", gap: "1.25rem", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gridAutoRows: "1fr", alignItems: "stretch" }}>
+            <div style={{ display: "grid", gap: "1.25rem", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gridAutoRows: "1fr", alignItems: "stretch" }}>
                 {loading ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1 / -1" }}>Chargement...</p> : null}
                 {!loading && visibleCategories.length === 0 ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1 / -1" }}>Aucune catégorie trouvée.</p> : null}
                 {!loading && visibleCategories.map((item) => (
                     <article
                         key={item.id}
                         style={{
-                            background: "#F1F6F6",
-                            borderRadius: "18px",
+                            background: "var(--surface-hover)",
+                            borderRadius: "20px",
                             padding: "1.25rem",
                             display: "grid",
                             gap: "0.85rem",
                             height: "100%",
-                            minHeight: "280px",
                         }}
                     >
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "center" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start" }}>
                             <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>{item.name}</h3>
                             <span className="db-badge" style={{ background: item.status === "actif" ? "#E5FFBC" : "#E6EDEE" }}>
                                 {item.status}
                             </span>
                         </div>
-                        <p style={{ color: "var(--text-muted)", fontSize: "0.87rem", lineHeight: 1.5 }}>{item.description || "-"}</p>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem", fontSize: "0.78rem", alignItems: "center" }}>
-                            <span style={{ background: "#E5FFBC", color: "#233B3D", borderRadius: "999px", padding: "0.2rem 0.55rem", fontWeight: 600 }}>
-                                {item.linkedServices || 0} liées
-                            </span>
-                            <span style={{ color: "var(--text-muted)", fontSize: "0.76rem" }}>
-                                {formatDateFR(item.createdAt)}
-                            </span>
+                        <p style={{ color: "var(--text-muted)", fontSize: "0.87rem", lineHeight: 1.5, minHeight: "2.6rem", maxHeight: "2.6rem", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                            {item.description || "-"}
+                        </p>
+                        <div style={{ display: "grid", gap: "0.6rem" }}>
+                            <div style={{ background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", fontSize: "0.95rem", color: "#1f3335", display: "flex", alignItems: "center", gap: "0.58rem", minHeight: "52px" }}>
+                                <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                </span>
+                                <span>{item.linkedServices || 0} prestation{Number(item.linkedServices || 0) !== 1 ? "s" : ""} liée{Number(item.linkedServices || 0) !== 1 ? "s" : ""}</span>
+                            </div>
+                            <div style={{ background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", fontSize: "0.95rem", color: "#2b4548", display: "flex", alignItems: "center", gap: "0.58rem", minHeight: "52px" }}>
+                                <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                </span>
+                                <span>{formatDateFR(item.createdAt)}</span>
+                            </div>
                         </div>
-                        <div style={{ display: "flex", gap: "0.55rem", alignItems: "center" }}>
+                        <div style={{ marginTop: "auto", display: "flex", gap: "0.55rem", alignItems: "center" }}>
                             <button className="action-cta" type="button" onClick={() => handleEdit(item)} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Modifier</button>
                             <button className="action-cta" type="button" onClick={() => handleDelete(item)} style={{ background: "#f4e8e8", color: "#8e2d2d" }}>Supprimer</button>
                         </div>

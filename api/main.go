@@ -17,6 +17,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
+
+	"upcycleconnect/api/pricing"
+	"upcycleconnect/api/reservations"
+	"upcycleconnect/api/users"
 )
 
 var db *sql.DB
@@ -83,11 +87,27 @@ func main() {
 	mux.Handle("/api/admin/service-categories", authMiddleware(http.HandlerFunc(serviceCategoriesHandler)))
 	mux.Handle("/api/admin/service-categories/", authMiddleware(http.HandlerFunc(serviceCategoryByIDHandler)))
 	mux.Handle("/api/admin/services", authMiddleware(http.HandlerFunc(servicesHandler)))
-	mux.Handle("/api/admin/services/", authMiddleware(http.HandlerFunc(serviceByIDHandler)))
+	mux.Handle("/api/admin/services/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/status") {
+			serviceStatusHandler(w, r)
+			return
+		}
+		serviceByIDHandler(w, r)
+	})))
+	mux.Handle("/api/admin/offers/overview", authMiddleware(http.HandlerFunc(offersOverviewHandler)))
 	mux.Handle("/api/admin/events", authMiddleware(http.HandlerFunc(eventsHandler)))
 	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(eventByIDHandler)))
 	mux.Handle("/api/admin/event-categories", authMiddleware(http.HandlerFunc(eventCategoriesHandler)))
 	mux.Handle("/api/admin/event-categories/", authMiddleware(http.HandlerFunc(eventCategoryByIDHandler)))
+
+	// Module users — routes enregistrées depuis le sous-package
+	users.RegisterRoutes(mux, db, authMiddleware)
+
+	// Module reservations (dépend de users + services, doit venir après)
+	reservations.RegisterRoutes(mux, db, authMiddleware)
+
+	// Module pricing
+	pricing.RegisterRoutes(mux, db, authMiddleware)
 
 	port := getEnv("API_PORT", "8080")
 
@@ -120,7 +140,6 @@ func main() {
 
 	log.Println("Server stopped gracefully")
 }
-
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -177,11 +196,10 @@ func initAuth() error {
 	return nil
 }
 
-
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == http.MethodOptions {
@@ -220,7 +238,6 @@ func authMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -284,6 +301,7 @@ type servicePayload struct {
 	CategoryID  int64   `json:"categoryId"`
 	Type        string  `json:"type"`
 	Price       float64 `json:"price"`
+	IsBookable  bool    `json:"isBookable"`
 	Status      string  `json:"status"`
 }
 
@@ -333,6 +351,8 @@ func ensureOffersSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_services_category_id ON services(category_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_services_status ON services(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_service_categories_status ON service_categories(status)`,
+		// Migration douce : ajoute is_bookable si la colonne n'existe pas encore
+		`ALTER TABLE services ADD COLUMN IF NOT EXISTS is_bookable BOOLEAN NOT NULL DEFAULT true`,
 	}
 
 	for _, statement := range statements {
@@ -554,7 +574,7 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		rows, err := db.Query(`
-			SELECT s.id, s.name, s.description, s.category_id, c.name, s.type, s.price, s.status, s.created_at, s.updated_at
+			SELECT s.id, s.name, s.description, s.category_id, c.name, s.type, s.price, s.is_bookable, s.status, s.created_at, s.updated_at
 			FROM services s
 			JOIN service_categories c ON c.id = s.category_id
 			WHERE ($1 = '' OR s.name ILIKE '%' || $1 || '%' OR s.description ILIKE '%' || $1 || '%')
@@ -573,9 +593,10 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			var id, catID int64
 			var name, description, categoryName, svcType, status string
 			var price float64
+			var isBookable bool
 			var createdAt, updatedAt time.Time
 
-			if err := rows.Scan(&id, &name, &description, &catID, &categoryName, &svcType, &price, &status, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &name, &description, &catID, &categoryName, &svcType, &price, &isBookable, &status, &createdAt, &updatedAt); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse services")
 				return
 			}
@@ -588,6 +609,7 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 				"categoryName": categoryName,
 				"type":         svcType,
 				"price":        price,
+				"isBookable":   isBookable,
 				"status":       status,
 				"createdAt":    createdAt.UTC().Format(time.RFC3339),
 				"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
@@ -633,10 +655,10 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		var id int64
 		var createdAt, updatedAt time.Time
 		err := db.QueryRow(`
-			INSERT INTO services (name, description, category_id, type, price, status)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO services (name, description, category_id, type, price, is_bookable, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING id, created_at, updated_at
-		`, name, description, payload.CategoryID, svcType, payload.Price, status).Scan(&id, &createdAt, &updatedAt)
+		`, name, description, payload.CategoryID, svcType, payload.Price, payload.IsBookable, status).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create service")
 			return
@@ -653,6 +675,7 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			"categoryName": categoryName,
 			"type":         svcType,
 			"price":        payload.Price,
+			"isBookable":   payload.IsBookable,
 			"status":       status,
 			"createdAt":    createdAt.UTC().Format(time.RFC3339),
 			"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
@@ -709,10 +732,10 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		var createdAt, updatedAt time.Time
 		result := db.QueryRow(`
 			UPDATE services
-			SET name = $1, description = $2, category_id = $3, type = $4, price = $5, status = $6, updated_at = NOW()
-			WHERE id = $7
+			SET name = $1, description = $2, category_id = $3, type = $4, price = $5, is_bookable = $6, status = $7, updated_at = NOW()
+			WHERE id = $8
 			RETURNING created_at, updated_at
-		`, name, description, payload.CategoryID, svcType, payload.Price, status, id)
+		`, name, description, payload.CategoryID, svcType, payload.Price, payload.IsBookable, status, id)
 
 		if err := result.Scan(&createdAt, &updatedAt); err != nil {
 			if err == sql.ErrNoRows {
@@ -734,6 +757,7 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 			"categoryName": categoryName,
 			"type":         svcType,
 			"price":        payload.Price,
+			"isBookable":   payload.IsBookable,
 			"status":       status,
 			"createdAt":    createdAt.UTC().Format(time.RFC3339),
 			"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
@@ -765,13 +789,148 @@ func parseIDFromPath(path string, prefix string) (int64, error) {
 	if trimmed == "" {
 		return 0, fmt.Errorf("missing id")
 	}
-
 	id, err := strconv.ParseInt(trimmed, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, fmt.Errorf("invalid id")
 	}
-
 	return id, nil
+}
+
+// serviceStatusHandler gère PATCH /api/admin/services/:id/status
+func serviceStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	cleanPath := strings.TrimSuffix(r.URL.Path, "/status")
+	id, err := parseIDFromPath(cleanPath+"/", "/api/admin/services/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid service id")
+		return
+	}
+
+	var payload struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	status := normalizeServiceStatus(payload.Status)
+	if status == "" {
+		writeError(w, http.StatusBadRequest, "invalid status (actif, inactif, brouillon)")
+		return
+	}
+
+	var updatedAt time.Time
+	res := db.QueryRow(`
+		UPDATE services SET status = $1, updated_at = NOW()
+		WHERE id = $2
+		RETURNING updated_at
+	`, status, id)
+	if err := res.Scan(&updatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not update service status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":        id,
+		"status":    status,
+		"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// offersOverviewHandler gère GET /api/admin/offers/overview
+// Retourne les statistiques agrégées du module Offres & Prestations.
+func offersOverviewHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var servicesTotal, servicesActive, servicesInactive int64
+	_ = db.QueryRow(`SELECT COUNT(*) FROM services`).Scan(&servicesTotal)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM services WHERE status = 'actif'`).Scan(&servicesActive)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM services WHERE status = 'inactif'`).Scan(&servicesInactive)
+
+	var categoriesTotal int64
+	_ = db.QueryRow(`SELECT COUNT(*) FROM service_categories`).Scan(&categoriesTotal)
+
+	var bookingsTotal, bookingsPending, bookingsConfirmed int64
+	_ = db.QueryRow(`SELECT COUNT(*) FROM service_bookings`).Scan(&bookingsTotal)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM service_bookings WHERE status = 'pending'`).Scan(&bookingsPending)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM service_bookings WHERE status = 'confirmed'`).Scan(&bookingsConfirmed)
+
+	// 5 réservations les plus récentes
+	recentBookings := make([]map[string]interface{}, 0)
+	bRows, err := db.Query(`
+		SELECT sb.id, sb.status, sb.amount, sb.created_at,
+		       COALESCE(u.firstname || ' ' || u.lastname, 'Utilisateur #' || sb.user_id::TEXT),
+		       COALESCE(s.name, 'Prestation #' || sb.service_id::TEXT)
+		FROM service_bookings sb
+		LEFT JOIN users u    ON u.id = sb.user_id
+		LEFT JOIN services s ON s.id = sb.service_id
+		ORDER BY sb.created_at DESC LIMIT 5
+	`)
+	if err == nil {
+		defer bRows.Close()
+		for bRows.Next() {
+			var bID int64
+			var bStatus, bUserName, bServiceName string
+			var bAmount float64
+			var bCreatedAt time.Time
+			if bRows.Scan(&bID, &bStatus, &bAmount, &bCreatedAt, &bUserName, &bServiceName) == nil {
+				recentBookings = append(recentBookings, map[string]interface{}{
+					"id": bID, "status": bStatus, "amount": bAmount,
+					"userName": bUserName, "serviceName": bServiceName,
+					"createdAt": bCreatedAt.UTC().Format(time.RFC3339),
+				})
+			}
+		}
+	}
+
+	// 5 prestations les plus récentes
+	recentServices := make([]map[string]interface{}, 0)
+	sRows, err := db.Query(`
+		SELECT s.id, s.name, s.status, s.price, s.created_at, COALESCE(c.name, '')
+		FROM services s
+		LEFT JOIN service_categories c ON c.id = s.category_id
+		ORDER BY s.created_at DESC LIMIT 5
+	`)
+	if err == nil {
+		defer sRows.Close()
+		for sRows.Next() {
+			var sID int64
+			var sName, sStatus, sCatName string
+			var sPrice float64
+			var sCreatedAt time.Time
+			if sRows.Scan(&sID, &sName, &sStatus, &sPrice, &sCreatedAt, &sCatName) == nil {
+				recentServices = append(recentServices, map[string]interface{}{
+					"id": sID, "name": sName, "status": sStatus,
+					"price": sPrice, "categoryName": sCatName,
+					"createdAt": sCreatedAt.UTC().Format(time.RFC3339),
+				})
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"servicesTotal":     servicesTotal,
+		"servicesActive":    servicesActive,
+		"servicesInactive":  servicesInactive,
+		"categoriesTotal":   categoriesTotal,
+		"bookingsTotal":     bookingsTotal,
+		"bookingsPending":   bookingsPending,
+		"bookingsConfirmed": bookingsConfirmed,
+		"recentBookings":    recentBookings,
+		"recentServices":    recentServices,
+	})
 }
 
 func normalizeCategoryStatus(raw string) string {
@@ -839,8 +998,8 @@ func ensureEventsSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_events_date_debut ON events(date_debut)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)`,
-		`CREATE INDEX IF NOT EXISTS idx_events_category_id ON events(category_id)` ,
-		`CREATE INDEX IF NOT EXISTS idx_event_categories_status ON event_categories(status)` ,
+		`CREATE INDEX IF NOT EXISTS idx_events_category_id ON events(category_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_categories_status ON event_categories(status)`,
 		`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_category_id_fkey`,
 		`ALTER TABLE events ADD CONSTRAINT events_category_id_fkey FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE RESTRICT`,
 	}
@@ -1208,19 +1367,19 @@ func normalizeEventStatus(raw string) string {
 
 func mapEventPayload(id int64, payload eventPayload, categoryName string, startAt time.Time, endAt time.Time, createdAt time.Time, updatedAt time.Time) map[string]interface{} {
 	data := map[string]interface{}{
-		"id":          id,
-		"name":        strings.TrimSpace(payload.Name),
-		"description": strings.TrimSpace(payload.Description),
-		"categoryId":  payload.CategoryID,
+		"id":           id,
+		"name":         strings.TrimSpace(payload.Name),
+		"description":  strings.TrimSpace(payload.Description),
+		"categoryId":   payload.CategoryID,
 		"categoryName": categoryName,
-		"type":        normalizeEventType(payload.Type),
-		"dateDebut":   startAt.UTC().Format(time.RFC3339),
-		"dateFin":     endAt.UTC().Format(time.RFC3339),
-		"lieu":        strings.TrimSpace(payload.Lieu),
-		"status":      normalizeEventStatus(payload.Status),
-		"intervenant": strings.TrimSpace(payload.Intervenant),
-		"createdAt":   createdAt.UTC().Format(time.RFC3339),
-		"updatedAt":   updatedAt.UTC().Format(time.RFC3339),
+		"type":         normalizeEventType(payload.Type),
+		"dateDebut":    startAt.UTC().Format(time.RFC3339),
+		"dateFin":      endAt.UTC().Format(time.RFC3339),
+		"lieu":         strings.TrimSpace(payload.Lieu),
+		"status":       normalizeEventStatus(payload.Status),
+		"intervenant":  strings.TrimSpace(payload.Intervenant),
+		"createdAt":    createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
 	}
 
 	if payload.Capacite != nil {
@@ -1244,19 +1403,19 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 	}
 
 	item := map[string]interface{}{
-		"id":          id,
-		"name":        name,
-		"description": description,
-		"categoryId":  categoryID,
+		"id":           id,
+		"name":         name,
+		"description":  description,
+		"categoryId":   categoryID,
 		"categoryName": categoryName,
-		"type":        typeName,
-		"dateDebut":   dateDebut.UTC().Format(time.RFC3339),
-		"dateFin":     dateFin.UTC().Format(time.RFC3339),
-		"lieu":        lieu,
-		"status":      status,
-		"intervenant": intervenant,
-		"createdAt":   createdAt.UTC().Format(time.RFC3339),
-		"updatedAt":   updatedAt.UTC().Format(time.RFC3339),
+		"type":         typeName,
+		"dateDebut":    dateDebut.UTC().Format(time.RFC3339),
+		"dateFin":      dateFin.UTC().Format(time.RFC3339),
+		"lieu":         lieu,
+		"status":       status,
+		"intervenant":  intervenant,
+		"createdAt":    createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
 	}
 
 	if capacite.Valid {
@@ -1280,19 +1439,19 @@ func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 	}
 
 	item := map[string]interface{}{
-		"id":          id,
-		"name":        name,
-		"description": description,
-		"categoryId":  categoryID,
+		"id":           id,
+		"name":         name,
+		"description":  description,
+		"categoryId":   categoryID,
 		"categoryName": categoryName,
-		"type":        typeName,
-		"dateDebut":   dateDebut.UTC().Format(time.RFC3339),
-		"dateFin":     dateFin.UTC().Format(time.RFC3339),
-		"lieu":        lieu,
-		"status":      status,
-		"intervenant": intervenant,
-		"createdAt":   createdAt.UTC().Format(time.RFC3339),
-		"updatedAt":   updatedAt.UTC().Format(time.RFC3339),
+		"type":         typeName,
+		"dateDebut":    dateDebut.UTC().Format(time.RFC3339),
+		"dateFin":      dateFin.UTC().Format(time.RFC3339),
+		"lieu":         lieu,
+		"status":       status,
+		"intervenant":  intervenant,
+		"createdAt":    createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
 	}
 
 	if capacite.Valid {
