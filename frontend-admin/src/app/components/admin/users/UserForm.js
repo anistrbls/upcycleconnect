@@ -4,28 +4,49 @@ import { useEffect, useState } from "react";
 import AdminModal from "../AdminModal";
 import { fieldStyle, labelStyle } from "../../../lib/styles";
 
-const ROLES = ["particulier", "prestataire", "admin"];
+const ROLES = ["particulier", "prestataire", "salarie", "admin"];
 const STATUSES = [
-    { value: "active",    label: "Actif" },
-    { value: "pending",   label: "En attente" },
+    { value: "active", label: "Actif" },
+    { value: "pending", label: "En attente" },
     { value: "suspended", label: "Suspendu" },
 ];
+
+const EMPLOYMENT_STATUSES = [
+    { value: "", label: "Sélectionner…" },
+    { value: "temps_plein", label: "Temps plein" },
+    { value: "temps_partiel", label: "Temps partiel" },
+];
+
+const JOB_FUNCTIONS = [
+    { value: "", label: "Sélectionner…" },
+    { value: "animateur", label: "Animateur" },
+    { value: "formateur", label: "Formateur" },
+    { value: "intervenant", label: "Intervenant" },
+];
+
+const ROLE_LABELS = {
+    particulier: "Particulier",
+    prestataire: "Professionnel",
+    salarie: "Salarié",
+    admin: "Admin",
+};
 
 // Formulaire utilisé pour la création ET la modification d'un utilisateur.
 // Si `editingUser` est non null → mode modification (pas de champ password).
 // Si `editingUser` est null → mode création (avec champ password).
-export default function UserForm({ open, editingUser, onClose, onSubmit }) {
+export default function UserForm({ open, editingUser, onClose, onSubmit, defaultRole = "particulier" }) {
     const isEdit = editingUser !== null;
 
     const emptyForm = {
-        firstname:   "",
-        lastname:    "",
-        email:       "",
-        password:    "",
-        role:        "particulier",
-        status:      "pending",
-        isValidated: false,
-        adminNote:   "",
+        firstname: "",
+        lastname: "",
+        email: "",
+        password: "",
+        role: defaultRole,
+        status: "pending",
+        employmentStatus: "",
+        jobFunction: "",
+        adminNote: "",
     };
 
     const [form, setForm] = useState(emptyForm);
@@ -37,14 +58,15 @@ export default function UserForm({ open, editingUser, onClose, onSubmit }) {
         if (!open) return;
         if (isEdit) {
             setForm({
-                firstname:   editingUser.firstname   ?? "",
-                lastname:    editingUser.lastname    ?? "",
-                email:       editingUser.email       ?? "",
-                password:    "",
-                role:        editingUser.role        ?? "particulier",
-                status:      editingUser.status      ?? "pending",
-                isValidated: editingUser.isValidated ?? false,
-                adminNote:   editingUser.adminNote   ?? "",
+                firstname: editingUser.firstname ?? "",
+                lastname: editingUser.lastname ?? "",
+                email: editingUser.email ?? "",
+                password: "",
+                role: editingUser.role ?? "particulier",
+                status: editingUser.status ?? "pending",
+                employmentStatus: editingUser.employmentStatus ?? "",
+                jobFunction: editingUser.jobFunction ?? "",
+                adminNote: editingUser.adminNote ?? "",
             });
         } else {
             setForm(emptyForm);
@@ -62,8 +84,8 @@ export default function UserForm({ open, editingUser, onClose, onSubmit }) {
         setError("");
 
         if (!form.firstname.trim()) { setError("Le prénom est requis."); return; }
-        if (!form.lastname.trim())  { setError("Le nom est requis.");    return; }
-        if (!form.email.trim())     { setError("L'email est requis.");   return; }
+        if (!form.lastname.trim()) { setError("Le nom est requis."); return; }
+        if (!form.email.trim()) { setError("L'email est requis."); return; }
         if (!isEdit && form.password.trim().length < 8) {
             setError("Le mot de passe doit faire au moins 8 caractères.");
             return;
@@ -72,13 +94,14 @@ export default function UserForm({ open, editingUser, onClose, onSubmit }) {
         setSaving(true);
         try {
             const payload = {
-                firstname:   form.firstname.trim(),
-                lastname:    form.lastname.trim(),
-                email:       form.email.trim(),
-                role:        form.role,
-                status:      form.status,
-                isValidated: form.isValidated,
-                adminNote:   form.adminNote.trim(),
+                firstname: form.firstname.trim(),
+                lastname: form.lastname.trim(),
+                email: form.email.trim(),
+                role: form.role,
+                status: form.status,
+                employmentStatus: form.role === "salarie" ? form.employmentStatus : "",
+                jobFunction: form.role === "salarie" ? form.jobFunction : "",
+                adminNote: form.adminNote.trim(),
             };
             if (!isEdit) {
                 payload.password = form.password;
@@ -127,7 +150,7 @@ export default function UserForm({ open, editingUser, onClose, onSubmit }) {
                         Rôle
                         <select style={fieldStyle} value={form.role} onChange={set("role")}>
                             {ROLES.map((r) => (
-                                <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
+                                <option key={r} value={r}>{ROLE_LABELS[r] ?? r}</option>
                             ))}
                         </select>
                     </label>
@@ -141,15 +164,28 @@ export default function UserForm({ open, editingUser, onClose, onSubmit }) {
                     </label>
                 </div>
 
-                <label style={{ ...labelStyle, flexDirection: "row", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-                    <input
-                        type="checkbox"
-                        checked={form.isValidated}
-                        onChange={set("isValidated")}
-                        style={{ width: "16px", height: "16px", cursor: "pointer" }}
-                    />
-                    Compte validé
-                </label>
+                {form.role === "salarie" && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.9rem", padding: "0.8rem", background: "#f8fafb", borderRadius: "12px", border: "1px solid #e2eaea" }}>
+                        <label style={labelStyle}>
+                            Statut d'emploi
+                            <select style={fieldStyle} value={form.employmentStatus} onChange={set("employmentStatus")}>
+                                {EMPLOYMENT_STATUSES.map((s) => (
+                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                ))}
+                            </select>
+                        </label>
+                        <label style={labelStyle}>
+                            Fonction
+                            <select style={fieldStyle} value={form.jobFunction} onChange={set("jobFunction")}>
+                                {JOB_FUNCTIONS.map((f) => (
+                                    <option key={f.value} value={f.value}>{f.label}</option>
+                                ))}
+                            </select>
+                        </label>
+                    </div>
+                )}
+
+
 
                 <label style={labelStyle}>
                     Note admin <span style={{ color: "var(--text-muted)" }}>(optionnel)</span>

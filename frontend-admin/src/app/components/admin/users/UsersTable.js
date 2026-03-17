@@ -4,14 +4,15 @@ import { formatDateFR } from "../../../lib/formatters";
 
 // Badges visuels pour rôle et statut
 const ROLE_COLORS = {
-    particulier: { bg: "#E5FFBC", color: "#3E686C" },
-    prestataire: { bg: "#D6EEF0", color: "#2E5C60" },
-    admin:       { bg: "#151A1B", color: "#C8D2D4" },
+    particulier: { bg: "#E5FFBC", color: "#3E686C", label: "Particulier" },
+    prestataire: { bg: "#D6EEF0", color: "#2E5C60", label: "Professionnel" },
+    salarie: { bg: "#F0E4D7", color: "#7D5A44", label: "Salarié" },
+    admin: { bg: "#151A1B", color: "#C8D2D4", label: "Admin" },
 };
 
 const STATUS_COLORS = {
-    active:    { bg: "#E5FFBC", color: "#3E4A1A", label: "Actif" },
-    pending:   { bg: "#EAF0F1", color: "#4F6163", label: "En attente" },
+    active: { bg: "#E5FFBC", color: "#3E4A1A", label: "Actif" },
+    pending: { bg: "#EAF0F1", color: "#4F6163", label: "En attente" },
     suspended: { bg: "#151A1B", color: "#C8D2D4", label: "Suspendu" },
 };
 
@@ -35,7 +36,7 @@ function Badge({ value, map }) {
 
 // Tableau principal des utilisateurs
 // Reçoit la liste filtrée + les callbacks d'action depuis UsersAdminView.
-export default function UsersTable({ users, loading, onView, onEdit, onDelete, onValidate, onToggleStatus }) {
+export default function UsersTable({ users, loading, onView, onEdit, onDelete, onToggleStatus }) {
     if (loading) {
         return <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>Chargement…</p>;
     }
@@ -53,7 +54,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
                 <thead>
                     <tr style={{ borderBottom: "1px solid #E2EAEA" }}>
-                        {["Nom complet", "Email", "Rôle", "Statut", "Validé", "Inscription", "Dernière connexion", "Actions"].map((col) => (
+                        {["Nom complet", "Email", "Rôle", "Statut", "Inscription", "Dernière connexion", "Actions"].map((col) => (
                             <th key={col} style={{
                                 textAlign: "left",
                                 padding: "0.55rem 0.75rem",
@@ -82,9 +83,6 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
                             <td style={{ padding: "0.6rem 0.75rem" }}>
                                 <Badge value={u.status} map={STATUS_COLORS} />
                             </td>
-                            <td style={{ padding: "0.6rem 0.75rem", textAlign: "center" }}>
-                                {u.isValidated ? "✓" : "–"}
-                            </td>
                             <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                                 {formatDateFR(u.createdAt)}
                             </td>
@@ -97,7 +95,6 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
                                     onView={onView}
                                     onEdit={onEdit}
                                     onDelete={onDelete}
-                                    onValidate={onValidate}
                                     onToggleStatus={onToggleStatus}
                                 />
                             </td>
@@ -109,7 +106,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
     );
 }
 
-function ActionButtons({ user, onView, onEdit, onDelete, onValidate, onToggleStatus }) {
+function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus }) {
     const btn = (extra) => ({
         border: "none",
         borderRadius: "999px",
@@ -119,15 +116,13 @@ function ActionButtons({ user, onView, onEdit, onDelete, onValidate, onToggleSta
         cursor: "pointer",
         fontFamily: "inherit",
         whiteSpace: "nowrap",
+        width: "100%",
+        boxSizing: "border-box",
         ...extra,
     });
 
-    // Bouton contextuel : Valider > Réactiver > Suspendre (priorité décroissante)
-    const contextual = !user.isValidated ? (
-        <button style={btn({ background: "#E5FFBC", color: "#3E4A1A" })} onClick={() => onValidate(user.id)}>
-            ✓ Valider
-        </button>
-    ) : user.status === "suspended" ? (
+    // Bouton contextuel : Réactiver > Suspendre
+    const contextual = user.status === "suspended" ? (
         <button style={btn({ background: "#E5FFBC", color: "#3E4A1A" })} onClick={() => onToggleStatus(user.id, "active")}>
             ↺ Réactiver
         </button>
@@ -148,7 +143,7 @@ function ActionButtons({ user, onView, onEdit, onDelete, onValidate, onToggleSta
             </button>
 
             {/* Ligne 2 : action contextuelle + supprimer */}
-            <div>{contextual}</div>
+            {contextual || <div />}
             <button style={btn({ background: "#151A1B", color: "#C8D2D4" })} onClick={() => onDelete(user.id)}>
                 Supprimer
             </button>

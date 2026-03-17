@@ -24,7 +24,7 @@ export default function AdminModal({ open, title, onClose, children }) {
                     width: "min(620px, 100%)",
                     maxHeight: "85vh",
                     overflowY: "auto",
-                    background: "#F4F8F8",
+                    background: "#FFFFFF",
                     borderRadius: "28px",
                     padding: "1.35rem",
                     boxShadow: "0 22px 50px rgba(0,0,0,0.16)",

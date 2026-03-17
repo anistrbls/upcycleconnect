@@ -5,14 +5,26 @@ import { formatDateFR, formatDateTimeFR } from "../../../lib/formatters";
 
 const ROLE_LABELS = {
     particulier: "Particulier",
-    prestataire: "Prestataire / Artisan",
-    admin:       "Administrateur",
+    prestataire: "Professionnel",
+    salarie: "Salarié",
+    admin: "Administrateur",
 };
 
 const STATUS_LABELS = {
-    active:    "Actif",
-    pending:   "En attente de validation",
+    active: "Actif",
+    pending: "En attente de validation",
     suspended: "Suspendu",
+};
+
+const EMP_STATUS_LABELS = {
+    temps_plein: "Temps plein",
+    temps_partiel: "Temps partiel",
+};
+
+const JOB_FUNCTION_LABELS = {
+    animateur: "Animateur",
+    formateur: "Formateur",
+    intervenant: "Intervenant",
 };
 
 // Modale de fiche détail d'un utilisateur — lecture seule.
@@ -25,23 +37,30 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
 
                 {/* Identité */}
                 <Section title="Identité">
-                    <Row label="Prénom"    value={user.firstname} />
-                    <Row label="Nom"       value={user.lastname} />
-                    <Row label="Email"     value={user.email} />
+                    <Row label="Prénom" value={user.firstname} />
+                    <Row label="Nom" value={user.lastname} />
+                    <Row label="Email" value={user.email} />
                 </Section>
 
                 {/* Rôle & statut */}
                 <Section title="Compte">
-                    <Row label="Rôle"     value={ROLE_LABELS[user.role]   ?? user.role} />
-                    <Row label="Statut"   value={STATUS_LABELS[user.status] ?? user.status} />
-                    <Row label="Validé"   value={user.isValidated ? "Oui ✓" : "Non"} />
+                    <Row label="Rôle" value={ROLE_LABELS[user.role] ?? user.role} />
+                    <Row label="Statut" value={STATUS_LABELS[user.status] ?? user.status} />
                 </Section>
+
+                {/* Attributs Salarié */}
+                {user.role === "salarie" && (
+                    <Section title="Détails Salarié">
+                        <Row label="Statut d'emploi" value={EMP_STATUS_LABELS[user.employmentStatus] ?? user.employmentStatus} />
+                        <Row label="Fonction" value={JOB_FUNCTION_LABELS[user.jobFunction] ?? user.jobFunction} />
+                    </Section>
+                )}
 
                 {/* Dates */}
                 <Section title="Dates">
-                    <Row label="Inscription"       value={formatDateFR(user.createdAt)} />
+                    <Row label="Inscription" value={formatDateFR(user.createdAt)} />
                     <Row label="Dernière connexion" value={user.lastLoginAt ? formatDateTimeFR(user.lastLoginAt) : "–"} />
-                    <Row label="Mise à jour"        value={formatDateFR(user.updatedAt)} />
+                    <Row label="Mise à jour" value={formatDateFR(user.updatedAt)} />
                 </Section>
 
                 {/* Note admin */}
@@ -70,7 +89,7 @@ function Section({ title, children }) {
             <p style={{ margin: "0 0 0.4rem", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 {title}
             </p>
-            <div style={{ background: "#EAF0F1", borderRadius: "14px", padding: "0.7rem 0.9rem", display: "grid", gap: "0.35rem" }}>
+            <div style={{ background: "#F8FAFB", borderRadius: "14px", padding: "0.7rem 0.9rem", display: "grid", gap: "0.35rem" }}>
                 {children}
             </div>
         </div>

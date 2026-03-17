@@ -12,6 +12,7 @@ export default function EventCategoryAdminView({ categories, loading, errorMessa
     const [formState, setFormState] = useState({ name: "", description: "", status: "actif" });
     const [localError, setLocalError] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    const [hoveredCategoryId, setHoveredCategoryId] = useState(null);
 
     const visibleCategories = categories.filter((item) => {
         const normalizedQuery = query.trim().toLowerCase();
@@ -190,40 +191,70 @@ export default function EventCategoryAdminView({ categories, loading, errorMessa
             <div style={{ display: "grid", gap: "1.25rem", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gridAutoRows: "1fr", alignItems: "stretch" }}>
                 {loading ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1 / -1" }}>Chargement...</p> : null}
                 {!loading && visibleCategories.length === 0 ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1 / -1" }}>Aucune categorie trouvee.</p> : null}
-                {!loading && visibleCategories.map((item) => (
-                    <article
-                        key={item.id}
-                        style={{
-                            background: "#F1F6F6",
-                            borderRadius: "18px",
-                            padding: "1.25rem",
-                            display: "grid",
-                            gap: "0.85rem",
-                            height: "100%",
-                            minHeight: "280px",
-                        }}
-                    >
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "center" }}>
-                            <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>{item.name}</h3>
-                            <span className="db-badge" style={{ background: item.status === "actif" ? "#E5FFBC" : "#E6EDEE" }}>
-                                {item.status}
-                            </span>
-                        </div>
-                        <p style={{ color: "var(--text-muted)", fontSize: "0.87rem", lineHeight: 1.5 }}>{item.description || "-"}</p>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem", fontSize: "0.78rem", alignItems: "center" }}>
-                            <span style={{ background: "#E5FFBC", color: "#233B3D", borderRadius: "999px", padding: "0.2rem 0.55rem", fontWeight: 600 }}>
-                                {item.linkedEvents || 0} lies
-                            </span>
-                            <span style={{ color: "var(--text-muted)", fontSize: "0.76rem" }}>
-                                {formatDateFR(item.createdAt)}
-                            </span>
-                        </div>
-                        <div style={{ display: "flex", gap: "0.55rem", alignItems: "center" }}>
-                            <button className="action-cta" type="button" onClick={() => handleEdit(item)} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Modifier</button>
-                            <button className="action-cta" type="button" onClick={() => handleDelete(item)} style={{ background: "#f4e8e8", color: "#8e2d2d" }}>Supprimer</button>
-                        </div>
-                    </article>
-                ))}
+                {!loading && visibleCategories.map((item) => {
+                    const isHovered = hoveredCategoryId === item.id;
+                    return (
+                        <article
+                            key={item.id}
+                            onMouseEnter={() => setHoveredCategoryId(item.id)}
+                            onMouseLeave={() => setHoveredCategoryId(null)}
+                            style={{
+                                background: "var(--surface-hover)",
+                                borderRadius: "20px",
+                                padding: "1.25rem",
+                                display: "grid",
+                                gap: "0.85rem",
+                                height: "100%",
+                                minHeight: "240px",
+                            }}
+                        >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start" }}>
+                                <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>{item.name}</h3>
+                                <span className="db-badge" style={{ background: item.status === "actif" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>
+                                    {item.status}
+                                </span>
+                            </div>
+
+                            <p
+                                style={{
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.87rem",
+                                    lineHeight: 1.5,
+                                    minHeight: "2.7rem",
+                                    maxHeight: "2.7rem",
+                                    overflow: "hidden",
+                                    display: "-webkit-box",
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: "vertical",
+                                }}
+                            >
+                                {item.description || "-"}
+                            </p>
+
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem", fontSize: "0.78rem", alignItems: "center" }}>
+                                <span style={{ background: "#cad6d8", color: "#233B3D", borderRadius: "999px", padding: "0.24rem 0.65rem", fontWeight: 600 }}>
+                                    {item.linkedEvents || 0} événements liés
+                                </span>
+                            </div>
+
+                            <div style={{ display: "grid", gap: "0.6rem", alignContent: "start" }}>
+                                <div style={{ background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", fontSize: "0.95rem", color: "#1f3335", letterSpacing: "0.01em", display: "flex", alignItems: "center", gap: "0.58rem", minHeight: "52px" }}>
+                                    <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M8 2v4M16 2v4M3 10h18M4 6h16a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
+                                        </svg>
+                                    </span>
+                                    <span>Diffusée le {formatDateFR(item.createdAt)}</span>
+                                </div>
+                            </div>
+
+                            <div style={{ marginTop: "auto", display: "flex", gap: "0.55rem", alignItems: "center", flexWrap: "wrap" }}>
+                                <button className="action-cta" type="button" onClick={() => handleEdit(item)} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Modifier</button>
+                                <button className="action-cta" type="button" onClick={() => handleDelete(item)} style={{ background: "#f4e8e8", color: "#8e2d2d" }}>Supprimer</button>
+                            </div>
+                        </article>
+                    );
+                })}
             </div>
         </>
     );

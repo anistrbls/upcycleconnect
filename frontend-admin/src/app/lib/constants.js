@@ -58,9 +58,9 @@ export const NAV_MODULES = [
         subNav: [
             { key: "tous-utilisateurs", label: "Tous les utilisateurs", shortLabel: "Tous" },
             { key: "particuliers", label: "Particuliers", shortLabel: "Particuliers" },
-            { key: "prestataires", label: "Prestataires / Artisans", shortLabel: "Prestataires" },
+            { key: "prestataires", label: "Professionnels", shortLabel: "Professionnels" },
+            { key: "salaries", label: "Salariés", shortLabel: "Salariés" },
             { key: "admins", label: "Admins", shortLabel: "Admins" },
-            { key: "validations", label: "Validations", shortLabel: "Validations" },
         ],
     },
     {

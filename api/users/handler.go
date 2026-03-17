@@ -53,8 +53,8 @@ func (h *Handler) ByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// On retire le suffixe /status ou /validate s'il reste dans le path
-	// (ces routes sont gérées par StatusHandler et ValidateHandler)
+	// On retire le suffixe /status s'il reste dans le path
+	// (cette route est gérée par StatusHandler)
 	suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/users/"+strconv.FormatInt(id, 10))
 	suffix = strings.Trim(suffix, "/")
 	if suffix != "" {
@@ -247,30 +247,7 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
-// ValidateHandler gère PATCH /api/admin/users/:id/validate
-func (h *Handler) ValidateHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 
-	id, err := parseID(r.URL.Path, "/api/admin/users/")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid user id")
-		return
-	}
-
-	u, err := h.repo.Validate(id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			writeError(w, http.StatusNotFound, "user not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "could not validate user")
-		return
-	}
-	writeJSON(w, http.StatusOK, u)
-}
 
 // --- helpers locaux ---
 
@@ -307,7 +284,6 @@ var _ = func(u User) map[string]interface{} {
 		"email":       u.Email,
 		"role":        u.Role,
 		"status":      u.Status,
-		"isValidated": u.IsValidated,
 		"adminNote":   u.AdminNote,
 		"createdAt":   u.CreatedAt.UTC().Format(time.RFC3339),
 		"updatedAt":   u.UpdatedAt.UTC().Format(time.RFC3339),

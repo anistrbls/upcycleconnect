@@ -36,13 +36,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	mux.Handle("/api/admin/users/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Routing manuel pour les sous-routes /status et /validate
+		// Routing manuel pour la sous-route /status
 		if hasSuffix(path, "/status") {
 			h.StatusHandler(w, r)
-			return
-		}
-		if hasSuffix(path, "/validate") {
-			h.ValidateHandler(w, r)
 			return
 		}
 
