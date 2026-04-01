@@ -51,6 +51,17 @@ export const NAV_MODULES = [
         ],
     },
     {
+        key: "annonces",
+        label: "Annonces",
+        shortLabel: "Annonces",
+        icon: "M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6 M12 12V2 M12 2l4 4 M12 2L8 6",
+        subNav: [
+            { key: "deposer", label: "Déposer une annonce", shortLabel: "Déposer" },
+            { key: "mes-annonces", label: "Mes annonces", shortLabel: "Mes" },
+            { key: "brouillons", label: "Brouillons", shortLabel: "Brouillons" },
+        ],
+    },
+    {
         key: "utilisateurs",
         label: "Utilisateurs",
         shortLabel: "Users",

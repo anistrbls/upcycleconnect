@@ -3,6 +3,7 @@ package users
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ func (h *Handler) ListHandler(w http.ResponseWriter, r *http.Request) {
 
 	users, err := h.repo.List(filters)
 	if err != nil {
+		log.Printf("Error listing users with filters %+v: %v", filters, err)
 		writeError(w, http.StatusInternalServerError, "could not list users")
 		return
 	}

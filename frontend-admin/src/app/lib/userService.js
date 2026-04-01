@@ -1,6 +1,6 @@
 import { apiUrl, buildAuthHeaders } from "./api";
 
-// ─── Liste ────────────────────────────────────────────────────────────────────
+// Liste
 
 /**
  * Récupère la liste des utilisateurs avec filtres optionnels.
@@ -21,7 +21,7 @@ export async function listUsers(filters = {}) {
     return data.items ?? [];
 }
 
-// ─── Lecture unitaire ─────────────────────────────────────────────────────────
+// Lecture unitaire
 
 /**
  * Récupère un utilisateur par son ID.
@@ -35,7 +35,7 @@ export async function getUser(id) {
     return parseResponse(res);
 }
 
-// ─── Création ─────────────────────────────────────────────────────────────────
+// Création
 
 /**
  * Crée un nouvel utilisateur.
@@ -50,7 +50,7 @@ export async function createUser(payload) {
     return parseResponse(res);
 }
 
-// ─── Modification ─────────────────────────────────────────────────────────────
+// Modification
 
 /**
  * Met à jour les champs d'un utilisateur.
@@ -66,7 +66,7 @@ export async function updateUser(id, payload) {
     return parseResponse(res);
 }
 
-// ─── Suppression ──────────────────────────────────────────────────────────────
+// Suppression
 
 /**
  * Supprime un utilisateur par son ID.
@@ -80,7 +80,7 @@ export async function deleteUser(id) {
     return parseResponse(res);
 }
 
-// ─── Actions rapides ──────────────────────────────────────────────────────────
+// Actions rapides
 
 /**
  * Change le statut d'un utilisateur (active | pending | suspended).
@@ -108,7 +108,7 @@ export async function validateUser(id) {
     return parseResponse(res);
 }
 
-// ─── Helper interne ───────────────────────────────────────────────────────────
+// Helper interne
 
 async function parseResponse(res) {
     let data = null;

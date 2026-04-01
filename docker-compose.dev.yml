@@ -1,0 +1,104 @@
+# Fichier Docker Compose pour le développement local
+# Ce fichier configure les 3 services de l'appli (frontend, API, base de données)
+# de façon à ce que ce soit pratique pour coder :
+# - le hot-reload est activé sur le frontend (on voit les changements sans rebuild)
+# - tous les ports sont exposés pour pouvoir déboguer facilement
+# - les logs sont accessibles en temps réel avec docker compose logs -f
+#
+# Pour lancer :
+#   docker compose -f docker-compose.dev.yml up --build
+#   docker compose -f docker-compose.dev.yml logs -f
+#   docker compose -f docker-compose.dev.yml down
+
+services:
+  # Service frontend : l'interface Next.js
+  frontend:
+    build:
+      context: ./frontend-admin
+      dockerfile: Dockerfile
+      # On utilise le stage "development" du Dockerfile multi-étapes
+      target: development
+    container_name: upcycle-frontend-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # On monte le code source local dans le conteneur
+      # Comme ça quand on modifie un fichier, Next.js le détecte et recharge automatiquement
+      - ./frontend-admin/src:/app/src
+      - ./frontend-admin/public:/app/public
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+      # Ces deux variables servent à activer le polling de fichiers
+      # C'est nécessaire sur Docker Desktop (macOS/Windows) sinon le hot-reload ne marche pas
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      # L'URL de l'API côté navigateur (pas côté conteneur)
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+    depends_on:
+      - api
+    networks:
+      - app-network
+
+  # Service API : le backend en Go
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: upcycle-api-dev
+    ports:
+      - "8080:8080"
+    environment:
+      # L'API se connecte à la BDD en utilisant le nom du service Docker ("db")
+      # Docker résout automatiquement ce nom en adresse IP grâce au réseau interne
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      # Clé secrète pour signer les tokens JWT (valeur par défaut en dev seulement)
+      - JWT_SECRET=${JWT_SECRET:-dev-only-secret-change-me-please}
+      - JWT_EXPIRES_HOURS=${JWT_EXPIRES_HOURS:-12}
+      # Compte admin créé automatiquement au démarrage
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@upcycleconnect.fr}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin1234}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # Service base de données : PostgreSQL
+  db:
+    image: postgres:16-alpine
+    container_name: upcycle-db-dev
+    ports:
+      # En dev on expose le port 5432 pour pouvoir se connecter avec pgAdmin ou DBeaver
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      # Volume nommé pour que les données restent même si on relance les conteneurs
+      - pgdata:/var/lib/postgresql/data
+      # Script SQL qui crée les tables au premier démarrage
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+# Déclaration du volume nommé pour la BDD
+volumes:
+  pgdata:
+    name: upcycle-pgdata-dev
+
+# Réseau interne partagé entre les conteneurs
+# Permet aux services de se parler via leur nom (ex: "db", "api")
+networks:
+  app-network:
+    driver: bridge

@@ -40,6 +40,8 @@ func (r *Repository) EnsureSchema() error {
 		)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS employment_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_function TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`,
 		`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('particulier', 'prestataire', 'salarie', 'admin'))`,
 		`CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email)`,
@@ -102,6 +104,21 @@ func (r *Repository) GetByID(id int64) (User, error) {
 		WHERE id = $1
 	`, id)
 	return scanRow(row)
+}
+
+// GetAuthByEmail retourne les infos minimales et le hash password pour l'authentification.
+func (r *Repository) GetAuthByEmail(email string) (int64, string, string, string, error) {
+	var id int64
+	var hash, role, status string
+	err := r.db.QueryRow(`
+		SELECT id, password_hash, role, status
+		FROM users
+		WHERE email = $1
+	`, strings.ToLower(strings.TrimSpace(email))).Scan(&id, &hash, &role, &status)
+	if err != nil {
+		return 0, "", "", "", err
+	}
+	return id, hash, role, status, nil
 }
 
 // Create insère un nouvel utilisateur et retourne l'enregistrement créé.

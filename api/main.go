@@ -21,13 +21,12 @@ import (
 	"upcycleconnect/api/pricing"
 	"upcycleconnect/api/reservations"
 	"upcycleconnect/api/users"
+	"upcycleconnect/api/items"
 )
 
 var db *sql.DB
 
-type contextKey string
-
-const authClaimsKey contextKey = "authClaims"
+const authClaimsKey = "authClaims"
 
 var adminEmail string
 var adminPasswordHash []byte
@@ -99,9 +98,12 @@ func main() {
 	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(eventByIDHandler)))
 	mux.Handle("/api/admin/event-categories", authMiddleware(http.HandlerFunc(eventCategoriesHandler)))
 	mux.Handle("/api/admin/event-categories/", authMiddleware(http.HandlerFunc(eventCategoryByIDHandler)))
-
-	// Module users — routes enregistrées depuis le sous-package
+	
+	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
 	users.RegisterRoutes(mux, db, authMiddleware)
+
+	// Module items (Annonces)
+	items.RegisterRoutes(mux, db, authMiddleware)
 
 	// Module reservations (dépend de users + services, doit venir après)
 	reservations.RegisterRoutes(mux, db, authMiddleware)
@@ -234,7 +236,7 @@ func authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		r = r.WithContext(context.WithValue(r.Context(), authClaimsKey, claims))
+		r = r.WithContext(context.WithValue(r.Context(), "authClaims", claims))
 		next.ServeHTTP(w, r)
 	})
 }
@@ -1670,12 +1672,41 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if email != adminEmail {
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
+	var userEmail, userRole, passwordHash string
+	var status string
+
+	// 1. Vérifier si c'est le super-admin (env)
+	if email == adminEmail {
+		userEmail = adminEmail
+		userRole = "admin"
+		passwordHash = string(adminPasswordHash)
+		status = "active"
+	} else {
+		// 2. Sinon, chercher en base de données
+		err := db.QueryRow(`
+			SELECT email, role, password_hash, status
+			FROM users
+			WHERE email = $1
+		`, email).Scan(&userEmail, &userRole, &passwordHash, &status)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusUnauthorized, "invalid credentials")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+	}
+
+	// 3. Vérifier le statut (seuls les 'active' peuvent se connecter)
+	if status != "active" {
+		writeError(w, http.StatusForbidden, "your account is "+status)
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword(adminPasswordHash, []byte(req.Password)); err != nil {
+	// 4. Comparer le mot de passe
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -1683,9 +1714,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(jwtExpiration)
 	claims := jwt.MapClaims{
-		"sub":   adminEmail,
-		"email": adminEmail,
-		"role":  "admin",
+		"sub":   userEmail,
+		"email": userEmail,
+		"role":  userRole,
 		"iat":   now.Unix(),
 		"exp":   expiresAt.Unix(),
 	}
@@ -1702,8 +1733,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		"token_type": "Bearer",
 		"expires_at": expiresAt.Format(time.RFC3339),
 		"user": map[string]string{
-			"email": adminEmail,
-			"role":  "admin",
+			"email": userEmail,
+			"role":  userRole,
 		},
 	})
 }

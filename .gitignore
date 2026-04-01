@@ -1,4 +1,4 @@
-# Dependencies
+# Dependances
 node_modules/
 
 # Next.js
@@ -8,7 +8,7 @@ out/
 # Environment
 .env
 
-# PostgreSQL data (if running outside Docker)
+# PostgreSQL data (si ça run en dehors de Docker)
 pgdata/
 
 # IDE
@@ -26,6 +26,6 @@ Desktop.ini
 # Logs
 *.log
 
-# Build artifacts
+# Build Artifacts
 tmp/
 dist/

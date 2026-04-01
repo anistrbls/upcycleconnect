@@ -3,19 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../lib/api";
-import { getDefaultSubRoute, getModuleByKey, getSubNavItem, NAV_MODULES } from "../lib/constants";
+import { getDefaultSubRoute, getModuleByKey, NAV_MODULES } from "../lib/constants";
 import { Icon } from "../components/admin/Icon";
 
 export default function AdminLayout({ children }) {
     const pathname = usePathname();
     const router = useRouter();
+    const [user, setUser] = useState(null);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const currentSubKey = pathname.split("/").filter(Boolean)[1] || "";
 
-    const { activeModule, activeSub } = useMemo(() => {
-        const [moduleKey, subKey] = pathname.split("/").filter(Boolean);
+    const { activeModule } = useMemo(() => {
+        const parts = pathname.split("/").filter(Boolean);
+        const moduleKey = parts[0] || "vue-globale";
+
         const module = getModuleByKey(moduleKey);
-        const sub = getSubNavItem(module.key, subKey);
-        return { activeModule: module, activeSub: sub };
+        return { activeModule: module };
     }, [pathname]);
 
     useEffect(() => {
@@ -38,6 +41,8 @@ export default function AdminLayout({ children }) {
                     throw new Error("unauthorized");
                 }
 
+                const data = await response.json();
+                setUser(data.user);
                 setIsCheckingAuth(false);
             } catch {
                 window.localStorage.removeItem(TOKEN_KEY);
@@ -54,6 +59,10 @@ export default function AdminLayout({ children }) {
     };
 
     const handleModuleChange = (moduleKey) => {
+        if (isAdmin && moduleKey === "annonces") {
+            router.push("/annonces/mes-annonces");
+            return;
+        }
         router.push(getDefaultSubRoute(moduleKey));
     };
 
@@ -69,6 +78,45 @@ export default function AdminLayout({ children }) {
         );
     }
 
+    const isAdmin = user?.role === "admin";
+    const userRoleLabel = user?.role === "salarie" ? "Salarié" : user?.role === "particulier" ? "Particulier" : user?.role === "prestataire" ? "Professionnel" : user?.role;
+    const adminAnnoncesSubNav = [
+        { key: "mes-annonces", label: "Annonces actives", shortLabel: "Actives" },
+        { key: "moderation", label: "Modération", shortLabel: "Modération" },
+    ];
+    const visibleSubNav = isAdmin && activeModule.key === "annonces"
+        ? adminAnnoncesSubNav
+        : activeModule.subNav;
+    const userDisplayName = (() => {
+        const email = user?.email || "";
+        const localPart = email.split("@")[0] || "";
+        if (!localPart) return "";
+
+        const capitalize = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : "";
+        const separatorParts = localPart.split(/[._-]+/).filter(Boolean);
+
+        if (separatorParts.length >= 2) {
+            return separatorParts.map(capitalize).join(" ");
+        }
+
+        if (localPart.length >= 7) {
+            const firstName = capitalize(localPart.slice(0, 3));
+            const lastName = capitalize(localPart.slice(3));
+            return `${firstName} ${lastName}`;
+        }
+
+        return capitalize(localPart);
+    })();
+
+    // Modules autorisés pour les utilisateurs non-admins
+    const allowedModulesForUsers = ["vue-globale", "annonces"];
+    const isModuleAllowed = isAdmin || allowedModulesForUsers.includes(activeModule.key);
+
+    // Filtrer la sidebar
+    const displayedModules = isAdmin
+        ? NAV_MODULES
+        : NAV_MODULES.filter(m => allowedModulesForUsers.includes(m.key));
+
     return (
         <div className="app-wrapper">
             <header className="topbar">
@@ -82,10 +130,10 @@ export default function AdminLayout({ children }) {
                 </div>
 
                 <div className="topbar-center">
-                    {activeModule.subNav.map((subItem) => (
+                    {(isAdmin || activeModule.key === "annonces") && visibleSubNav.map((subItem) => (
                         <button
                             key={subItem.key}
-                            className={`action-btn ${activeSub.key === subItem.key ? "primary" : ""}`}
+                            className={`action-btn ${currentSubKey === subItem.key ? "primary" : ""}`}
                             onClick={() => handleSubNavChange(subItem.key)}
                             type="button"
                         >
@@ -93,17 +141,25 @@ export default function AdminLayout({ children }) {
                             <span className="action-label-short">{subItem.shortLabel || subItem.label}</span>
                         </button>
                     ))}
+                    {!isAdmin && activeModule.key === "vue-globale" && (
+                        <div style={{ fontSize: "0.9rem", color: "var(--text-muted)", background: "#f8fafb", padding: "0.4rem 1rem", borderRadius: "100px", border: "1px solid #e2eaea" }}>
+                            Mode {userRoleLabel}
+                        </div>
+                    )}
                 </div>
 
                 <div className="topbar-right">
-                    <button className="top-icon" onClick={handleLogout} title="Se déconnecter" aria-label="Se déconnecter"><Icon path="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginRight: "1rem" }}>
+                        {!isAdmin && <span style={{ fontSize: "0.8rem", fontWeight: "600", color: "var(--text-muted)" }}>{userDisplayName || user?.email}</span>}
+                        <button className="top-icon" onClick={handleLogout} title="Se déconnecter" aria-label="Se déconnecter"><Icon path="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></button>
+                    </div>
                 </div>
             </header>
 
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 <aside className="sidebar">
-                    <nav className="sidebar-nav" aria-label="Navigation principale backoffice">
-                        {NAV_MODULES.map((module) => {
+                    <nav className="sidebar-nav" aria-label="Navigation principale">
+                        {displayedModules.map((module) => {
                             const isActive = activeModule.key === module.key;
 
                             return (
@@ -123,7 +179,25 @@ export default function AdminLayout({ children }) {
                     </nav>
                 </aside>
 
-                <main className="main-content">{children}</main>
+                <main className="main-content">
+                    {isModuleAllowed ? (
+                        children
+                    ) : (
+                        <div style={{ padding: "2rem", maxWidth: "800px" }}>
+                            <div className="panel" style={{ textAlign: "center", padding: "4rem 2rem" }}>
+                                <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🚧</div>
+                                <h2 style={{ marginBottom: "1rem" }}>Espace en construction</h2>
+                                <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", lineHeight: 1.6 }}>
+                                    Bienvenue, <strong>{user?.email}</strong>.<br />
+                                    Votre espace pour accéder au module <strong>{activeModule.label}</strong> est actuellement en cours de développement.
+                                </p>
+                                <p style={{ color: "var(--text-muted)", marginTop: "1rem" }}>
+                                    Utilisez la barre latérale pour accéder aux fonctionnalités disponibles.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </main>
             </div>
         </div>
     );

@@ -1,4 +1,4 @@
-# Dependencies
+# Dependances
 node_modules/
 .pnp
 .pnp.js
@@ -7,7 +7,7 @@ node_modules/
 .next/
 out/
 
-# Testing
+# Test
 coverage/
 
 # Misc

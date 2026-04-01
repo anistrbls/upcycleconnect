@@ -1,0 +1,173 @@
+# Fichier Docker Compose pour la production
+# Contrairement au fichier dev, ici on optimise pour la sécurité et la stabilité :
+# - les services redémarrent automatiquement si ils plantent (restart: unless-stopped)
+# - le port de la base de données n'est pas exposé (on ne peut y accéder que depuis les autres conteneurs)
+# - pas de volumes bind sur le code source
+# - les variables sensibles (mots de passe, secrets) viennent du fichier .env
+# - les images sont tirées depuis le registre GHCR (pas buildées en local)
+#
+# Pour lancer :
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml logs -f
+#   docker compose -f docker-compose.prod.yml down
+
+services:
+  # Service frontend : on récupère directement l'image depuis le registre GHCR
+  # L'image a été buildée en CI avec le stage "production" du Dockerfile multi-étapes
+  frontend:
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-your-namespace}/upcycle-frontend-admin:${IMAGE_TAG:-latest}
+    pull_policy: always
+    container_name: upcycle-frontend-prod
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - app-network
+
+  # Service API : idem, image tirée depuis le registre
+  api:
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-your-namespace}/upcycle-api:${IMAGE_TAG:-latest}
+    pull_policy: always
+    container_name: upcycle-api-prod
+    ports:
+      - "8080:8080"
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      # En prod il faut absolument mettre un vrai secret JWT dans le .env, pas une valeur par défaut
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_HOURS=${JWT_EXPIRES_HOURS:-12}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # Base de données PostgreSQL
+  # En prod le port 5432 n'est pas exposé à l'extérieur, seuls les autres conteneurs
+  # du même réseau peuvent s'y connecter (c'est plus sécurisé)
+  db:
+    image: postgres:16-alpine
+    container_name: upcycle-db-prod
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      # Volume nommé pour que les données persistent même si le conteneur est supprimé
+      - pgdata:/var/lib/postgresql/data
+      # Script SQL d'initialisation lancé au premier démarrage
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Portainer : interface web pour gérer les conteneurs Docker visuellement
+  # Accessible sur http://localhost:9000 ou https://localhost:9443
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: upcycle-portainer
+    ports:
+      - "9443:9443"
+      - "9000:9000"
+    volumes:
+      # Portainer a besoin d'accéder au socket Docker pour lister et gérer les conteneurs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Prometheus : collecte les métriques des conteneurs toutes les X secondes
+  # Il scrappe cAdvisor qui lui expose les stats des conteneurs
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: upcycle-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      # On monte notre fichier de config Prometheus
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # On garde les métriques 7 jours
+      - '--storage.tsdb.retention.time=7d'
+    restart: unless-stopped
+    depends_on:
+      - cadvisor
+    networks:
+      - app-network
+
+  # cAdvisor : expose les métriques de chaque conteneur Docker (CPU, RAM, réseau...)
+  # Prometheus vient lire ces métriques régulièrement
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: upcycle-cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      # cAdvisor a besoin d'accéder aux infos système pour collecter les métriques
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Grafana : interface de visualisation des métriques collectées par Prometheus
+  # Le dashboard ID 893 est chargé automatiquement au démarrage (pas besoin d'import manuel)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: upcycle-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Dossier de provisioning : datasource Prometheus et dashboard chargés automatiquement
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - app-network
+
+# Volumes nommés pour persister les données importantes
+volumes:
+  pgdata:
+    name: upcycle-pgdata-prod
+  portainer_data:
+    name: upcycle-portainer-data
+  prometheus_data:
+    name: upcycle-prometheus-data
+  grafana_data:
+    name: upcycle-grafana-data
+
+# Réseau interne partagé entre tous les services
+networks:
+  app-network:
+    driver: bridge

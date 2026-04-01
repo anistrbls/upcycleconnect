@@ -1,0 +1,26 @@
+# ============================================================
+# Prometheus — Configuration
+# ============================================================
+# Collecte des métriques depuis cAdvisor toutes les 15 secondes
+# cAdvisor expose les métriques de performance des conteneurs Docker
+# ============================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Métriques de Prometheus lui-même
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Métriques des conteneurs via cAdvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    # Filtrer uniquement les conteneurs UpcycleConnect
+    metric_relabel_configs:
+      - source_labels: [container_label_com_docker_compose_project]
+        regex: upcycleconnect
+        action: keep

@@ -2,35 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
-const getApiBaseUrl = () => {
-    const fallback = "/api";
-    const rawValue = (process.env.NEXT_PUBLIC_API_URL || "").trim();
-    const cleanedValue = rawValue.replace(/^['\"]|['\"]$/g, "").replace(/\/+$/, "");
-
-    if (!cleanedValue) {
-        return fallback;
-    }
-
-    if (/^https?:\/\//i.test(cleanedValue) || cleanedValue.startsWith("/")) {
-        return cleanedValue;
-    }
-
-    return fallback;
-};
-
-const API_BASE_URL = getApiBaseUrl();
-const apiUrl = (path) => {
-    const normalizedBase = API_BASE_URL.replace(/\/+$/, "");
-    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-
-    if (normalizedBase.endsWith("/api")) {
-        return `${normalizedBase}${normalizedPath}`;
-    }
-
-    return `${normalizedBase}/api${normalizedPath}`;
-};
-const TOKEN_KEY = "uc_admin_token";
+import { TOKEN_KEY, apiUrl } from "../lib/api";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -57,7 +29,7 @@ export default function LoginPage() {
                     router.replace("/vue-globale/vue-generale");
                 }
             })
-            .catch(() => {});
+            .catch(() => { });
     }, [router]);
 
     const handleSubmit = async (event) => {
