@@ -1,0 +1,100 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  - group: upcycleconnect-prod-secrets
+
+stages:
+  - stage: Build
+    displayName: "Build et push des images Docker"
+    jobs:
+      - job: BuildAPI
+        displayName: "Build image API (Go)"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: "Login ACR + Build + Push API"
+            inputs:
+              azureSubscription: "azure-upcycleconnect"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az acr login --name $(ACR_NAME)
+                docker build --platform linux/amd64 \
+                  -t $(ACR_LOGIN_SERVER)/api:$(Build.BuildId) \
+                  -t $(ACR_LOGIN_SERVER)/api:latest \
+                  ./api
+                docker push $(ACR_LOGIN_SERVER)/api:$(Build.BuildId)
+                docker push $(ACR_LOGIN_SERVER)/api:latest
+
+      - job: BuildFrontend
+        displayName: "Build image Frontend (Next.js)"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: "Login ACR + Build + Push Frontend"
+            inputs:
+              azureSubscription: "azure-upcycleconnect"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az acr login --name $(ACR_NAME)
+                docker build --platform linux/amd64 \
+                  --build-arg NEXT_PUBLIC_API_URL=$(NEXT_PUBLIC_API_URL) \
+                  -t $(ACR_LOGIN_SERVER)/frontend:$(Build.BuildId) \
+                  -t $(ACR_LOGIN_SERVER)/frontend:latest \
+                  ./frontend-admin
+                docker push $(ACR_LOGIN_SERVER)/frontend:$(Build.BuildId)
+                docker push $(ACR_LOGIN_SERVER)/frontend:latest
+
+  - stage: Deploy
+    displayName: "Déploiement sur Azure App Service"
+    dependsOn: Build
+    jobs:
+      - job: DeployAPI
+        displayName: "Déployer l'API"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: AzureCLI@2
+            displayName: "Mettre à jour l'image de l'API + restart"
+            inputs:
+              azureSubscription: "azure-upcycleconnect"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az webapp config container set \
+                  --name $(API_APP_NAME) \
+                  --resource-group $(RESOURCE_GROUP) \
+                  --container-image-name $(ACR_LOGIN_SERVER)/api:$(Build.BuildId)
+                az webapp restart \
+                  --name $(API_APP_NAME) \
+                  --resource-group $(RESOURCE_GROUP)
+
+      - job: DeployFrontend
+        displayName: "Déployer le Frontend"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: AzureCLI@2
+            displayName: "Mettre à jour l'image du Frontend + restart"
+            inputs:
+              azureSubscription: "azure-upcycleconnect"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az webapp config container set \
+                  --name $(FRONTEND_APP_NAME) \
+                  --resource-group $(RESOURCE_GROUP) \
+                  --container-image-name $(ACR_LOGIN_SERVER)/frontend:$(Build.BuildId)
+                az webapp restart \
+                  --name $(FRONTEND_APP_NAME) \
+                  --resource-group $(RESOURCE_GROUP)
