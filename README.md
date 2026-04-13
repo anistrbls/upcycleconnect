@@ -132,6 +132,8 @@ Cette commande reconstruit localement `api` et `frontend` puis démarre les serv
 | `JWT_EXPIRES_HOURS` | Durée du token |
 | `ADMIN_EMAIL` | Email admin par défaut |
 | `ADMIN_PASSWORD` | Mot de passe admin par défaut |
+| `NEXT_PUBLIC_API_URL` | URL API exposee au navigateur (`/api` recommande) |
+| `API_INTERNAL_URL` | URL API utilisee par Next.js cote serveur/proxy |
 
 ## Structure rapide
 

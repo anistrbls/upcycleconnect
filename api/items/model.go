@@ -39,6 +39,11 @@ type Item struct {
 	ContainerID  *int64    `json:"containerId,omitempty"`
 	UserName             string    `json:"userName,omitempty"`
 	UserRegistrationDate string    `json:"userRegistrationDate,omitempty"`
+	WorkflowStatus       string    `json:"workflowStatus"`
+	DepositCode          string    `json:"depositCode"`
+	PickupCode           string    `json:"pickupCode"`
+	DepositPointName     string    `json:"depositPointName"`
+	ContainerName        string    `json:"containerName"`
 	Date                 string    `json:"date"` // Formatted date for frontend
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`

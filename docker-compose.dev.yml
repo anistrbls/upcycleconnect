@@ -33,8 +33,10 @@ services:
       # C'est nécessaire sur Docker Desktop (macOS/Windows) sinon le hot-reload ne marche pas
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
-      # L'URL de l'API côté navigateur (pas côté conteneur)
-      - NEXT_PUBLIC_API_URL=http://localhost:8080
+      # Cote navigateur, on passe par le meme host que le frontend.
+      - NEXT_PUBLIC_API_URL=/api
+      # Cote serveur Next, le proxy peut joindre l'API via le reseau Docker.
+      - API_INTERNAL_URL=http://api:8080
     depends_on:
       - api
     networks:

@@ -144,14 +144,12 @@ const spinStyle = { animation: "spin 1s linear infinite" };
 // ── Section réutilisable ──────────────────────────────────────────────────────
 function ConfigSection({ icon: Icon, title, description, count, loading, children, onAdd, addLabel = "Nouvel élément" }) {
     return (
-        <section style={{ marginBottom: "2rem" }}>
+        <section style={{ display: "flex", flexDirection: "column", height: "100%" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.4rem" }}>
                 <Icon size={18} strokeWidth={2} style={{ color: "var(--forest-deep)" }} />
                 <h2 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-main)" }}>{title}</h2>
             </div>
-            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1.25rem", paddingLeft: "1.65rem" }}>{description}</p>
-
-            <div style={{ background: "var(--surface-hover)", borderRadius: "24px", padding: "1.5rem" }}>
+            <div style={{ background: "var(--surface-hover)", borderRadius: "24px", padding: "1.5rem", flex: 1, display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
                     <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
                         {loading ? "Chargement..." : <><strong style={{ color: "var(--text-main)" }}>{count}</strong> élément{count > 1 ? "s" : ""}</>}
@@ -169,10 +167,6 @@ function ConfigSection({ icon: Icon, title, description, count, loading, childre
                     ) : children}
                 </div>
 
-                <div style={{ marginTop: "1.25rem", padding: "0.75rem 1rem", background: "rgba(62,104,108,0.08)", borderRadius: "12px", fontSize: "0.78rem", color: "var(--forest-deep)", display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
-                    <Tag size={13} style={{ marginTop: "1px", flexShrink: 0 }} />
-                    <span>Ces valeurs s'affichent dans le formulaire de dépôt d'annonce en temps réel depuis la base de données.</span>
-                </div>
             </div>
         </section>
     );
@@ -207,6 +201,13 @@ export default function ConfigurationPage() {
     const [addCountryModal, setAddCountryModal] = useState(false);
     const [newCountry, setNewCountry] = useState({ label: "", emoji: "🌍", zip_length: 5 });
     const [addingCountry, setAddingCountry] = useState(false);
+
+    // Types de points de dépôt
+    const [dpTypes, setDpTypes] = useState([]);
+    const [dpTypeLoading, setDpTypeLoading] = useState(true);
+    const [addDpTypeModal, setAddDpTypeModal] = useState(false);
+    const [newDpType, setNewDpType] = useState({ label: "" });
+    const [addingDpType, setAddingDpType] = useState(false);
 
     const [toast, setToast] = useState(null);
 
@@ -260,7 +261,19 @@ export default function ConfigurationPage() {
         finally { setCountryLoading(false); }
     }, []);
 
-    useEffect(() => { fetchCategories(); fetchConditions(); fetchMaterials(); fetchCountries(); }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries]);
+    // ── Fetch types de points
+    const fetchDpTypes = useCallback(async () => {
+        setDpTypeLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/deposit-point-types"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setDpTypes(data.items || []);
+        } catch { showToast("Impossible de charger les types de points.", "error"); }
+        finally { setDpTypeLoading(false); }
+    }, []);
+
+    useEffect(() => { fetchCategories(); fetchConditions(); fetchMaterials(); fetchCountries(); fetchDpTypes(); }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries, fetchDpTypes]);
 
     // ── CRUD catégories
     const handleSaveCat = async (updated) => {
@@ -394,8 +407,41 @@ export default function ConfigurationPage() {
         finally { setAddingCountry(false); }
     };
 
+    // ── CRUD types de points
+    const handleSaveDPType = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/deposit-point-types/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setDpTypes(prev => prev.map(t => t.id === saved.id ? saved : t));
+            showToast("Type de point mis à jour.");
+        } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
+    };
+    const handleDeleteDPType = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/deposit-point-types/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            setDpTypes(prev => prev.filter(t => t.id !== id));
+            showToast("Type de point supprimé.");
+        } catch { showToast("Impossible de supprimer.", "error"); }
+    };
+    const handleAddDPType = async () => {
+        if (!newDpType.label.trim()) return;
+        setAddingDpType(true);
+        try {
+            const res = await fetch(apiUrl("/admin/deposit-point-types"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newDpType.label.trim() }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setDpTypes(prev => [...prev, created]);
+            setNewDpType({ label: "" });
+            setAddDpTypeModal(false);
+            showToast("Type de point ajouté.");
+        } catch (e) { showToast(e.message && e.message.includes("already exists") ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
+        finally { setAddingDpType(false); }
+    };
+
     return (
-        <div style={{ width: "100%", padding: "1rem 2rem 3rem 0", animation: "fadeIn 0.4s ease-out", maxWidth: "860px" }}>
+        <div style={{ width: "100%", padding: "1rem 3rem 4rem 1rem", animation: "fadeIn 0.4s ease-out", maxWidth: "100%" }}>
 
             <header style={{ marginBottom: "2.5rem" }}>
                 <p className="activities-label">Paramètres</p>
@@ -403,41 +449,52 @@ export default function ConfigurationPage() {
                 <p style={{ color: "var(--text-muted)", fontSize: "1rem" }}>Gérez les réglages globaux de la plateforme UpcycleConnect.</p>
             </header>
 
-            {/* ── Catégories d'objets ── */}
-            <ConfigSection
-                icon={Package} title="Catégories d'objets" addLabel="Nouvelle catégorie"
-                description="Définissez les catégories d'objets disponibles dans le formulaire de dépôt d'annonce."
-                count={categories.length} loading={catLoading} onAdd={() => setAddCatModal(true)}
-            >
-                {categories.map(cat => <CategoryRow key={cat.id} cat={cat} onSave={handleSaveCat} onDelete={handleDeleteCat} />)}
-            </ConfigSection>
+            <div style={{ 
+                display: "grid", 
+                gridTemplateColumns: "repeat(3, 1fr)", 
+                gap: "2rem",
+                alignItems: "stretch"
+            }}>
+                {/* ── Catégories d'objets ── */}
+                <ConfigSection
+                    icon={Package} title="Catégories d'objets" addLabel="Nouvelle catégorie"
+                    count={categories.length} loading={catLoading} onAdd={() => setAddCatModal(true)}
+                >
+                    {categories.map(cat => <CategoryRow key={cat.id} cat={cat} onSave={handleSaveCat} onDelete={handleDeleteCat} />)}
+                </ConfigSection>
 
-            {/* ── États des objets ── */}
-            <ConfigSection
-                icon={Shield} title="États des objets" addLabel="Nouvel état"
-                description="Définissez les états disponibles pour décrire la condition d'un objet dans une annonce."
-                count={conditions.length} loading={condLoading} onAdd={() => setAddCondModal(true)}
-            >
-                {conditions.map(cond => <ConditionRow key={cond.id} cond={cond} onSave={handleSaveCond} onDelete={handleDeleteCond} />)}
-            </ConfigSection>
+                {/* ── États des objets ── */}
+                <ConfigSection
+                    icon={Shield} title="États des objets" addLabel="Nouvel état"
+                    count={conditions.length} loading={condLoading} onAdd={() => setAddCondModal(true)}
+                >
+                    {conditions.map(cond => <ConditionRow key={cond.id} cond={cond} onSave={handleSaveCond} onDelete={handleDeleteCond} />)}
+                </ConfigSection>
 
-            {/* ── Matériaux des objets ── */}
-            <ConfigSection
-                icon={Layers} title="Matériaux des objets" addLabel="Nouveau matériau"
-                description="Définissez les matériaux disponibles pour décrire la composition d'un objet dans une annonce."
-                count={materials.length} loading={matLoading} onAdd={() => setAddMatModal(true)}
-            >
-                {materials.map(mat => <ConditionRow key={mat.id} cond={mat} onSave={handleSaveMat} onDelete={handleDeleteMat} />)}
-            </ConfigSection>
+                {/* ── Matériaux des objets ── */}
+                <ConfigSection
+                    icon={Layers} title="Matériaux des objets" addLabel="Nouveau matériau"
+                    count={materials.length} loading={matLoading} onAdd={() => setAddMatModal(true)}
+                >
+                    {materials.map(mat => <ConditionRow key={mat.id} cond={mat} onSave={handleSaveMat} onDelete={handleDeleteMat} />)}
+                </ConfigSection>
 
-            {/* ── Pays supportés ── */}
-            <ConfigSection
-                icon={MapPin} title="Pays supportés" addLabel="Nouveau pays"
-                description="Définissez les pays disponibles dans le formulaire de dépôt avec leur longueur de code postal."
-                count={countries.length} loading={countryLoading} onAdd={() => setAddCountryModal(true)}
-            >
-                {countries.map(country => <CountryRow key={country.id} item={country} onSave={handleSaveCountry} onDelete={handleDeleteCountry} />)}
-            </ConfigSection>
+                {/* ── Pays supportés ── */}
+                <ConfigSection
+                    icon={MapPin} title="Pays supportés" addLabel="Nouveau pays"
+                    count={countries.length} loading={countryLoading} onAdd={() => setAddCountryModal(true)}
+                >
+                    {countries.map(country => <CountryRow key={country.id} item={country} onSave={handleSaveCountry} onDelete={handleDeleteCountry} />)}
+                </ConfigSection>
+
+                {/* ── Types de points de dépôt ── */}
+                <ConfigSection
+                    icon={MapPin} title="Types de points de dépôt" addLabel="Nouveau type"
+                    count={dpTypes.length} loading={dpTypeLoading} onAdd={() => setAddDpTypeModal(true)}
+                >
+                    {dpTypes.map(t => <ConditionRow key={t.id} cond={t} onSave={handleSaveDPType} onDelete={handleDeleteDPType} />)}
+                </ConfigSection>
+            </div>
 
             {/* ── Modal ajout catégorie ── */}
             <AdminModal open={addCatModal} title="Nouvelle catégorie" onClose={() => { setAddCatModal(false); setNewCat({ label: "", emoji: "📦" }); }}>
@@ -523,6 +580,24 @@ export default function ConfigurationPage() {
                         <button onClick={handleAddCountry} disabled={!newCountry.label.trim() || addingCountry}
                             style={{ border: "none", background: newCountry.label.trim() ? "var(--black)" : "var(--border)", color: newCountry.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newCountry.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
                             {addingCountry ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Modal ajout type de point ── */}
+            <AdminModal open={addDpTypeModal} title="Nouveau type de point" onClose={() => { setAddDpTypeModal(false); setNewDpType({ label: "" }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Libellé *</label>
+                        <input autoFocus placeholder="Ex : Box mobile, Casiers..." value={newDpType.label} onChange={e => setNewDpType({ label: e.target.value })} onKeyDown={e => { if (e.key === "Enter") handleAddDPType(); }}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddDpTypeModal(false); setNewDpType({ label: "" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddDPType} disabled={!newDpType.label.trim() || addingDpType}
+                            style={{ border: "none", background: newDpType.label.trim() ? "var(--black)" : "var(--border)", color: newDpType.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newDpType.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingDpType ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
                         </button>
                     </div>
                 </div>

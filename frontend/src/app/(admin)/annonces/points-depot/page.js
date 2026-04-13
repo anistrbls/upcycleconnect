@@ -21,21 +21,31 @@ const styles = {
         justifyContent: "space-between",
         alignItems: "flex-end",
     },
-    kpiGrid: {
+    kpiStrip: {
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-        gap: "1.2rem",
-        marginBottom: "2rem",
+        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+        gap: "0.75rem",
+        marginBottom: "1.5rem",
     },
     kpiCard: {
-        background: "white",
-        borderRadius: "24px",
-        padding: "1.5rem",
+        background: "#F7F8F7",
+        borderRadius: "16px",
+        padding: "0.85rem 1rem",
         display: "flex",
         alignItems: "center",
-        gap: "1rem",
-        boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
-        border: "1px solid rgba(0,0,0,0.03)",
+        gap: "0.65rem",
+    },
+    kpiLabel: {
+        margin: 0,
+        fontSize: "0.78rem",
+        color: "var(--text-muted)",
+        lineHeight: "1.2",
+    },
+    kpiValue: {
+        margin: "0.1rem 0 0",
+        fontSize: "1.05rem",
+        fontWeight: "700",
+        color: "var(--text-main)",
     },
     grid: {
         display: "grid",
@@ -109,6 +119,8 @@ const styles = {
         padding: "2.5rem",
         position: "relative",
         boxShadow: "0 20px 50px rgba(0,0,0,0.15)",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
     },
     input: {
         width: "100%",
@@ -125,13 +137,13 @@ const styles = {
         background: "var(--black)",
         color: "white",
         border: "none",
-        padding: "0.9rem 1.8rem",
+        padding: "0.8rem 1.5rem",
         borderRadius: "999px",
         fontWeight: "700",
         cursor: "pointer",
         display: "flex",
         alignItems: "center",
-        gap: "0.6rem",
+        gap: "0.75rem",
         fontSize: "0.95rem",
         transition: "transform 0.1s, background 0.2s",
     }
@@ -145,9 +157,12 @@ function PointsDepotContent() {
     const [editingPoint, setEditingPoint] = useState(null);
     const [formData, setFormData] = useState({
         name: "", address: "", zip_code: "", city: "", country: "France",
-        latitude: 48.8566, longitude: 2.3522, status: "actif", type: "conteneur",
+        latitude: 48.8566, longitude: 2.3522, status: "actif", type: "",
         internal_comment: ""
     });
+    const [types, setTypes] = useState([]);
+    const [suggestions, setSuggestions] = useState([]);
+    const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
     const fetchPoints = async () => {
         const token = window.localStorage.getItem(TOKEN_KEY);
@@ -166,7 +181,57 @@ function PointsDepotContent() {
         }
     };
 
-    useEffect(() => { fetchPoints(); }, []);
+    const fetchTypes = async () => {
+        try {
+            const res = await fetch(apiUrl("/deposit-point-types"));
+            if (res.ok) {
+                const data = await res.json();
+                setTypes(data.items || []);
+            }
+        } catch (err) {
+            console.error("Failed to fetch types", err);
+        }
+    };
+
+    useEffect(() => { fetchPoints(); fetchTypes(); }, []);
+
+    const searchAddress = async (query) => {
+        if (!query || query.length < 3) {
+            setSuggestions([]);
+            return;
+        }
+        setLoadingSuggestions(true);
+        try {
+            const res = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=5`);
+            if (res.ok) {
+                const data = await res.json();
+                setSuggestions(data.features || []);
+            }
+        } catch (err) {
+            console.error("Geocoding error", err);
+        } finally {
+            setLoadingSuggestions(false);
+        }
+    };
+
+    const handleAddressChange = (e) => {
+        const value = e.target.value;
+        setFormData({ ...formData, address: value });
+        searchAddress(value);
+    };
+
+    const selectSuggestion = (feature) => {
+        const { properties, geometry } = feature;
+        setFormData({
+            ...formData,
+            address: properties.name || properties.label,
+            city: properties.city || "",
+            zip_code: properties.postcode || "",
+            latitude: geometry.coordinates[1],
+            longitude: geometry.coordinates[0]
+        });
+        setSuggestions([]);
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -237,41 +302,46 @@ function PointsDepotContent() {
             <header style={styles.header}>
                 <div>
                     <p className="activities-label">Logistique & Collecte</p>
-                    <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.45rem 0" }}>Points de dépôt</h1>
+                    <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.45rem 0", letterSpacing: "-0.02em" }}>Points de dépôt</h1>
                     <p style={{ color: "var(--text-muted)" }}>Gérez les lieux physiques de collecte et surveillez leur saturation.</p>
                 </div>
-                <button style={styles.primaryBtn} onClick={openAdd}>
+                <button 
+                    className="action-btn primary" 
+                    type="button" 
+                    style={{ marginBottom: "0.4rem" }} 
+                    onClick={openAdd}
+                >
                     <Plus size={20} /> Nouveau point
                 </button>
             </header>
 
-            <div style={styles.kpiGrid}>
+            <div style={styles.kpiStrip}>
                 <div style={styles.kpiCard}>
-                    <div style={{ background: "#e0f2fe", padding: "0.8rem", borderRadius: "16px" }}><Building2 size={24} color="#0369a1" /></div>
+                    <Building2 size={18} color="var(--forest-deep)" />
                     <div>
-                        <div style={{ fontSize: "1.5rem", fontWeight: "800" }}>{points.length}</div>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "601" }}>Points totaux</div>
+                        <p style={styles.kpiLabel}>Points totaux</p>
+                        <p style={styles.kpiValue}>{points.length}</p>
                     </div>
                 </div>
                 <div style={styles.kpiCard}>
-                    <div style={{ background: "#dcfce7", padding: "0.8rem", borderRadius: "16px" }}><Package size={24} color="#166534" /></div>
+                    <Package size={18} color="var(--forest-deep)" />
                     <div>
-                        <div style={{ fontSize: "1.5rem", fontWeight: "800" }}>{totalCapacity}</div>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "601" }}>Capacité totale</div>
+                        <p style={styles.kpiLabel}>Capacité totale</p>
+                        <p style={styles.kpiValue}>{totalCapacity}</p>
                     </div>
                 </div>
                 <div style={styles.kpiCard}>
-                    <div style={{ background: "#fff3e0", padding: "0.8rem", borderRadius: "16px" }}><AlertTriangle size={24} color="#ef6c00" /></div>
+                    <AlertTriangle size={18} color="var(--forest-deep)" />
                     <div>
-                        <div style={{ fontSize: "1.5rem", fontWeight: "800" }}>{saturatedCount}</div>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "601" }}>Points saturés</div>
+                        <p style={styles.kpiLabel}>Points saturés</p>
+                        <p style={styles.kpiValue}>{saturatedCount}</p>
                     </div>
                 </div>
                 <div style={styles.kpiCard}>
-                    <div style={{ background: "#f3e8ff", padding: "0.8rem", borderRadius: "16px" }}><Settings2 size={24} color="#7e22ce" /></div>
+                    <Settings2 size={18} color="var(--forest-deep)" />
                     <div>
-                        <div style={{ fontSize: "1.5rem", fontWeight: "800" }}>{globalUsagePercent}%</div>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "601" }}>Utilisation globale</div>
+                        <p style={styles.kpiLabel}>Utilisation globale</p>
+                        <p style={styles.kpiValue}>{globalUsagePercent}%</p>
                     </div>
                 </div>
             </div>
@@ -339,7 +409,7 @@ function PointsDepotContent() {
 
             {showModal && (
                 <div style={styles.modalOverlay} onClick={() => setShowModal(false)}>
-                    <div style={styles.modal} onClick={e => e.stopPropagation()}>
+                    <div className="modal-content" style={styles.modal} onClick={e => e.stopPropagation()}>
                         <button style={{ position: "absolute", top: "1.5rem", right: "1.5rem", border: "none", background: "none", cursor: "pointer" }} onClick={() => setShowModal(false)}><X size={24} /></button>
                         <h2 style={{ fontSize: "1.8rem", marginBottom: "1.5rem" }}>{editingPoint ? "Modifier le point" : "Ajouter un point"}</h2>
                         
@@ -350,9 +420,48 @@ function PointsDepotContent() {
                             </div>
 
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                                <div>
+                                <div style={{ position: "relative" }}>
                                     <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Adresse</label>
-                                    <input style={styles.input} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} required />
+                                    <input 
+                                        style={styles.input} 
+                                        value={formData.address} 
+                                        onChange={handleAddressChange} 
+                                        required 
+                                        autoComplete="off"
+                                    />
+                                    {suggestions.length > 0 && (
+                                        <div style={{
+                                            position: "absolute",
+                                            top: "100%",
+                                            left: 0,
+                                            right: 0,
+                                            background: "white",
+                                            borderRadius: "12px",
+                                            boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+                                            zIndex: 10,
+                                            marginTop: "4px",
+                                            overflow: "hidden"
+                                        }}>
+                                            {suggestions.map((s, idx) => (
+                                                <div 
+                                                    key={idx}
+                                                    onClick={() => selectSuggestion(s)}
+                                                    style={{
+                                                        padding: "0.8rem 1rem",
+                                                        fontSize: "0.85rem",
+                                                        cursor: "pointer",
+                                                        borderBottom: idx === suggestions.length - 1 ? "none" : "1px solid #f0f0f0",
+                                                        transition: "background 0.2s"
+                                                    }}
+                                                    onMouseEnter={e => e.target.style.background = "#f7f9fa"}
+                                                    onMouseLeave={e => e.target.style.background = "white"}
+                                                >
+                                                    <div style={{ fontWeight: "700" }}>{s.properties.name}</div>
+                                                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{s.properties.postcode} {s.properties.city}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 <div>
                                     <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Code Postal</label>
@@ -378,12 +487,23 @@ function PointsDepotContent() {
 
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
                                 <div>
-                                    <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Latitude</label>
-                                    <input type="number" step="any" style={styles.input} value={formData.latitude} onChange={e => setFormData({...formData, latitude: parseFloat(e.target.value)})} />
+                                    <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Type</label>
+                                    <select style={styles.input} value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} required>
+                                        <option value="">Sélectionner un type...</option>
+                                        {types.map(t => (
+                                            <option key={t.id} value={t.label}>{t.label}</option>
+                                        ))}
+                                    </select>
                                 </div>
-                                <div>
-                                    <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Longitude</label>
-                                    <input type="number" step="any" style={styles.input} value={formData.longitude} onChange={e => setFormData({...formData, longitude: parseFloat(e.target.value)})} />
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                                    <div>
+                                        <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Lat</label>
+                                        <input type="number" step="any" style={styles.input} value={formData.latitude} onChange={e => setFormData({...formData, latitude: parseFloat(e.target.value)})} required />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Long</label>
+                                        <input type="number" step="any" style={styles.input} value={formData.longitude} onChange={e => setFormData({...formData, longitude: parseFloat(e.target.value)})} required />
+                                    </div>
                                 </div>
                             </div>
 
@@ -403,6 +523,9 @@ function PointsDepotContent() {
                 .deposit-card:hover {
                     transform: translateY(-5px);
                     box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+                }
+                .modal-content::-webkit-scrollbar {
+                    display: none;
                 }
             `}</style>
         </div>

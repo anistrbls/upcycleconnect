@@ -28,7 +28,8 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
-      - NEXT_PUBLIC_API_URL=http://localhost:8080
+      - NEXT_PUBLIC_API_URL=/api
+      - API_INTERNAL_URL=http://api:8080
     restart: unless-stopped
     depends_on:
       - api

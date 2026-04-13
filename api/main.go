@@ -92,6 +92,9 @@ func main() {
 	if err := ensureItemCountriesSchema(); err != nil {
 		log.Fatalf("failed to init item_countries schema: %v", err)
 	}
+	if err := ensureDepositPointTypesSchema(); err != nil {
+		log.Fatalf("failed to init deposit_point_types schema: %v", err)
+	}
 	log.Println("✓ Item materials schema initialized")
 
 	mux := http.NewServeMux()
@@ -136,9 +139,37 @@ func main() {
 	mux.HandleFunc("GET /api/item-countries", itemCountriesPublicHandler)
 	mux.Handle("/api/admin/item-countries", authMiddleware(http.HandlerFunc(itemCountriesAdminHandler)))
 	mux.Handle("/api/admin/item-countries/", authMiddleware(http.HandlerFunc(itemCountryByIDAdminHandler)))
+	
+	// === Deposit Point Types ===
+	mux.HandleFunc("GET /api/deposit-point-types", depositPointTypesPublicHandler)
+	mux.Handle("/api/admin/deposit-point-types", authMiddleware(http.HandlerFunc(depositPointTypesAdminHandler)))
+	mux.Handle("/api/admin/deposit-point-types/", authMiddleware(http.HandlerFunc(depositPointTypeByIDAdminHandler)))
 
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
 	users.RegisterRoutes(mux, db, authMiddleware)
+
+	// Ensure admin user exists in database for foreign key constraints
+	go func() {
+		// Wait a bit for everything to be ready
+		time.Sleep(2 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var existingAdminID int64
+		err := db.QueryRowContext(ctx, "SELECT id FROM users WHERE email = $1", adminEmail).Scan(&existingAdminID)
+		if err == sql.ErrNoRows {
+			log.Printf("Seeding admin user in database: %s", adminEmail)
+			_, err = db.ExecContext(ctx, `
+				INSERT INTO users (firstname, lastname, email, password_hash, role, status)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`, "Admin", "System", adminEmail, string(adminPasswordHash), "admin", "active")
+			if err != nil {
+				log.Printf("Warning: failed to seed admin user: %v", err)
+			}
+		} else if err != nil && err != context.Canceled {
+			log.Printf("Warning: database error checking admin user: %v", err)
+		}
+	}()
 
 	// Module items (Annonces)
 	items.RegisterRoutes(mux, db, authMiddleware)
@@ -151,9 +182,16 @@ func main() {
 
 	port := getEnv("API_PORT", "8080")
 
+	loggerMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("Request: %s %s", r.Method, r.URL.Path)
+			next.ServeHTTP(w, r)
+		})
+	}
+
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      corsMiddleware(mux),
+		Handler:      corsMiddleware(loggerMiddleware(mux)),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -1810,6 +1848,202 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deposit Point Types — types de points de dépôt
+// ─────────────────────────────────────────────────────────────────────────────
+
+type depositPointTypePayload struct {
+	Label string `json:"label"`
+}
+
+func ensureDepositPointTypesSchema() error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS deposit_point_types (
+			id         BIGSERIAL PRIMARY KEY,
+			label      TEXT NOT NULL UNIQUE,
+			position   INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_deposit_point_types_position ON deposit_point_types(position)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM deposit_point_types`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		defaults := []string{"Conteneur", "Box", "Local", "Boutique partenaire", "Déchèterie"}
+		for i, label := range defaults {
+			if _, err := db.Exec(
+				`INSERT INTO deposit_point_types (label, position) VALUES ($1, $2)`,
+				label, i,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func depositPointTypesPublicHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`SELECT id, label FROM deposit_point_types ORDER BY position ASC, id ASC`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list deposit point types")
+		return
+	}
+	defer rows.Close()
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id int64
+		var label string
+		if err := rows.Scan(&id, &label); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse deposit point type")
+			return
+		}
+		result = append(result, map[string]interface{}{"id": id, "label": label})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+}
+
+func depositPointTypesAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`SELECT id, label, position, created_at, updated_at FROM deposit_point_types ORDER BY position ASC, id ASC`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list deposit point types")
+			return
+		}
+		defer rows.Close()
+		result := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id int64
+			var pos int
+			var label string
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &label, &pos, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse deposit point type")
+				return
+			}
+			result = append(result, map[string]interface{}{
+				"id": id, "label": label,
+				"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+
+	case http.MethodPost:
+		var payload depositPointTypePayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO deposit_point_types (label, position)
+			VALUES ($1, (SELECT COALESCE(MAX(position), -1) + 1 FROM deposit_point_types))
+			RETURNING id, created_at, updated_at
+		`, label).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "type label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not create deposit point type")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM deposit_point_types WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "label": label,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func depositPointTypeByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	id, err := parseIDFromPath(r.URL.Path, "/api/admin/deposit-point-types/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid type id")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var payload depositPointTypePayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		var createdAt, updatedAt time.Time
+		res := db.QueryRow(`
+			UPDATE deposit_point_types SET label = $1, updated_at = NOW()
+			WHERE id = $2 RETURNING created_at, updated_at
+		`, label, id)
+		if err := res.Scan(&createdAt, &updatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "type not found")
+				return
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "type label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update deposit point type")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM deposit_point_types WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "label": label,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM deposit_point_types WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete deposit point type")
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			writeError(w, http.StatusNotFound, "type not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

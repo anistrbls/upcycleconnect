@@ -19,6 +19,11 @@ import {
     ChevronLeft,
     ChevronRight,
     Star,
+    Info,
+    Clock,
+    Box,
+    Terminal,
+    QrCode,
 } from "lucide-react";
 
 const STATUS_LABELS = { actif: "Actif", vendu: "Vendu", "en attente": "En attente", brouillon: "Brouillon", refusee: "Refusee", desactivee: "Desactivee" };
@@ -29,6 +34,30 @@ const STATUS_COLORS = {
     brouillon:    { bg: "rgba(35,59,61,0.08)",   color: "var(--text-main)" },
     refusee:      { bg: "var(--state-critical-bg)",  color: "var(--state-critical)" },
     desactivee:   { bg: "rgba(35,59,61,0.16)",   color: "var(--text-main)" },
+};
+
+const WF_LABELS = {
+    validated: "Validee",
+    assigned: "Point assigne",
+    deposit_code_sent: "Pret pour depot",
+    deposited: "Depose",
+    available: "Disponible",
+    reserved: "Reserve",
+    closed: "Recupere / Termine",
+    cancelled: "Annule",
+    deposit_expired: "Expire",
+};
+
+const WF_COLORS = {
+    validated: "#6366f1",
+    assigned: "#8b5cf6",
+    deposit_code_sent: "#3b82f6",
+    deposited: "#10b981",
+    available: "#059669",
+    reserved: "#f59e0b",
+    closed: "#636868",
+    cancelled: "#ef4444",
+    deposit_expired: "#71717a"
 };
 
 const normalizeStatus = (status) => {
@@ -453,10 +482,142 @@ function AnnonceDetailContent() {
     })();
     const locationDisplay = [authorProfile.city, authorProfile.country].filter(Boolean).join(", ") || "N/A";
 
+    const LogisticsStatus = () => {
+        if (!annonce.workflowStatus) return null;
+        
+        const wf = annonce.workflowStatus;
+        const label = WF_LABELS[wf] || wf;
+        const color = WF_COLORS[wf] || "var(--text-muted)";
+        const panelBackground = `linear-gradient(135deg, ${color}14 0%, rgba(255,255,255,0.98) 34%, rgba(246,249,248,0.98) 100%)`;
+        const nextStep =
+            (wf === "validated" && "Assignation par l'admin") ||
+            (wf === "assigned" && "Envoi du code de depot") ||
+            (wf === "deposit_code_sent" && "Depot physique de l'objet") ||
+            (wf === "deposited" && "Validation de mise en ligne") ||
+            (wf === "available" && "Attente de reservation") ||
+            (wf === "reserved" && "Attente de recuperation") ||
+            (wf === "closed" && "Cycle termine") ||
+            (wf === "cancelled" && "Action annulee") ||
+            (wf === "deposit_expired" && "Redemander un code") ||
+            "Suivi logistique en cours";
+        const codeLabel = wf === "reserved" ? "Code de recuperation" : "Code de depot";
+        const codeValue = wf === "reserved" ? annonce.pickupCode : annonce.depositCode;
+        const codeColor = wf === "reserved" ? "#f59e0b" : color;
+
+        return (
+            <div style={{
+                position: "relative",
+                overflow: "hidden",
+                background: panelBackground,
+                borderRadius: "28px",
+                padding: "1.4rem",
+                border: "1px solid rgba(35,59,61,0.08)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "1.15rem",
+                boxShadow: "0 22px 50px rgba(20, 32, 34, 0.06)"
+            }}>
+                <div style={{
+                    position: "absolute",
+                    top: "-38px",
+                    right: "-30px",
+                    width: "140px",
+                    height: "140px",
+                    borderRadius: "999px",
+                    background: `${color}18`,
+                    filter: "blur(2px)",
+                    pointerEvents: "none"
+                }} />
+
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap", position: "relative", zIndex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "0.9rem", flex: "1 1 320px" }}>
+                        <div style={{ 
+                            width: "48px",
+                            height: "48px",
+                            flexShrink: 0,
+                            background: `linear-gradient(180deg, ${color}24 0%, ${color}12 100%)`,
+                            color: color,
+                            border: `1px solid ${color}22`,
+                            borderRadius: "16px",
+                            display: "flex"
+                            ,alignItems: "center"
+                            ,justifyContent: "center"
+                            ,boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45)"
+                        }}>
+                            <Clock size={20} />
+                        </div>
+
+                        <div style={{ display: "grid", gap: "0.45rem" }}>
+                            <div style={{ display: "inline-flex", alignItems: "center", width: "fit-content", padding: "0.38rem 0.72rem", borderRadius: "999px", background: `${color}12`, color: color, fontSize: "0.7rem", fontWeight: "800", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                                Statut logistique
+                            </div>
+                            <div style={{ fontSize: "1.34rem", fontWeight: "800", color: "var(--text-main)", lineHeight: "1.1", letterSpacing: "-0.03em" }}>{label}</div>
+                            <div style={{ fontSize: "0.92rem", lineHeight: "1.6", color: "var(--text-muted)", maxWidth: "56ch" }}>
+                                Cette annonce suit un parcours encadre. La prochaine action attendue est : <span style={{ color: "var(--text-main)", fontWeight: "700" }}>{nextStep}</span>.
+                            </div>
+                        </div>
+                    </div>
+
+                    {codeValue && (
+                        <div style={{
+                            flex: "0 0 auto",
+                            minWidth: "220px",
+                            background: "rgba(255,255,255,0.8)",
+                            border: "1px solid rgba(35,59,61,0.08)",
+                            borderRadius: "18px",
+                            padding: "0.95rem 1rem",
+                            boxShadow: "0 10px 30px rgba(20, 32, 34, 0.05)"
+                        }}>
+                            <div style={{ fontSize: "0.68rem", fontWeight: "800", textTransform: "uppercase", color: codeColor, letterSpacing: "0.08em", marginBottom: "0.35rem" }}>{codeLabel}</div>
+                            <div style={{ fontSize: "1.48rem", fontWeight: "900", color: "var(--text-main)", letterSpacing: "0.14em", fontFamily: "monospace", marginBottom: "0.3rem" }}>{codeValue}</div>
+                            <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: "1.45" }}>
+                                A communiquer tel quel au point de passage concerne.
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "0.9rem", position: "relative", zIndex: 1 }}>
+                    {annonce.depositPointName && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", background: "rgba(255,255,255,0.76)", borderRadius: "18px", padding: "0.95rem 1rem", border: "1px solid rgba(35,59,61,0.06)" }}>
+                            <div style={{ width: "34px", height: "34px", borderRadius: "10px", background: "rgba(35,59,61,0.06)", color: "var(--text-main)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <MapPin size={16} />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Point de depot</div>
+                                <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)" }}>{annonce.depositPointName}</div>
+                            </div>
+                        </div>
+                    )}
+                    {annonce.containerName && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", background: "rgba(255,255,255,0.76)", borderRadius: "18px", padding: "0.95rem 1rem", border: "1px solid rgba(35,59,61,0.06)" }}>
+                            <div style={{ width: "34px", height: "34px", borderRadius: "10px", background: "rgba(35,59,61,0.06)", color: "var(--text-main)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <Box size={16} />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Conteneur</div>
+                                <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)" }}>{annonce.containerName}</div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", background: "rgba(255,255,255,0.76)", borderRadius: "18px", padding: "0.95rem 1rem", border: "1px solid rgba(35,59,61,0.06)" }}>
+                        <div style={{ width: "34px", height: "34px", borderRadius: "10px", background: `${color}12`, color: color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <Info size={16} />
+                        </div>
+                        <div>
+                            <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Prochaine etape</div>
+                            <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)", lineHeight: "1.45" }}>{nextStep}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div style={{ width: "100%", padding: "1rem 0 4rem 0", animation: "fadeIn 0.4s ease-out" }}>
             <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap", paddingBottom: "0.9rem", borderBottom: "1px solid rgba(35,59,61,0.08)" }}>
                     <button
                         onClick={() => router.back()}
@@ -490,6 +651,8 @@ function AnnonceDetailContent() {
                         </button>
                     </div>
                 </div>
+
+                <LogisticsStatus />
 
                 <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(360px, 0.8fr)", gap: "1.5rem", alignItems: "stretch" }}>
                     <div style={{ background: "var(--black)", borderRadius: "28px", padding: "1rem", border: "1px solid rgba(18, 25, 26, 0.08)" }}>

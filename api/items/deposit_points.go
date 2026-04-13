@@ -132,8 +132,13 @@ func (r *Repository) DeleteContainer(ctx context.Context, id int64) error {
 }
 
 func (r *Repository) UpdateContainerCounts(ctx context.Context, containerID int64) error {
-	// Re-calculate current_count based on items assigned to this container
-	query := `UPDATE containers SET current_count = (SELECT count(*) FROM items WHERE container_id = $1) WHERE id = $1`
+	// Re-calculate current_count based on item_logistics assigned to this container
+	// (Only count items that are physically in the container)
+	query := `UPDATE containers SET current_count = (
+		SELECT count(*) FROM item_logistics 
+		WHERE container_id = $1 
+		AND workflow_status IN ('deposited', 'available', 'reserved')
+	) WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, containerID)
 	if err != nil {
 		return err

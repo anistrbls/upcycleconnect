@@ -615,6 +615,15 @@ function MesAnnoncesContent() {
                             )}
                             <div style={styles.tagsRow}>
                                 <span style={styles.tag}>{annonce.type === "don" ? "Don" : "Vente"}</span>
+                                {annonce.workflowStatus && (
+                                    <span style={{ ...styles.tag, background: "rgba(99,102,241,0.25)", color: "#c7d2fe", border: "1px solid rgba(99,102,241,0.4)" }}>
+                                        {annonce.workflowStatus === 'deposit_code_sent' ? `À déposer (${annonce.depositCode})` : 
+                                         annonce.workflowStatus === 'deposited' ? 'Déposé' :
+                                         annonce.workflowStatus === 'reserved' ? 'Réservé' :
+                                         annonce.workflowStatus === 'collected' ? 'Récupéré' : 
+                                         annonce.workflowStatus === 'closed' ? 'Terminé' : 'En transit'}
+                                    </span>
+                                )}
                             </div>
 
                             {isAdmin && annonce.photos && annonce.photos.length > 0 && (

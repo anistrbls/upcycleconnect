@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
-import { Search, XCircle, Clock3, ShieldAlert } from "lucide-react";
+import { Search, XCircle, Clock3, ShieldAlert, Check, X, Eye } from "lucide-react";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
 
 const styles = {
@@ -198,19 +198,26 @@ const styles = {
         alignItems: "center",
     },
     actionBtn: (tone) => ({
-        "--btn-bg": tone === "accept" ? "var(--forest-deep)" : tone === "reject" ? "#f6c8c8" : "white",
-        "--btn-hover-bg": tone === "accept" ? "#1f3537" : tone === "reject" ? "#e9b4b4" : "#ececec",
+        "--btn-bg": tone === "accept" ? "var(--forest-deep)" : tone === "reject" ? "rgba(255, 82, 82, 0.15)" : "rgba(255, 255, 255, 0.12)",
+        "--btn-color": tone === "accept" ? "white" : tone === "reject" ? "#ff5252" : "white",
+        "--btn-hover": tone === "accept" ? "#1b2a2c" : tone === "reject" ? "rgba(255, 82, 82, 0.25)" : "rgba(255, 255, 255, 0.22)",
         flex: 1,
-        border: "none",
-        borderRadius: "999px",
-        padding: "0.72rem 0.85rem",
+        border: tone === "view" ? "1px solid rgba(255,255,255,0.3)" : "none",
+        borderRadius: "14px",
+        padding: "0.65rem 0.6rem",
         background: "var(--btn-bg)",
-        color: tone === "accept" ? "white" : "#111",
+        color: "var(--btn-color)",
         cursor: "pointer",
         fontFamily: "inherit",
-        fontSize: "0.88rem",
+        fontSize: "0.82rem",
         fontWeight: "700",
-        transition: "background-color 0.2s ease",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "0.45rem",
+        transition: "all 0.2s ease",
+        backdropFilter: tone !== "accept" ? "blur(8px)" : "none",
+        WebkitBackdropFilter: tone !== "accept" ? "blur(8px)" : "none",
     }),
 };
 
@@ -459,7 +466,7 @@ function ModerationContent() {
                                         setStatus(annonce.id, "actif");
                                     }}
                                 >
-                                    Valider
+                                    <Check size={16} /> Valider
                                 </button>
                                 <button
                                     className="moderation-action-btn"
@@ -469,7 +476,7 @@ function ModerationContent() {
                                         setStatus(annonce.id, "refusee");
                                     }}
                                 >
-                                    Refuser
+                                    <X size={16} /> Refuser
                                 </button>
                                 <button
                                     className="moderation-action-btn"
@@ -479,7 +486,7 @@ function ModerationContent() {
                                         router.push(`/annonces/${annonce.id}`);
                                     }}
                                 >
-                                    Détail
+                                    <Eye size={16} /> Détail
                                 </button>
                             </div>
                         </div>
@@ -499,7 +506,11 @@ function ModerationContent() {
                 }
 
                 .moderation-action-btn:hover {
-                    background: var(--btn-hover-bg);
+                    background: var(--btn-hover) !important;
+                    transform: scale(1.03);
+                }
+                .moderation-action-btn:active {
+                    transform: scale(0.97);
                 }
             `}</style>
         </div>

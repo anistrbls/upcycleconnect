@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { TOKEN_KEY, apiUrl } from "../lib/api";
+import { TOKEN_KEY, apiUrl, fetchWithTimeout } from "../lib/api";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -18,12 +18,12 @@ export default function LoginPage() {
             return;
         }
 
-        fetch(apiUrl("/auth/me"), {
+        fetchWithTimeout(apiUrl("/auth/me"), {
             method: "GET",
             headers: {
                 Authorization: `Bearer ${existingToken}`,
             },
-        })
+        }, 5000)
             .then((res) => {
                 if (res.ok) {
                     router.replace("/vue-globale/vue-generale");
@@ -55,15 +55,19 @@ export default function LoginPage() {
         }
 
         try {
-            const response = await fetch(apiUrl("/auth/login"), {
+            const response = await fetchWithTimeout(apiUrl("/auth/login"), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({ email: normalizedEmail, password: normalizedPassword }),
-            });
+            }, 10000);
 
-            const data = await response.json();
+            const contentType = response.headers.get("content-type") || "";
+            const data = contentType.includes("application/json")
+                ? await response.json()
+                : { error: "Erreur de connexion" };
+
             if (!response.ok) {
                 throw new Error(data.error || "Identifiants invalides");
             }
@@ -71,7 +75,11 @@ export default function LoginPage() {
             window.localStorage.setItem(TOKEN_KEY, data.token);
             router.replace("/vue-globale/vue-generale");
         } catch (err) {
-            setError(String(err?.message || "Erreur de connexion"));
+            if (err?.name === "AbortError") {
+                setError("Le serveur met trop de temps a repondre. Verifiez que l'API est accessible.");
+            } else {
+                setError(String(err?.message || "Erreur de connexion"));
+            }
         } finally {
             setIsLoading(false);
         }

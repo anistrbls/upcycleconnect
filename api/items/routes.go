@@ -17,6 +17,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	if err := repo.EnsureSchema(); err != nil {
 		log.Fatalf("Items schema error: %v", err)
 	}
+	if err := repo.EnsureLogisticsSchema(); err != nil {
+		log.Fatalf("Logistics schema error: %v", err)
+	}
 
 	// GET /api/items (public viewing of active items)
 	mux.HandleFunc("GET /api/items", func(w http.ResponseWriter, r *http.Request) {
@@ -175,11 +178,22 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			writeError(w, http.StatusInternalServerError, "could not update status")
 			return
 		}
+
+		// When an item is approved (actif), create a logistics entry
+		if p.Status == StatusActive {
+			if _, logErr := repo.CreateLogistics(r.Context(), id); logErr != nil {
+				log.Printf("Warning: could not create logistics for item %d: %v", id, logErr)
+			}
+		}
+
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 	})))
 
 	// Deposit Points Routes
 	RegisterDepositRoutes(mux, repo, authMiddleware)
+
+	// Logistics Workflow Routes
+	RegisterLogisticsRoutes(mux, repo, authMiddleware)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
