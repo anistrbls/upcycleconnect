@@ -83,6 +83,7 @@ export default function AdminLayout({ children }) {
     const adminAnnoncesSubNav = [
         { key: "mes-annonces", label: "Annonces actives", shortLabel: "Actives" },
         { key: "moderation", label: "Modération", shortLabel: "Modération" },
+        { key: "points-depot", label: "Points de dépôt", shortLabel: "Dépôts" },
     ];
     const visibleSubNav = isAdmin && activeModule.key === "annonces"
         ? adminAnnoncesSubNav

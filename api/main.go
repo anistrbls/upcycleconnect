@@ -76,6 +76,24 @@ func main() {
 	}
 	log.Println("✓ Events schema initialized")
 
+	if err := ensureItemCategoriesSchema(); err != nil {
+		log.Fatalf("Item categories schema initialization error: %v", err)
+	}
+	log.Println("✓ Item categories schema initialized")
+
+	if err := ensureItemConditionsSchema(); err != nil {
+		log.Fatalf("Item conditions schema initialization error: %v", err)
+	}
+	log.Println("✓ Item conditions schema initialized")
+
+	if err := ensureItemMaterialsSchema(); err != nil {
+		log.Fatalf("failed to init item_materials schema: %v", err)
+	}
+	if err := ensureItemCountriesSchema(); err != nil {
+		log.Fatalf("failed to init item_countries schema: %v", err)
+	}
+	log.Println("✓ Item materials schema initialized")
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", healthHandler)
@@ -98,7 +116,27 @@ func main() {
 	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(eventByIDHandler)))
 	mux.Handle("/api/admin/event-categories", authMiddleware(http.HandlerFunc(eventCategoriesHandler)))
 	mux.Handle("/api/admin/event-categories/", authMiddleware(http.HandlerFunc(eventCategoryByIDHandler)))
-	
+
+	// Item categories (catégories d'objets pour les annonces)
+	mux.HandleFunc("GET /api/item-categories", itemCategoriesPublicHandler)
+	mux.Handle("/api/admin/item-categories", authMiddleware(http.HandlerFunc(itemCategoriesAdminHandler)))
+	mux.Handle("/api/admin/item-categories/", authMiddleware(http.HandlerFunc(itemCategoryByIDAdminHandler)))
+
+	// Item conditions (états des objets pour les annonces)
+	mux.HandleFunc("GET /api/item-conditions", itemConditionsPublicHandler)
+	mux.Handle("/api/admin/item-conditions", authMiddleware(http.HandlerFunc(itemConditionsAdminHandler)))
+	mux.Handle("/api/admin/item-conditions/", authMiddleware(http.HandlerFunc(itemConditionByIDAdminHandler)))
+
+	// Item materials (matériaux des objets pour les annonces)
+	mux.HandleFunc("GET /api/item-materials", itemMaterialsPublicHandler)
+	mux.Handle("/api/admin/item-materials", authMiddleware(http.HandlerFunc(itemMaterialsAdminHandler)))
+	mux.Handle("/api/admin/item-materials/", authMiddleware(http.HandlerFunc(itemMaterialByIDAdminHandler)))
+
+	// === Item Countries ===
+	mux.HandleFunc("GET /api/item-countries", itemCountriesPublicHandler)
+	mux.Handle("/api/admin/item-countries", authMiddleware(http.HandlerFunc(itemCountriesAdminHandler)))
+	mux.Handle("/api/admin/item-countries/", authMiddleware(http.HandlerFunc(itemCountryByIDAdminHandler)))
+
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
 	users.RegisterRoutes(mux, db, authMiddleware)
 
@@ -1772,4 +1810,844 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Item Categories — catégories d'objets pour le formulaire d'annonce
+// ─────────────────────────────────────────────────────────────────────────────
+
+type itemCategoryPayload struct {
+	Label string `json:"label"`
+	Emoji string `json:"emoji"`
+}
+
+func ensureItemCategoriesSchema() error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS item_categories (
+			id         BIGSERIAL PRIMARY KEY,
+			label      TEXT NOT NULL UNIQUE,
+			emoji      TEXT NOT NULL DEFAULT '📦',
+			position   INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_item_categories_position ON item_categories(position)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM item_categories`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		type seed struct{ label, emoji string }
+		defaults := []seed{
+			{"Mobilier", "🪑"},
+			{"Décoration", "🖼️"},
+			{"Électroménager", "⚡"},
+			{"Jardinage", "🌱"},
+		}
+		for i, d := range defaults {
+			if _, err := db.Exec(
+				`INSERT INTO item_categories (label, emoji, position) VALUES ($1, $2, $3)`,
+				d.label, d.emoji, i,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func itemCategoriesPublicHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`SELECT id, label, emoji FROM item_categories ORDER BY position ASC, id ASC`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list item categories")
+		return
+	}
+	defer rows.Close()
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id int64
+		var label, emoji string
+		if err := rows.Scan(&id, &label, &emoji); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse item category")
+			return
+		}
+		result = append(result, map[string]interface{}{"id": id, "label": label, "emoji": emoji})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+}
+
+func itemCategoriesAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`SELECT id, label, emoji, position, created_at, updated_at FROM item_categories ORDER BY position ASC, id ASC`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list item categories")
+			return
+		}
+		defer rows.Close()
+		result := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id int64
+			var pos int
+			var label, emoji string
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &label, &emoji, &pos, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse item category")
+				return
+			}
+			result = append(result, map[string]interface{}{
+				"id": id, "label": label, "emoji": emoji,
+				"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+
+	case http.MethodPost:
+		var payload itemCategoryPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		emoji := strings.TrimSpace(payload.Emoji)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		if emoji == "" {
+			emoji = "📦"
+		}
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO item_categories (label, emoji, position)
+			VALUES ($1, $2, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_categories))
+			RETURNING id, created_at, updated_at
+		`, label, emoji).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "category label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not create item category")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_categories WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "label": label, "emoji": emoji,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func itemCategoryByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	id, err := parseIDFromPath(r.URL.Path, "/api/admin/item-categories/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid category id")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var payload itemCategoryPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		emoji := strings.TrimSpace(payload.Emoji)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		if emoji == "" {
+			emoji = "📦"
+		}
+		var createdAt, updatedAt time.Time
+		res := db.QueryRow(`
+			UPDATE item_categories SET label = $1, emoji = $2, updated_at = NOW()
+			WHERE id = $3 RETURNING created_at, updated_at
+		`, label, emoji, id)
+		if err := res.Scan(&createdAt, &updatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "category not found")
+				return
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "category label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update item category")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_categories WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "label": label, "emoji": emoji,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM item_categories WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete item category")
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			writeError(w, http.StatusNotFound, "category not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Item Conditions — états des objets pour le formulaire d'annonce
+// ─────────────────────────────────────────────────────────────────────────────
+
+type itemConditionPayload struct {
+	Label string `json:"label"`
+}
+
+func ensureItemConditionsSchema() error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS item_conditions (
+			id         BIGSERIAL PRIMARY KEY,
+			label      TEXT NOT NULL UNIQUE,
+			position   INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_item_conditions_position ON item_conditions(position)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM item_conditions`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		type seed struct{ label string }
+		defaults := []seed{
+			{"Neuf"},
+			{"Très bon état"},
+			{"Bon état"},
+			{"Traces d'usure"},
+			{"À restaurer"},
+		}
+		for i, d := range defaults {
+			if _, err := db.Exec(
+				`INSERT INTO item_conditions (label, position) VALUES ($1, $2)`,
+				d.label, i,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func itemConditionsPublicHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`SELECT id, label FROM item_conditions ORDER BY position ASC, id ASC`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list item conditions")
+		return
+	}
+	defer rows.Close()
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id int64
+		var label string
+		if err := rows.Scan(&id, &label); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse item condition")
+			return
+		}
+		result = append(result, map[string]interface{}{"id": id, "label": label})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+}
+
+func itemConditionsAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`SELECT id, label, position, created_at, updated_at FROM item_conditions ORDER BY position ASC, id ASC`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list item conditions")
+			return
+		}
+		defer rows.Close()
+		result := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id int64
+			var pos int
+			var label string
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &label, &pos, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse item condition")
+				return
+			}
+			result = append(result, map[string]interface{}{
+				"id": id, "label": label,
+				"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+
+	case http.MethodPost:
+		var payload itemConditionPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO item_conditions (label, position)
+			VALUES ($1, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_conditions))
+			RETURNING id, created_at, updated_at
+		`, label).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "condition label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not create item condition")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_conditions WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "label": label,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func itemConditionByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	id, err := parseIDFromPath(r.URL.Path, "/api/admin/item-conditions/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid condition id")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var payload itemConditionPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		var createdAt, updatedAt time.Time
+		res := db.QueryRow(`
+			UPDATE item_conditions SET label = $1, updated_at = NOW()
+			WHERE id = $2 RETURNING created_at, updated_at
+		`, label, id)
+		if err := res.Scan(&createdAt, &updatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "condition not found")
+				return
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "condition label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update item condition")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_conditions WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "label": label,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM item_conditions WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete item condition")
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			writeError(w, http.StatusNotFound, "condition not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Item Materials — matériaux des objets pour le formulaire d'annonce
+// ─────────────────────────────────────────────────────────────────────────────
+
+type itemMaterialPayload struct {
+	Label string `json:"label"`
+}
+
+func ensureItemMaterialsSchema() error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS item_materials (
+			id         BIGSERIAL PRIMARY KEY,
+			label      TEXT NOT NULL UNIQUE,
+			position   INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_item_materials_position ON item_materials(position)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM item_materials`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		type seed struct{ label string }
+		defaults := []seed{
+			{"Bois"},
+			{"Métal"},
+			{"Verre"},
+			{"Plastique"},
+			{"Tissu"},
+			{"Céramique"},
+			{"Pierre"},
+			{"Cuir"},
+		}
+		for i, d := range defaults {
+			if _, err := db.Exec(
+				`INSERT INTO item_materials (label, position) VALUES ($1, $2)`,
+				d.label, i,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func itemMaterialsPublicHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`SELECT id, label FROM item_materials ORDER BY position ASC, id ASC`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list item materials")
+		return
+	}
+	defer rows.Close()
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id int64
+		var label string
+		if err := rows.Scan(&id, &label); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse item material")
+			return
+		}
+		result = append(result, map[string]interface{}{"id": id, "label": label})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+}
+
+func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`SELECT id, label, position, created_at, updated_at FROM item_materials ORDER BY position ASC, id ASC`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list item materials")
+			return
+		}
+		defer rows.Close()
+		result := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id int64
+			var pos int
+			var label string
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &label, &pos, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse item material")
+				return
+			}
+			result = append(result, map[string]interface{}{
+				"id": id, "label": label,
+				"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+
+	case http.MethodPost:
+		var payload itemMaterialPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO item_materials (label, position)
+			VALUES ($1, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_materials))
+			RETURNING id, created_at, updated_at
+		`, label).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "material label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not create item material")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_materials WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "label": label,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func itemMaterialByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	id, err := parseIDFromPath(r.URL.Path, "/api/admin/item-materials/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid material id")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var payload itemMaterialPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		var createdAt, updatedAt time.Time
+		res := db.QueryRow(`
+			UPDATE item_materials SET label = $1, updated_at = NOW()
+			WHERE id = $2 RETURNING created_at, updated_at
+		`, label, id)
+		if err := res.Scan(&createdAt, &updatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "material not found")
+				return
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "material label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update item material")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_materials WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "label": label,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM item_materials WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete item material")
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			writeError(w, http.StatusNotFound, "material not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Item Countries — pays pour le formulaire d'annonce
+// ─────────────────────────────────────────────────────────────────────────────
+
+type itemCountryPayload struct {
+	Label     string `json:"label"`
+	Emoji     string `json:"emoji"`
+	ZipLength int    `json:"zip_length"`
+}
+
+func ensureItemCountriesSchema() error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS item_countries (
+			id         BIGSERIAL PRIMARY KEY,
+			label      TEXT NOT NULL UNIQUE,
+			emoji      TEXT NOT NULL DEFAULT '',
+			zip_length INT NOT NULL DEFAULT 5,
+			position   INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_item_countries_position ON item_countries(position)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM item_countries`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		type seed struct {
+			label     string
+			emoji     string
+			zipLength int
+		}
+		defaults := []seed{
+			{"France", "🇫🇷", 5},
+			{"Suisse", "🇨🇭", 4},
+			{"Belgique", "🇧🇪", 4},
+		}
+		for i, d := range defaults {
+			if _, err := db.Exec(
+				`INSERT INTO item_countries (label, emoji, zip_length, position) VALUES ($1, $2, $3, $4)`,
+				d.label, d.emoji, d.zipLength, i,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func itemCountriesPublicHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`SELECT id, label, emoji, zip_length FROM item_countries ORDER BY position ASC, id ASC`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list item countries")
+		return
+	}
+	defer rows.Close()
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id int64
+		var label, emoji string
+		var zipLength int
+		if err := rows.Scan(&id, &label, &emoji, &zipLength); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse item country")
+			return
+		}
+		result = append(result, map[string]interface{}{"id": id, "label": label, "emoji": emoji, "zip_length": zipLength})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+}
+
+func itemCountriesAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "requires admin role")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`SELECT id, label, emoji, zip_length, position, created_at, updated_at FROM item_countries ORDER BY position ASC, id ASC`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list item countries")
+			return
+		}
+		defer rows.Close()
+		result := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id int64
+			var pos, zipLength int
+			var label, emoji string
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &label, &emoji, &zipLength, &pos, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse item country")
+				return
+			}
+			result = append(result, map[string]interface{}{
+				"id": id, "label": label, "emoji": emoji, "zip_length": zipLength,
+				"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+
+	case http.MethodPost:
+		var payload itemCountryPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		emoji := strings.TrimSpace(payload.Emoji)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		if payload.ZipLength <= 0 {
+			payload.ZipLength = 5
+		}
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO item_countries (label, emoji, zip_length, position)
+			VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_countries))
+			RETURNING id, created_at, updated_at
+		`, label, emoji, payload.ZipLength).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "country label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not create item country")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_countries WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "label": label, "emoji": emoji, "zip_length": payload.ZipLength,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func itemCountryByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "requires admin role")
+		return
+	}
+	id, err := parseIDFromPath(r.URL.Path, "/api/admin/item-countries/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid ID")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var payload itemCountryPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		label := strings.TrimSpace(payload.Label)
+		emoji := strings.TrimSpace(payload.Emoji)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+		if payload.ZipLength <= 0 {
+			payload.ZipLength = 5
+		}
+		var createdAt, updatedAt time.Time
+		res := db.QueryRow(`
+			UPDATE item_countries SET label = $1, emoji = $2, zip_length = $3, updated_at = NOW()
+			WHERE id = $4 RETURNING created_at, updated_at
+		`, label, emoji, payload.ZipLength, id)
+		if err := res.Scan(&createdAt, &updatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "country not found")
+				return
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "country label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update item country")
+			return
+		}
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM item_countries WHERE id = $1`, id).Scan(&pos)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "label": label, "emoji": emoji, "zip_length": payload.ZipLength,
+			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM item_countries WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete country")
+			return
+		}
+		rowsAff, _ := result.RowsAffected()
+		if rowsAff == 0 {
+			writeError(w, http.StatusNotFound, "country not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }

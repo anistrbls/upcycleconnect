@@ -1,0 +1,544 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { Tag, Plus, Pencil, Trash2, Check, X, GripVertical, Package, Shield, Layers, Loader2, MapPin } from "lucide-react";
+import AdminModal from "../../../components/admin/AdminModal";
+import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+
+// Les entités n'utilisent plus de slug. Le label fait foi.
+
+// ── Row catégorie (avec emoji) ────────────────────────────────────────────────
+function CategoryRow({ cat, onSave, onDelete }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState({ label: cat.label, emoji: cat.emoji });
+    const [saving, setSaving] = useState(false);
+
+    const commit = async () => {
+        if (!draft.label.trim()) return;
+        setSaving(true);
+        await onSave({ ...cat, label: draft.label.trim(), emoji: draft.emoji.trim() || "📦" });
+        setSaving(false);
+        setEditing(false);
+    };
+    const cancel = () => { setDraft({ label: cat.label, emoji: cat.emoji }); setEditing(false); };
+
+    return (
+        <div style={rowStyle}>
+            <span style={gripStyle}><GripVertical size={16} /></span>
+            {editing ? (
+                <>
+                    <input value={draft.emoji} onChange={e => setDraft(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={emojiInput} />
+                    <input autoFocus value={draft.label} onChange={e => setDraft(d => ({ ...d, label: e.target.value }))}
+                        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
+                        style={{ ...textInput, flex: 1 }} />
+                    <button onClick={commit} disabled={saving} style={{ ...iconBtn, background: "var(--forest-deep)", color: "white" }}>
+                        {saving ? <Loader2 size={14} style={spinStyle} /> : <Check size={14} />}
+                    </button>
+                    <button onClick={cancel} style={iconBtn}><X size={14} /></button>
+                </>
+            ) : (
+                <>
+                    <span style={{ fontSize: "1.3rem", flexShrink: 0 }}>{cat.emoji}</span>
+                    <span style={{ flex: 1, fontSize: "0.92rem", fontWeight: "500" }}>{cat.label}</span>
+                    <button onClick={() => setEditing(true)} style={iconBtn}><Pencil size={14} /></button>
+                    <button onClick={() => onDelete(cat.id)} style={{ ...iconBtn, color: "var(--state-critical)" }}><Trash2 size={14} /></button>
+                </>
+            )}
+        </div>
+    );
+}
+
+// ── Row pays ──────────────────────────────────────────────────────────────────
+function CountryRow({ item, onSave, onDelete }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState({ label: item.label, emoji: item.emoji, zip_length: item.zip_length || 5 });
+    const [saving, setSaving] = useState(false);
+
+    const commit = async () => {
+        if (!draft.label.trim()) return;
+        setSaving(true);
+        await onSave({ ...item, label: draft.label.trim(), emoji: draft.emoji.trim() || "🌍", zip_length: parseInt(draft.zip_length, 10) || 5 });
+        setSaving(false);
+        setEditing(false);
+    };
+    const cancel = () => { setDraft({ label: item.label, emoji: item.emoji, zip_length: item.zip_length || 5 }); setEditing(false); };
+
+    return (
+        <div style={rowStyle}>
+            <span style={gripStyle}><GripVertical size={16} /></span>
+            {editing ? (
+                <>
+                    <input value={draft.emoji} onChange={e => setDraft(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={emojiInput} />
+                    <input autoFocus value={draft.label} onChange={e => setDraft(d => ({ ...d, label: e.target.value }))}
+                        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
+                        style={{ ...textInput, flex: 1 }} />
+                    <input type="number" value={draft.zip_length} min={1} max={15} onChange={e => setDraft(d => ({ ...d, zip_length: e.target.value }))}
+                        style={{ ...textInput, width: "70px", textAlign: "center" }} />
+                    <button onClick={commit} disabled={saving} style={{ ...iconBtn, background: "var(--forest-deep)", color: "white" }}>
+                        {saving ? <Loader2 size={14} style={spinStyle} /> : <Check size={14} />}
+                    </button>
+                    <button onClick={cancel} style={iconBtn}><X size={14} /></button>
+                </>
+            ) : (
+                <>
+                    <span style={{ fontSize: "1.3rem", flexShrink: 0 }}>{item.emoji}</span>
+                    <span style={{ flex: 1, fontSize: "0.92rem", fontWeight: "500" }}>{item.label}</span>
+                    <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", background: "rgba(35,59,61,0.06)", padding: "2px 8px", borderRadius: "12px" }}>
+                        {item.zip_length} chiffres
+                    </span>
+                    <button onClick={() => setEditing(true)} style={iconBtn}><Pencil size={14} /></button>
+                    <button onClick={() => onDelete(item.id)} style={{ ...iconBtn, color: "var(--state-critical)" }}><Trash2 size={14} /></button>
+                </>
+            )}
+        </div>
+    );
+}
+
+// ── Row état (sans emoji) ─────────────────────────────────────────────────────
+function ConditionRow({ cond, onSave, onDelete }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState({ label: cond.label });
+    const [saving, setSaving] = useState(false);
+
+    const commit = async () => {
+        if (!draft.label.trim()) return;
+        setSaving(true);
+        await onSave({ ...cond, label: draft.label.trim() });
+        setSaving(false);
+        setEditing(false);
+    };
+    const cancel = () => { setDraft({ label: cond.label }); setEditing(false); };
+
+    return (
+        <div style={rowStyle}>
+            <span style={gripStyle}><GripVertical size={16} /></span>
+            {editing ? (
+                <>
+                    <input autoFocus value={draft.label} onChange={e => setDraft(d => ({ ...d, label: e.target.value }))}
+                        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
+                        style={{ ...textInput, flex: 1 }} />
+                    <button onClick={commit} disabled={saving} style={{ ...iconBtn, background: "var(--forest-deep)", color: "white" }}>
+                        {saving ? <Loader2 size={14} style={spinStyle} /> : <Check size={14} />}
+                    </button>
+                    <button onClick={cancel} style={iconBtn}><X size={14} /></button>
+                </>
+            ) : (
+                <>
+                    <span style={{ flex: 1, fontSize: "0.92rem", fontWeight: "500" }}>{cond.label}</span>
+                    <button onClick={() => setEditing(true)} style={iconBtn}><Pencil size={14} /></button>
+                    <button onClick={() => onDelete(cond.id)} style={{ ...iconBtn, color: "var(--state-critical)" }}><Trash2 size={14} /></button>
+                </>
+            )}
+        </div>
+    );
+}
+
+// ── Styles partagés ───────────────────────────────────────────────────────────
+const rowStyle = { display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", background: "#FFFFFF", borderRadius: "16px", transition: "box-shadow 0.15s ease" };
+const gripStyle = { color: "var(--text-muted)", opacity: 0.35, cursor: "grab", flexShrink: 0 };
+const iconBtn = { border: "none", background: "var(--surface-hover)", borderRadius: "10px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-main)", flexShrink: 0, transition: "background 0.15s ease" };
+const emojiInput = { width: "44px", padding: "0.4rem", borderRadius: "10px", border: "1px solid var(--border)", fontSize: "1.2rem", textAlign: "center", outline: "none", background: "var(--surface-hover)" };
+const textInput = { padding: "0.4rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)", fontSize: "0.9rem", outline: "none", fontFamily: "inherit" };
+const spinStyle = { animation: "spin 1s linear infinite" };
+
+// ── Section réutilisable ──────────────────────────────────────────────────────
+function ConfigSection({ icon: Icon, title, description, count, loading, children, onAdd, addLabel = "Nouvel élément" }) {
+    return (
+        <section style={{ marginBottom: "2rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.4rem" }}>
+                <Icon size={18} strokeWidth={2} style={{ color: "var(--forest-deep)" }} />
+                <h2 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-main)" }}>{title}</h2>
+            </div>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1.25rem", paddingLeft: "1.65rem" }}>{description}</p>
+
+            <div style={{ background: "var(--surface-hover)", borderRadius: "24px", padding: "1.5rem" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+                    <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                        {loading ? "Chargement..." : <><strong style={{ color: "var(--text-main)" }}>{count}</strong> élément{count > 1 ? "s" : ""}</>}
+                    </span>
+                    <button onClick={onAdd} style={{ border: "none", background: "var(--black)", color: "white", borderRadius: "12px", padding: "0.5rem 1rem", fontSize: "0.8rem", cursor: "pointer", fontFamily: "inherit", fontWeight: "500", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                        <Plus size={14} />{addLabel}
+                    </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    {loading ? (
+                        <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)" }}><Loader2 size={20} style={spinStyle} /></div>
+                    ) : count === 0 ? (
+                        <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.9rem" }}>Aucun élément. Ajoutez-en un ci-dessus.</div>
+                    ) : children}
+                </div>
+
+                <div style={{ marginTop: "1.25rem", padding: "0.75rem 1rem", background: "rgba(62,104,108,0.08)", borderRadius: "12px", fontSize: "0.78rem", color: "var(--forest-deep)", display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
+                    <Tag size={13} style={{ marginTop: "1px", flexShrink: 0 }} />
+                    <span>Ces valeurs s'affichent dans le formulaire de dépôt d'annonce en temps réel depuis la base de données.</span>
+                </div>
+            </div>
+        </section>
+    );
+}
+
+// ── Page principale ───────────────────────────────────────────────────────────
+export default function ConfigurationPage() {
+    // Catégories
+    const [categories, setCategories] = useState([]);
+    const [catLoading, setCatLoading] = useState(true);
+    const [addCatModal, setAddCatModal] = useState(false);
+    const [newCat, setNewCat] = useState({ label: "", emoji: "📦" });
+    const [addingCat, setAddingCat] = useState(false);
+
+    // États / conditions
+    const [conditions, setConditions] = useState([]);
+    const [condLoading, setCondLoading] = useState(true);
+    const [addCondModal, setAddCondModal] = useState(false);
+    const [newCond, setNewCond] = useState({ label: "" });
+    const [addingCond, setAddingCond] = useState(false);
+
+    // Matériaux
+    const [materials, setMaterials] = useState([]);
+    const [matLoading, setMatLoading] = useState(true);
+    const [addMatModal, setAddMatModal] = useState(false);
+    const [newMat, setNewMat] = useState({ label: "" });
+    const [addingMat, setAddingMat] = useState(false);
+
+    // Pays
+    const [countries, setCountries] = useState([]);
+    const [countryLoading, setCountryLoading] = useState(true);
+    const [addCountryModal, setAddCountryModal] = useState(false);
+    const [newCountry, setNewCountry] = useState({ label: "", emoji: "🌍", zip_length: 5 });
+    const [addingCountry, setAddingCountry] = useState(false);
+
+    const [toast, setToast] = useState(null);
+
+    const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
+
+    // ── Fetch catégories
+    const fetchCategories = useCallback(async () => {
+        setCatLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-categories"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setCategories(data.items || []);
+        } catch { showToast("Impossible de charger les catégories.", "error"); }
+        finally { setCatLoading(false); }
+    }, []);
+
+    // ── Fetch états
+    const fetchConditions = useCallback(async () => {
+        setCondLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-conditions"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setConditions(data.items || []);
+        } catch { showToast("Impossible de charger les états.", "error"); }
+        finally { setCondLoading(false); }
+    }, []);
+
+    // ── Fetch matériaux
+    const fetchMaterials = useCallback(async () => {
+        setMatLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-materials"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setMaterials(data.items || []);
+        } catch { showToast("Impossible de charger les matériaux.", "error"); }
+        finally { setMatLoading(false); }
+    }, []);
+
+    // ── Fetch pays
+    const fetchCountries = useCallback(async () => {
+        setCountryLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-countries"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setCountries(data.items || []);
+        } catch { showToast("Impossible de charger les pays.", "error"); }
+        finally { setCountryLoading(false); }
+    }, []);
+
+    useEffect(() => { fetchCategories(); fetchConditions(); fetchMaterials(); fetchCountries(); }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries]);
+
+    // ── CRUD catégories
+    const handleSaveCat = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-categories/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label, emoji: updated.emoji }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setCategories(prev => prev.map(c => c.id === saved.id ? saved : c));
+            showToast("Catégorie mise à jour.");
+        } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
+    };
+    const handleDeleteCat = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-categories/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            setCategories(prev => prev.filter(c => c.id !== id));
+            showToast("Catégorie supprimée.");
+        } catch { showToast("Impossible de supprimer.", "error"); }
+    };
+    const handleAddCat = async () => {
+        if (!newCat.label.trim()) return;
+        setAddingCat(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-categories"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newCat.label.trim(), emoji: newCat.emoji.trim() || "📦" }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setCategories(prev => [...prev, created]);
+            setNewCat({ label: "", emoji: "📦" });
+            setAddCatModal(false);
+            showToast("Catégorie ajoutée.");
+        } catch (e) { showToast(e.message === "category label already exists" ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
+        finally { setAddingCat(false); }
+    };
+
+    // ── CRUD états
+    const handleSaveCond = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-conditions/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setConditions(prev => prev.map(c => c.id === saved.id ? saved : c));
+            showToast("État mis à jour.");
+        } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
+    };
+    const handleDeleteCond = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-conditions/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            setConditions(prev => prev.filter(c => c.id !== id));
+            showToast("État supprimé.");
+        } catch { showToast("Impossible de supprimer.", "error"); }
+    };
+    const handleAddCond = async () => {
+        if (!newCond.label.trim()) return;
+        setAddingCond(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-conditions"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newCond.label.trim() }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setConditions(prev => [...prev, created]);
+            setNewCond({ label: "" });
+            setAddCondModal(false);
+            showToast("État ajouté.");
+        } catch (e) { showToast(e.message === "condition label already exists" ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
+        finally { setAddingCond(false); }
+    };
+
+    // ── CRUD matériaux
+    const handleSaveMat = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-materials/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setMaterials(prev => prev.map(m => m.id === saved.id ? saved : m));
+            showToast("Matériau mis à jour.");
+        } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
+    };
+    const handleDeleteMat = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-materials/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            setMaterials(prev => prev.filter(m => m.id !== id));
+            showToast("Matériau supprimé.");
+        } catch { showToast("Impossible de supprimer.", "error"); }
+    };
+    const handleAddMat = async () => {
+        if (!newMat.label.trim()) return;
+        setAddingMat(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-materials"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newMat.label.trim() }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setMaterials(prev => [...prev, created]);
+            setNewMat({ label: "" });
+            setAddMatModal(false);
+            showToast("Matériau ajouté.");
+        } catch (e) { showToast(e.message === "material label already exists" ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
+        finally { setAddingMat(false); }
+    };
+
+    // ── CRUD pays
+    const handleSaveCountry = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-countries/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label, emoji: updated.emoji, zip_length: updated.zip_length }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setCountries(prev => prev.map(c => c.id === saved.id ? saved : c));
+            showToast("Pays mis à jour.");
+        } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
+    };
+    const handleDeleteCountry = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/item-countries/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            setCountries(prev => prev.filter(c => c.id !== id));
+            showToast("Pays supprimé.");
+        } catch { showToast("Impossible de supprimer.", "error"); }
+    };
+    const handleAddCountry = async () => {
+        if (!newCountry.label.trim()) return;
+        setAddingCountry(true);
+        try {
+            const res = await fetch(apiUrl("/admin/item-countries"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newCountry.label.trim(), emoji: newCountry.emoji.trim() || "🌍", zip_length: parseInt(newCountry.zip_length, 10) }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setCountries(prev => [...prev, created]);
+            setNewCountry({ label: "", emoji: "🌍", zip_length: 5 });
+            setAddCountryModal(false);
+            showToast("Pays ajouté.");
+        } catch (e) { showToast(e.message && e.message.includes("already exists") ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
+        finally { setAddingCountry(false); }
+    };
+
+    return (
+        <div style={{ width: "100%", padding: "1rem 2rem 3rem 0", animation: "fadeIn 0.4s ease-out", maxWidth: "860px" }}>
+
+            <header style={{ marginBottom: "2.5rem" }}>
+                <p className="activities-label">Paramètres</p>
+                <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.5rem 0 0.5rem", letterSpacing: "-0.02em" }}>Configuration</h1>
+                <p style={{ color: "var(--text-muted)", fontSize: "1rem" }}>Gérez les réglages globaux de la plateforme UpcycleConnect.</p>
+            </header>
+
+            {/* ── Catégories d'objets ── */}
+            <ConfigSection
+                icon={Package} title="Catégories d'objets" addLabel="Nouvelle catégorie"
+                description="Définissez les catégories d'objets disponibles dans le formulaire de dépôt d'annonce."
+                count={categories.length} loading={catLoading} onAdd={() => setAddCatModal(true)}
+            >
+                {categories.map(cat => <CategoryRow key={cat.id} cat={cat} onSave={handleSaveCat} onDelete={handleDeleteCat} />)}
+            </ConfigSection>
+
+            {/* ── États des objets ── */}
+            <ConfigSection
+                icon={Shield} title="États des objets" addLabel="Nouvel état"
+                description="Définissez les états disponibles pour décrire la condition d'un objet dans une annonce."
+                count={conditions.length} loading={condLoading} onAdd={() => setAddCondModal(true)}
+            >
+                {conditions.map(cond => <ConditionRow key={cond.id} cond={cond} onSave={handleSaveCond} onDelete={handleDeleteCond} />)}
+            </ConfigSection>
+
+            {/* ── Matériaux des objets ── */}
+            <ConfigSection
+                icon={Layers} title="Matériaux des objets" addLabel="Nouveau matériau"
+                description="Définissez les matériaux disponibles pour décrire la composition d'un objet dans une annonce."
+                count={materials.length} loading={matLoading} onAdd={() => setAddMatModal(true)}
+            >
+                {materials.map(mat => <ConditionRow key={mat.id} cond={mat} onSave={handleSaveMat} onDelete={handleDeleteMat} />)}
+            </ConfigSection>
+
+            {/* ── Pays supportés ── */}
+            <ConfigSection
+                icon={MapPin} title="Pays supportés" addLabel="Nouveau pays"
+                description="Définissez les pays disponibles dans le formulaire de dépôt avec leur longueur de code postal."
+                count={countries.length} loading={countryLoading} onAdd={() => setAddCountryModal(true)}
+            >
+                {countries.map(country => <CountryRow key={country.id} item={country} onSave={handleSaveCountry} onDelete={handleDeleteCountry} />)}
+            </ConfigSection>
+
+            {/* ── Modal ajout catégorie ── */}
+            <AdminModal open={addCatModal} title="Nouvelle catégorie" onClose={() => { setAddCatModal(false); setNewCat({ label: "", emoji: "📦" }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", gap: "0.75rem" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Emoji</label>
+                            <input value={newCat.emoji} onChange={e => setNewCat(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={{ width: "56px", padding: "0.6rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "1.4rem", textAlign: "center", outline: "none", background: "var(--surface-hover)", fontFamily: "inherit" }} />
+                        </div>
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom *</label>
+                            <input autoFocus placeholder="Ex : Textile, Livres..." value={newCat.label} onChange={e => setNewCat(d => ({ ...d, label: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") handleAddCat(); }}
+                                style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddCatModal(false); setNewCat({ label: "", emoji: "📦" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddCat} disabled={!newCat.label.trim() || addingCat}
+                            style={{ border: "none", background: newCat.label.trim() ? "var(--black)" : "var(--border)", color: newCat.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newCat.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingCat ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Modal ajout état ── */}
+            <AdminModal open={addCondModal} title="Nouvel état" onClose={() => { setAddCondModal(false); setNewCond({ label: "" }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Libellé *</label>
+                        <input autoFocus placeholder="Ex : Reconditionné, Endommagé..." value={newCond.label} onChange={e => setNewCond({ label: e.target.value })} onKeyDown={e => { if (e.key === "Enter") handleAddCond(); }}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddCondModal(false); setNewCond({ label: "" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddCond} disabled={!newCond.label.trim() || addingCond}
+                            style={{ border: "none", background: newCond.label.trim() ? "var(--black)" : "var(--border)", color: newCond.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newCond.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingCond ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Modal ajout matériau ── */}
+            <AdminModal open={addMatModal} title="Nouveau matériau" onClose={() => { setAddMatModal(false); setNewMat({ label: "" }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Libellé *</label>
+                        <input autoFocus placeholder="Ex : Bambou, Aluminium..." value={newMat.label} onChange={e => setNewMat({ label: e.target.value })} onKeyDown={e => { if (e.key === "Enter") handleAddMat(); }}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddMatModal(false); setNewMat({ label: "" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddMat} disabled={!newMat.label.trim() || addingMat}
+                            style={{ border: "none", background: newMat.label.trim() ? "var(--black)" : "var(--border)", color: newMat.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newMat.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingMat ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Modal ajout pays ── */}
+            <AdminModal open={addCountryModal} title="Nouveau pays" onClose={() => { setAddCountryModal(false); setNewCountry({ label: "", emoji: "🌍", zip_length: 5 }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", gap: "0.75rem" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Emoji</label>
+                            <input value={newCountry.emoji} onChange={e => setNewCountry(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={{ width: "56px", padding: "0.6rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "1.4rem", textAlign: "center", outline: "none", background: "var(--surface-hover)", fontFamily: "inherit" }} />
+                        </div>
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom *</label>
+                            <input autoFocus placeholder="Ex : France, Suisse..." value={newCountry.label} onChange={e => setNewCountry(d => ({ ...d, label: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") handleAddCountry(); }}
+                                style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Longueur code postal *</label>
+                        <input type="number" value={newCountry.zip_length} onChange={e => setNewCountry(d => ({ ...d, zip_length: e.target.value }))} min={1} max={15}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)", width: "100%" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddCountryModal(false); setNewCountry({ label: "", emoji: "🌍", zip_length: 5 }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddCountry} disabled={!newCountry.label.trim() || addingCountry}
+                            style={{ border: "none", background: newCountry.label.trim() ? "var(--black)" : "var(--border)", color: newCountry.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newCountry.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingCountry ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Toast ── */}
+            {toast && (
+                <div style={{ position: "fixed", bottom: "2rem", right: "2rem", background: toast.type === "error" ? "var(--state-critical)" : "var(--black)", color: "white", padding: "0.75rem 1.25rem", borderRadius: "14px", fontSize: "0.85rem", fontWeight: "500", zIndex: 9999, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", display: "flex", alignItems: "center", gap: "0.5rem", animation: "fadeIn 0.25s ease-out" }}>
+                    {toast.type !== "error" && <Check size={14} />}{toast.msg}
+                </div>
+            )}
+
+            <style>{`
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            `}</style>
+        </div>
+    );
+}

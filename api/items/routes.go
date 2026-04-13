@@ -63,10 +63,50 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 
 		item, err := repo.Create(userID, payload)
 		if err != nil {
+			log.Printf("Error creating item: %v", err)
 			writeError(w, http.StatusInternalServerError, "could not create item")
 			return
 		}
 		writeJSON(w, http.StatusCreated, item)
+	})))
+
+	// PUT /api/admin/items/{id} (update item)
+	mux.Handle("PUT /api/admin/items/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		email := claims["sub"].(string)
+
+		var userID int64
+		err := db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+
+		path := r.URL.Path
+		idStr := strings.TrimPrefix(path, "/api/admin/items/")
+		itemID, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+
+		var payload CreatePayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+
+		item, err := repo.Update(userID, itemID, payload)
+		if err != nil {
+			log.Printf("Error updating item: %v", err)
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "item not found or unauthorized")
+			} else {
+				writeError(w, http.StatusInternalServerError, "could not update item")
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
 	})))
 
 	// GET /api/my-items (user's ads)
@@ -137,6 +177,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 	})))
+
+	// Deposit Points Routes
+	RegisterDepositRoutes(mux, repo, authMiddleware)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

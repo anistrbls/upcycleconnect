@@ -14,7 +14,7 @@ services:
   # Service frontend : l'interface Next.js
   frontend:
     build:
-      context: ./frontend-admin
+      context: ./frontend
       dockerfile: Dockerfile
       # On utilise le stage "development" du Dockerfile multi-étapes
       target: development
@@ -24,8 +24,8 @@ services:
     volumes:
       # On monte le code source local dans le conteneur
       # Comme ça quand on modifie un fichier, Next.js le détecte et recharge automatiquement
-      - ./frontend-admin/src:/app/src
-      - ./frontend-admin/public:/app/public
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
     environment:
       - NODE_ENV=development
       - NEXT_TELEMETRY_DISABLED=1

@@ -24,6 +24,7 @@ type Item struct {
 	Material     string    `json:"material"`
 	Quantity     string    `json:"quantity"`
 	City         string    `json:"city"`
+	Country      string    `json:"country"`
 	Zip          string    `json:"zip"`
 	DeliveryMode string    `json:"deliveryMode"`
 	Dimensions   string    `json:"dimensions"`
@@ -35,8 +36,10 @@ type Item struct {
 	Saves        int       `json:"saves"`
 	Interested   int       `json:"interested"`
 	UserID       int64     `json:"userId"`
-	UserName     string    `json:"userName,omitempty"`
-	Date         string    `json:"date"` // Formatted date for frontend
+	ContainerID  *int64    `json:"containerId,omitempty"`
+	UserName             string    `json:"userName,omitempty"`
+	UserRegistrationDate string    `json:"userRegistrationDate,omitempty"`
+	Date                 string    `json:"date"` // Formatted date for frontend
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
@@ -51,6 +54,7 @@ type CreatePayload struct {
 	Material     string   `json:"material"`
 	Quantity     string   `json:"quantity"`
 	City         string   `json:"city"`
+	Country      string   `json:"country"`
 	Zip          string   `json:"zip"`
 	DeliveryMode string   `json:"deliveryMode"`
 	Dimensions   string   `json:"dimensions"`

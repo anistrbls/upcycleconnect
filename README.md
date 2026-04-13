@@ -3,7 +3,7 @@
 Projet annuel conteneurisé avec Docker Compose.
 
 L'application tourne avec :
-- un frontend admin en Next.js
+- un frontend en Next.js
 - une API en Go
 - une base PostgreSQL
 
@@ -13,7 +13,7 @@ On a aussi ajouté des outils de monitoring/gestion en bonus (Portainer, Prometh
 
 | Service | Technologie | Port |
 
-| Frontend Admin | Next.js 15 / React 19 | `3000` |
+| Frontend | Next.js 15 / React 19 | `3000` |
 | API Backend | Go 1.22 | `8080` |
 | Base de données | PostgreSQL 16 | `5432` |
 | Portainer (bonus) | Portainer CE | `9000` / `9443` |
@@ -105,13 +105,21 @@ git tag v1.0.0 && git push origin v1.0.0
 Format des images :
 
 - `ghcr.io/<owner>/upcycle-api:<tag>`
-- `ghcr.io/<owner>/upcycle-frontend-admin:<tag>`
+- `ghcr.io/<owner>/upcycle-frontend:<tag>`
 
 Variables à renseigner dans `.env` pour la prod :
 
 - `IMAGE_REGISTRY=ghcr.io`
 - `IMAGE_NAMESPACE=<owner>`
 - `IMAGE_TAG=latest` (ou un tag de version)
+
+Si GHCR est indisponible, vous pouvez lancer la prod en build local (sans pull registre) :
+
+```bash
+PROD_IMAGE_PULL_POLICY=never docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Cette commande reconstruit localement `api` et `frontend` puis démarre les services.
 
 ## Variables d'environnement
 
@@ -131,7 +139,7 @@ Variables à renseigner dans `.env` pour la prod :
 upcycleconnect/
 ├── api/
 ├── db/
-├── frontend-admin/
+├── frontend/
 ├── monitoring/
 ├── docker-compose.dev.yml
 ├── docker-compose.prod.yml
@@ -146,3 +154,10 @@ upcycleconnect/
 - mode dev simple à utiliser
 - mode prod plus propre et plus sécurisé
 - monitoring ajouté pour la soutenance (bonus)
+
+
+## Lien Figma (diagramme + docu)
+
+https://www.figma.com/design/E64NqWVn4Pt3rfup36McnL/UpcycleConnect?node-id=165-30&t=newDIsXK2TqrPIT6-1
+
+| Page "Docker" |

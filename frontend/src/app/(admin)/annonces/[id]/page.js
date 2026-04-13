@@ -27,7 +27,7 @@ const STATUS_COLORS = {
     vendu:        { bg: "rgba(35,59,61,0.12)",   color: "var(--text-main)" },
     "en attente": { bg: "rgba(62,104,108,0.12)", color: "var(--forest-deep)" },
     brouillon:    { bg: "rgba(35,59,61,0.08)",   color: "var(--text-main)" },
-    refusee:      { bg: "rgba(179,72,72,0.14)",  color: "#8a2e2e" },
+    refusee:      { bg: "var(--state-critical-bg)",  color: "var(--state-critical)" },
     desactivee:   { bg: "rgba(35,59,61,0.16)",   color: "var(--text-main)" },
 };
 
@@ -183,11 +183,11 @@ const arrowBtn = (side) => ({
 });
 
 const actionBtn = (tone = "neutral") => ({
-    "--btn-bg": tone === "primary" ? "var(--forest-deep)" : tone === "danger" ? "rgb(229, 255, 188)" : "transparent",
-    "--btn-hover-bg": tone === "primary" ? "#33575a" : tone === "danger" ? "rgb(214, 240, 170)" : "rgba(35,59,61,0.06)",
+    "--btn-bg": tone === "primary" ? "var(--forest-deep)" : tone === "danger" ? "var(--state-critical-bg)" : "transparent",
+    "--btn-hover-bg": tone === "primary" ? "#33575a" : tone === "danger" ? "#FFD6C9" : "rgba(35,59,61,0.06)",
     "--btn-border": tone === "neutral" ? "1px solid rgba(35,59,61,0.12)" : "none",
     "--btn-hover-border": tone === "neutral" ? "1px solid rgba(35,59,61,0.18)" : "none",
-    "--btn-color": tone === "primary" ? "white" : tone === "danger" ? "var(--black)" : "var(--text-main)",
+    "--btn-color": tone === "primary" ? "white" : tone === "danger" ? "var(--state-critical)" : "var(--text-main)",
     padding: "0.82rem 1rem",
     borderRadius: "999px",
     fontFamily: "inherit",
@@ -221,6 +221,9 @@ function AnnonceDetailContent() {
         country: "",
         avatar: "",
     });
+
+    // Les données de catégories, états, et matériaux ne sont plus requises 
+    // pour le mapping d'affichage puisque les "labels" font maintenant foi en BDD.
 
     useEffect(() => {
         let isMounted = true;
@@ -288,7 +291,13 @@ function AnnonceDetailContent() {
             name,
             rating: Number(annonce?.seller?.rating || annonce?.authorRating || 0),
             annoncesCount,
-            registeredAt: String(annonce?.seller?.since || annonce?.authorSince || annonce?.registeredAt || ""),
+            registeredAt: String(
+                annonce?.userRegistrationDate || 
+                annonce?.seller?.since || 
+                annonce?.authorSince || 
+                annonce?.registeredAt || 
+                ""
+            ),
             city: String(
                 annonce?.seller?.city ||
                 annonce?.authorCity ||
@@ -429,7 +438,13 @@ function AnnonceDetailContent() {
     const registrationDisplay = (() => {
         const raw = String(authorProfile.registeredAt || "").trim();
         if (!raw) return "N/A";
+        
+        // Si c'est déjà au format JJ/MM/AAAA, on le garde tel quel
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
+        
+        // Si c'est juste une année (ex: "2024")
         if (/^\d{4}$/.test(raw)) return raw;
+
         const parsed = new Date(raw);
         if (!Number.isNaN(parsed.getTime())) {
             return parsed.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -464,27 +479,34 @@ function AnnonceDetailContent() {
                         <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontSize: "0.78rem", color: "var(--text-muted)" }}>
                             <Eye size={12} /> {annonce.views || 0} vues
                         </span>
-                        <button onClick={copyShareLink} style={actionBtn("neutral")}>
-                            <Share2 size={15} /> Copier le lien
+                        <button onClick={copyShareLink} style={{
+                            display: "inline-flex", alignItems: "center", gap: "0.4rem",
+                            background: "var(--surface-hover)", border: "none",
+                            color: "var(--text-main)", fontSize: "0.78rem", fontWeight: "600",
+                            padding: "6px 12px", borderRadius: "999px", cursor: "pointer",
+                            transition: "background 0.2s"
+                        }}>
+                            <Share2 size={13} /> Copier le lien
                         </button>
                     </div>
                 </div>
 
                 <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(360px, 0.8fr)", gap: "1.5rem", alignItems: "stretch" }}>
-                    <div style={{ background: "var(--black)", borderRadius: "28px", padding: "1rem", border: "1px solid rgba(35,59,61,0.06)" }}>
+                    <div style={{ background: "var(--black)", borderRadius: "28px", padding: "1rem", border: "1px solid rgba(18, 25, 26, 0.08)" }}>
                         <div style={{ borderRadius: "22px", overflow: "hidden", background: "#12191A", position: "relative" }}>
-                            <div style={{ position: "relative", width: "100%", paddingBottom: "72%", overflow: "hidden" }}>
+                            <div style={{ position: "relative", width: "100%", aspectRatio: "4/3", overflow: "hidden" }}>
                                 <img
                                     src={photos[activePhoto]}
                                     alt={annonce.title}
-                                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
                                 />
 
                                 <div style={{
                                     position: "absolute",
                                     inset: 0,
-                                    background: "linear-gradient(to top, rgba(10,15,15,0.58) 0%, rgba(10,15,15,0.08) 24%, rgba(10,15,15,0) 42%)",
+                                    background: "linear-gradient(to top, rgba(10, 15, 15, 0.7) 0%, rgba(10, 15, 15, 0.2) 20%, rgba(10, 15, 15, 0) 40%)",
                                     pointerEvents: "none",
+                                    zIndex: 2,
                                 }} />
 
                                 {photos.length > 1 && (
@@ -492,85 +514,48 @@ function AnnonceDetailContent() {
                                         <button onClick={prev} style={arrowBtn("left")}><ChevronLeft size={20} /></button>
                                         <button onClick={next} style={arrowBtn("right")}><ChevronRight size={20} /></button>
 
-                                        {!isAdmin && (
-                                            <div style={{
-                                                position: "absolute",
-                                                left: "0.8rem",
-                                                right: "0.8rem",
-                                                bottom: "0.8rem",
-                                                display: "grid",
-                                                gridTemplateColumns: `repeat(${Math.min(photos.length, 5)}, minmax(0, 84px))`,
-                                                justifyContent: "start",
-                                                gap: "0.5rem",
-                                                zIndex: 3,
-                                            }}>
-                                                {photos.slice(0, 5).map((p, i) => (
-                                                    <button
-                                                        key={i}
-                                                        onClick={() => setActivePhoto(i)}
-                                                        style={{
-                                                            border: "1px solid rgba(255,255,255,0.16)",
-                                                            padding: 0,
-                                                            borderRadius: "14px",
-                                                            overflow: "hidden",
-                                                            cursor: "pointer",
-                                                            background: "rgba(255,255,255,0.08)",
-                                                            backdropFilter: "blur(8px)",
-                                                            outline: i === activePhoto ? "2px solid white" : "2px solid transparent",
-                                                            opacity: i === activePhoto ? 1 : 0.72,
-                                                            transition: "all 0.2s ease",
-                                                        }}
-                                                    >
-                                                        <img src={p} alt="" style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", display: "block" }} />
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
+                                        <div style={{
+                                            position: "absolute",
+                                            left: 0,
+                                            right: 0,
+                                            bottom: 0,
+                                            padding: "1.2rem",
+                                            display: "flex",
+                                            overflowX: "auto",
+                                            gap: "0.6rem",
+                                            zIndex: 5,
+                                            scrollbarWidth: "none",
+                                            WebkitOverflowScrolling: "touch",
+                                        }}>
+                                            {photos.map((p, i) => (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => setActivePhoto(i)}
+                                                    style={{
+                                                        border: i === activePhoto ? "2px solid white" : "1px solid rgba(255,255,255,0.16)",
+                                                        padding: 0,
+                                                        borderRadius: "14px",
+                                                        overflow: "hidden",
+                                                        cursor: "pointer",
+                                                        background: "rgba(255,255,255,0.08)",
+                                                        backdropFilter: "blur(8px)",
+                                                        minWidth: "64px",
+                                                        width: "64px",
+                                                        height: "64px",
+                                                        flexShrink: 0,
+                                                        opacity: i === activePhoto ? 1 : 0.65,
+                                                        transition: "all 0.2s ease",
+                                                        position: "relative"
+                                                    }}
+                                                >
+                                                    <img src={p} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                                </button>
+                                            ))}
+                                        </div>
                                     </>
                                 )}
                             </div>
                         </div>
-
-                        {/* Images supplementaires pour les admins, affichees en dessous du viewport principal */}
-                        {isAdmin && photos.length > 0 && (
-                            <div style={{ 
-                                display: "flex", 
-                                gap: "0.85rem", 
-                                marginTop: "1.5rem",
-                                padding: "1.15rem",
-                                background: "rgba(255,255,255,0.04)",
-                                borderRadius: "20px",
-                                border: "1px solid rgba(255,255,255,0.1)",
-                                overflowX: "auto",
-                                scrollbarWidth: "none",
-                                WebkitOverflowScrolling: "touch",
-                            }}>
-                                {photos.map((p, i) => (
-                                    <button
-                                        key={i}
-                                        onClick={() => setActivePhoto(i)}
-                                        style={{
-                                            border: "2px solid",
-                                            borderColor: i === activePhoto ? "var(--forest-deep)" : "rgba(255,255,255,0.1)",
-                                            padding: 0,
-                                            borderRadius: "14px",
-                                            overflow: "hidden",
-                                            cursor: "pointer",
-                                            width: "84px",
-                                            height: "84px",
-                                            flexShrink: 0,
-                                            background: "rgba(255,255,255,0.05)",
-                                            opacity: i === activePhoto ? 1 : 0.65,
-                                            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                                            boxShadow: i === activePhoto ? "0 8px 16px rgba(0,0,0,0.4)" : "none",
-                                            transform: i === activePhoto ? "scale(1.05)" : "scale(1)",
-                                        }}
-                                    >
-                                        <img src={p} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                                    </button>
-                                ))}
-                            </div>
-                        )}
                     </div>
 
                     <div style={{ display: "grid", gap: "0.85rem", gridTemplateRows: "1fr auto", height: "100%" }}>
@@ -746,9 +731,10 @@ function AnnonceDetailContent() {
                         <span style={sectionLabel}>Details</span>
                         <div className="details-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem 1.2rem" }}>
                             {[
-                                { label: "Categorie", val: annonce.category, icon: <Tag size={13} /> },
+                                { label: "Categorie", val: annonce.category || "N/A", icon: <Tag size={13} /> },
                                 { label: "Type", val: isDon ? "Don" : "Vente", icon: isDon ? <Gift size={13} /> : <Tag size={13} /> },
                                 { label: "Etat", val: annonce.condition || "N/A", icon: <CheckCircle2 size={13} /> },
+                                { label: "Matiere", val: annonce.material || "N/A", icon: <Package size={13} /> },
                                 { label: "Ville", val: `${annonce.city}${annonce.zip ? " · " + annonce.zip : ""}`, icon: <MapPin size={13} /> },
                                 { label: "Publiee le", val: annonce.date, icon: <Calendar size={13} /> },
                                 { label: "Reference", val: `#${String(annonce.id).padStart(4, "0")}`, icon: <Package size={13} /> },
