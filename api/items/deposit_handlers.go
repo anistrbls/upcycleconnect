@@ -2,6 +2,7 @@ package items
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -127,6 +128,20 @@ func RegisterDepositRoutes(mux *http.ServeMux, repo *Repository, authMiddleware 
 			writeError(w, http.StatusBadRequest, "invalid payload")
 			return
 		}
+		if c.Status == "maintenance" {
+			if strings.TrimSpace(c.MaintenanceReason) == "" || c.MaintenanceStart == nil || c.MaintenanceEnd == nil {
+				writeError(w, http.StatusBadRequest, "maintenance requires reason, start and end dates")
+				return
+			}
+			if c.MaintenanceEnd.Before(*c.MaintenanceStart) {
+				writeError(w, http.StatusBadRequest, "maintenance end must be after start")
+				return
+			}
+		} else {
+			c.MaintenanceReason = ""
+			c.MaintenanceStart = nil
+			c.MaintenanceEnd = nil
+		}
 		c.DepositPointID = id
 		if err := repo.CreateContainer(r.Context(), &c); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create container")
@@ -148,8 +163,22 @@ func RegisterDepositRoutes(mux *http.ServeMux, repo *Repository, authMiddleware 
 			writeError(w, http.StatusBadRequest, "invalid payload")
 			return
 		}
+		if c.Status == "maintenance" {
+			if strings.TrimSpace(c.MaintenanceReason) == "" || c.MaintenanceStart == nil || c.MaintenanceEnd == nil {
+				writeError(w, http.StatusBadRequest, "maintenance requires reason, start and end dates")
+				return
+			}
+			if c.MaintenanceEnd.Before(*c.MaintenanceStart) {
+				writeError(w, http.StatusBadRequest, "maintenance end must be after start")
+				return
+			}
+		}
 		c.ID = id
 		if err := repo.UpdateContainer(r.Context(), &c); err != nil {
+			if errors.Is(err, ErrContainerStatusChangeBlocked) {
+				writeError(w, http.StatusBadRequest, "cannot set container to inactif or maintenance while it contains objects")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "could not update container")
 			return
 		}

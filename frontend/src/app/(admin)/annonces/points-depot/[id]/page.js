@@ -36,6 +36,37 @@ const styles = {
         gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
         gap: "1.5rem",
     },
+    photoPanel: {
+        background: "white",
+        borderRadius: "24px",
+        padding: "1.25rem",
+        border: "1px solid rgba(0,0,0,0.06)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.9rem",
+        marginBottom: "1.5rem",
+    },
+    photoHero: {
+        width: "100%",
+        height: "280px",
+        objectFit: "cover",
+        borderRadius: "18px",
+        display: "block",
+        background: "#f1f5f9",
+    },
+    photoStrip: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(104px, 104px))",
+        gap: "0.6rem",
+    },
+    photoThumb: {
+        width: "100%",
+        aspectRatio: "1 / 1",
+        objectFit: "cover",
+        borderRadius: "14px",
+        display: "block",
+        background: "#f1f5f9",
+    },
     card: {
         background: "white",
         borderRadius: "24px",
@@ -109,7 +140,22 @@ function ContainerManagementContent({ id }) {
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [editingContainer, setEditingContainer] = useState(null);
-    const [formData, setFormData] = useState({ name: "", capacity: 10, status: "actif" });
+    const [formData, setFormData] = useState({ name: "", capacity: "10", status: "actif", maintenance_reason: "", maintenance_start: "", maintenance_end: "" });
+
+    const toLocalDateTimeInput = (value) => {
+        if (!value) return "";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+
+    const toISOFromLocalDateTime = (value) => {
+        if (!value) return null;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return null;
+        return date.toISOString();
+    };
 
     const fetchData = async () => {
         const token = window.localStorage.getItem(TOKEN_KEY);
@@ -134,6 +180,36 @@ function ContainerManagementContent({ id }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        const parsedCapacity = Number.parseInt(String(formData.capacity), 10);
+        if (!Number.isFinite(parsedCapacity) || parsedCapacity <= 0) {
+            alert("La capacité doit être un nombre supérieur à 0.");
+            return;
+        }
+
+        if (editingContainer?.current_count > 0 && formData.status !== "actif") {
+            alert("Impossible de passer ce container en inactif ou maintenance tant qu'il contient des objets.");
+            return;
+        }
+
+        if (formData.status === "maintenance") {
+            if (!formData.maintenance_reason?.trim() || !formData.maintenance_start || !formData.maintenance_end) {
+                alert("Pour la maintenance, la raison ainsi que les dates de début et de fin sont obligatoires.");
+                return;
+            }
+            if (new Date(formData.maintenance_end).getTime() < new Date(formData.maintenance_start).getTime()) {
+                alert("La date de fin de maintenance doit être après la date de début.");
+                return;
+            }
+        }
+
+        const payload = {
+            ...formData,
+            capacity: parsedCapacity,
+            maintenance_reason: formData.status === "maintenance" ? String(formData.maintenance_reason || "").trim() : "",
+            maintenance_start: formData.status === "maintenance" ? toISOFromLocalDateTime(formData.maintenance_start) : null,
+            maintenance_end: formData.status === "maintenance" ? toISOFromLocalDateTime(formData.maintenance_end) : null,
+        };
+
         const token = window.localStorage.getItem(TOKEN_KEY);
         const method = editingContainer ? "PATCH" : "POST";
         const url = editingContainer 
@@ -147,11 +223,18 @@ function ContainerManagementContent({ id }) {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}` 
                 },
-                body: JSON.stringify(formData)
+                body: JSON.stringify(payload)
             });
             if (res.ok) {
                 setShowModal(false);
                 fetchData();
+            } else {
+                let errorMessage = "Impossible d'enregistrer le container.";
+                try {
+                    const data = await res.json();
+                    if (data?.error) errorMessage = data.error;
+                } catch (_) {}
+                alert(errorMessage);
             }
         } catch (err) {
             alert(err.message);
@@ -159,7 +242,7 @@ function ContainerManagementContent({ id }) {
     };
 
     const deleteContainer = async (cid) => {
-        if(!confirm("Supprimer ce container ?")) return;
+        if (!confirm("Supprimer ce container ?")) return;
         const token = window.localStorage.getItem(TOKEN_KEY);
         try {
             await fetch(apiUrl(`/admin/containers/${cid}`), {
@@ -167,7 +250,9 @@ function ContainerManagementContent({ id }) {
                 headers: { Authorization: `Bearer ${token}` }
             });
             fetchData();
-        } catch(err) { console.error(err); }
+        } catch (err) {
+            console.error(err);
+        }
     };
 
     if (loading) return <div style={{ padding: "3rem" }}>Chargement...</div>;
@@ -184,15 +269,43 @@ function ContainerManagementContent({ id }) {
                 </div>
                 <button 
                   style={{ marginLeft: "auto", background: "var(--forest-deep)", color: "white", border: "none", padding: "0.8rem 1.5rem", borderRadius: "999px", fontWeight: "700", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem" }}
-                  onClick={() => { setEditingContainer(null); setFormData({ name: "", capacity: 10, status: "actif" }); setShowModal(true); }}
+                                    onClick={() => { setEditingContainer(null); setFormData({ name: "", capacity: "10", status: "actif", maintenance_reason: "", maintenance_start: "", maintenance_end: "" }); setShowModal(true); }}
                 >
                     <Plus size={18} /> Ajouter un container
                 </button>
             </header>
 
+            {Array.isArray(point?.photos) && point.photos.length > 0 && (
+                <section style={styles.photoPanel}>
+                    <div>
+                        <div style={{ fontSize: "0.76rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.35rem" }}>
+                            Photos du point de dépôt
+                        </div>
+                        <div style={{ fontSize: "0.92rem", color: "var(--text-main)", fontWeight: "700" }}>
+                            {point.name}
+                        </div>
+                    </div>
+                    <div style={styles.photoStrip}>
+                        {point.photos.map((photo, index) => (
+                            <div
+                                key={`${index}-${photo.slice(0, 20)}`}
+                                style={{
+                                    border: "1px solid rgba(0,0,0,0.08)",
+                                    borderRadius: "16px",
+                                    overflow: "hidden",
+                                    background: "#f8fafc",
+                                }}
+                            >
+                                <img src={photo} alt={`${point.name} ${index + 1}`} style={styles.photoThumb} />
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
+
             <div style={styles.grid}>
                 {containers.map((c) => {
-                    const usage = Math.round((c.current_count / c.capacity) * 100);
+                    const usage = c.capacity > 0 ? Math.round((c.current_count / c.capacity) * 100) : 0;
                     return (
                         <div key={c.id} style={styles.card}>
                             <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -201,7 +314,7 @@ function ContainerManagementContent({ id }) {
                                     <h3 style={{ margin: 0, fontWeight: "700" }}>{c.name}</h3>
                                 </div>
                                 <div style={{ display: "flex", gap: "0.4rem" }}>
-                                    <button onClick={() => { setEditingContainer(c); setFormData({ ...c }); setShowModal(true); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)" }}><Edit3 size={16} /></button>
+                                    <button onClick={() => { setEditingContainer(c); setFormData({ ...c, capacity: String(c.capacity ?? ""), maintenance_reason: c.maintenance_reason || "", maintenance_start: toLocalDateTimeInput(c.maintenance_start), maintenance_end: toLocalDateTimeInput(c.maintenance_end) }); setShowModal(true); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)" }}><Edit3 size={16} /></button>
                                     <button onClick={() => deleteContainer(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444" }}><Trash2 size={16} /></button>
                                 </div>
                             </div>
@@ -222,7 +335,11 @@ function ContainerManagementContent({ id }) {
 
                             <div style={{ marginTop: "0.5rem", padding: "0.6rem", borderRadius: "12px", background: c.status === 'actif' ? '#f0fdf4' : '#fef2f2', display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem" }}>
                                 {c.status === 'actif' ? <CheckCircle2 size={14} color="#166534" /> : <AlertCircle size={14} color="#991b1b" />}
-                                <span style={{ fontWeight: "700", color: c.status === 'actif' ? '#166534' : '#991b1b' }}>Container {c.status}</span>
+                                <span style={{ fontWeight: "700", color: c.status === 'actif' ? '#166534' : '#991b1b' }}>
+                                    {c.status === "maintenance" && c.maintenance_reason
+                                        ? `Container maintenance: ${c.maintenance_reason}`
+                                        : `Container ${c.status}`}
+                                </span>
                             </div>
                         </div>
                     );
@@ -232,6 +349,11 @@ function ContainerManagementContent({ id }) {
             {showModal && (
                 <div style={styles.modalOverlay} onClick={() => setShowModal(false)}>
                     <div style={styles.modal} onClick={e => e.stopPropagation()}>
+                        {editingContainer?.current_count > 0 && (
+                            <div style={{ marginBottom: "1rem", borderRadius: "12px", padding: "0.7rem 0.9rem", background: "#fef3c7", color: "#92400e", fontSize: "0.82rem", fontWeight: "600" }}>
+                                Ce container contient des objets. Le statut doit rester actif tant qu'il n'est pas vide.
+                            </div>
+                        )}
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
                             <h2 style={{ fontSize: "1.5rem", fontWeight: "700" }}>{editingContainer ? "Modifier" : "Nouveau"} container</h2>
                             <button onClick={() => setShowModal(false)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={20} /></button>
@@ -243,16 +365,32 @@ function ContainerManagementContent({ id }) {
                             </div>
                             <div>
                                 <label style={{ fontSize: "0.85rem", fontWeight: "700" }}>Capacité (nombre d'objets)</label>
-                                <input type="number" style={styles.input} value={formData.capacity} onChange={e => setFormData({...formData, capacity: parseInt(e.target.value)})} required />
+                                <input type="number" style={styles.input} value={formData.capacity} onChange={e => setFormData({...formData, capacity: e.target.value})} min="1" required />
                             </div>
                             <div>
                                 <label style={{ fontSize: "0.85rem", fontWeight: "700" }}>Statut</label>
                                 <select style={styles.input} value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                                     <option value="actif">Actif</option>
-                                    <option value="inactif">Inactif</option>
-                                    <option value="maintenance">Maintenance</option>
+                                    <option value="inactif" disabled={Boolean(editingContainer?.current_count > 0)}>Inactif</option>
+                                    <option value="maintenance" disabled={Boolean(editingContainer?.current_count > 0)}>Maintenance</option>
                                 </select>
                             </div>
+                            {formData.status === "maintenance" && (
+                                <>
+                                    <div>
+                                        <label style={{ fontSize: "0.85rem", fontWeight: "700" }}>Raison de maintenance</label>
+                                        <input style={styles.input} value={formData.maintenance_reason || ""} onChange={e => setFormData({ ...formData, maintenance_reason: e.target.value })} required />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: "0.85rem", fontWeight: "700" }}>Début de maintenance</label>
+                                        <input type="datetime-local" style={styles.input} value={formData.maintenance_start || ""} onChange={e => setFormData({ ...formData, maintenance_start: e.target.value })} required />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: "0.85rem", fontWeight: "700" }}>Fin de maintenance</label>
+                                        <input type="datetime-local" style={styles.input} value={formData.maintenance_end || ""} onChange={e => setFormData({ ...formData, maintenance_end: e.target.value })} required />
+                                    </div>
+                                </>
+                            )}
                             <button type="submit" style={styles.saveBtn}>Enregistrer</button>
                         </form>
                     </div>

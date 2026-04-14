@@ -146,8 +146,43 @@ const styles = {
         gap: "0.75rem",
         fontSize: "0.95rem",
         transition: "transform 0.1s, background 0.2s",
-    }
+    },
+    photoUploadBox: {
+        width: "100%",
+        padding: "1rem 1.2rem",
+        borderRadius: "16px",
+        border: "1px dashed rgba(35,59,61,0.22)",
+        background: "#f8fafc",
+        cursor: "pointer",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.35rem",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+    },
+    photoGrid: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(86px, 1fr))",
+        gap: "0.75rem",
+        marginTop: "0.85rem",
+    },
+    photoThumb: {
+        width: "100%",
+        aspectRatio: "1 / 1",
+        borderRadius: "14px",
+        objectFit: "cover",
+        display: "block",
+        background: "#eef2f7",
+    },
 };
+
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+});
 
 function PointsDepotContent() {
     const router = useRouter();
@@ -158,7 +193,7 @@ function PointsDepotContent() {
     const [formData, setFormData] = useState({
         name: "", address: "", zip_code: "", city: "", country: "France",
         latitude: 48.8566, longitude: 2.3522, status: "actif", type: "",
-        internal_comment: ""
+        internal_comment: "", photos: []
     });
     const [types, setTypes] = useState([]);
     const [suggestions, setSuggestions] = useState([]);
@@ -260,6 +295,24 @@ function PointsDepotContent() {
         }
     };
 
+    const handlePhotoChange = async (e) => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+        const nextPhotos = await Promise.all(files.map(fileToBase64));
+        setFormData((current) => ({
+            ...current,
+            photos: [...(Array.isArray(current.photos) ? current.photos : []), ...nextPhotos].slice(0, 8),
+        }));
+        e.target.value = "";
+    };
+
+    const removePhoto = (index) => {
+        setFormData((current) => ({
+            ...current,
+            photos: (current.photos || []).filter((_, idx) => idx !== index),
+        }));
+    };
+
     const deletePoint = async (id) => {
         if (!confirm("Supprimer ce point de dépôt ?")) return;
         const token = window.localStorage.getItem(TOKEN_KEY);
@@ -276,7 +329,7 @@ function PointsDepotContent() {
 
     const openEdit = (point) => {
         setEditingPoint(point);
-        setFormData({ ...point });
+        setFormData({ ...point, photos: Array.isArray(point.photos) ? point.photos : [] });
         setShowModal(true);
     };
 
@@ -285,7 +338,7 @@ function PointsDepotContent() {
         setFormData({
             name: "", address: "", zip_code: "", city: "", country: "France",
             latitude: 48.8566, longitude: 2.3522, status: "actif", type: "conteneur",
-            internal_comment: ""
+            internal_comment: "", photos: []
         });
         setShowModal(true);
     };
@@ -355,6 +408,13 @@ function PointsDepotContent() {
                         : 0;
                     return (
                         <div key={point.id} className="deposit-card" style={styles.card}>
+                            {Array.isArray(point.photos) && point.photos[0] && (
+                                <img
+                                    src={point.photos[0]}
+                                    alt={point.name}
+                                    style={{ width: "100%", height: "180px", objectFit: "cover", borderRadius: "20px", marginBottom: "0.2rem" }}
+                                />
+                            )}
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                                 <div style={styles.statusBadge(point.status)}>{point.status}</div>
                                 <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -505,6 +565,46 @@ function PointsDepotContent() {
                                         <input type="number" step="any" style={styles.input} value={formData.longitude} onChange={e => setFormData({...formData, longitude: parseFloat(e.target.value)})} required />
                                     </div>
                                 </div>
+                            </div>
+
+                            <div>
+                                <label style={{ fontSize: "0.85rem", fontWeight: "700", color: "var(--text-main)" }}>Photos du point</label>
+                                <label style={styles.photoUploadBox}>
+                                    <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handlePhotoChange} />
+                                    <Building2 size={18} color="var(--forest-deep)" />
+                                    <div style={{ fontWeight: "700", color: "var(--text-main)", fontSize: "0.9rem" }}>Ajouter des photos</div>
+                                    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Jusqu'à 8 images pour le point de dépôt</div>
+                                </label>
+                                {Array.isArray(formData.photos) && formData.photos.length > 0 && (
+                                    <div style={styles.photoGrid}>
+                                        {formData.photos.map((photo, index) => (
+                                            <div key={`${index}-${photo.slice(0, 20)}`} style={{ position: "relative" }}>
+                                                <img src={photo} alt={`Point ${index + 1}`} style={styles.photoThumb} />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removePhoto(index)}
+                                                    style={{
+                                                        position: "absolute",
+                                                        top: "6px",
+                                                        right: "6px",
+                                                        width: "24px",
+                                                        height: "24px",
+                                                        borderRadius: "999px",
+                                                        border: "none",
+                                                        background: "rgba(0,0,0,0.55)",
+                                                        color: "white",
+                                                        cursor: "pointer",
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        justifyContent: "center",
+                                                    }}
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             <button type="submit" style={{ ...styles.primaryBtn, width: "100%", justifyContent: "center", marginTop: "1rem" }}>

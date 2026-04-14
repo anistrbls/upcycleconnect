@@ -52,25 +52,48 @@ export default function DepositMap({ points, onPointClick }) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {points.map((point) => (
-          <Marker 
-            key={point.id} 
-            position={[point.latitude || 0, point.longitude || 0]}
-            eventHandlers={{
-              click: () => onPointClick && onPointClick(point),
-            }}
-          >
-            <Popup>
-              <div style={{ padding: "5px" }}>
-                <strong style={{ fontSize: "1rem" }}>{point.name}</strong><br />
-                <span style={{ fontSize: "0.85rem", color: "#666" }}>{point.address}</span><br />
-                <div style={{ marginTop: "8px", fontSize: "0.8rem", fontWeight: "bold", color: point.status === 'sature' ? '#ef4444' : '#22c55e' }}>
-                  {point.status.toUpperCase()}
+        {points.map((point) => {
+          const usagePercent = point.total_capacity > 0
+            ? Math.round((point.current_count / point.total_capacity) * 100)
+            : 0;
+
+          return (
+            <Marker 
+              key={point.id} 
+              position={[point.latitude || 0, point.longitude || 0]}
+              eventHandlers={{
+                click: () => onPointClick && onPointClick(point),
+              }}
+            >
+              <Popup>
+                <div style={{ padding: "5px", width: "190px" }}>
+                  {Array.isArray(point.photos) && point.photos[0] && (
+                    <img
+                      src={point.photos[0]}
+                      alt={point.name}
+                      style={{
+                        width: "100%",
+                        height: "96px",
+                        objectFit: "cover",
+                        borderRadius: "12px",
+                        marginBottom: "0.65rem",
+                        display: "block",
+                      }}
+                    />
+                  )}
+                  <strong style={{ fontSize: "1rem", lineHeight: "1.3", display: "block" }}>{point.name}</strong>
+                  <span style={{ fontSize: "0.85rem", color: "#666" }}>{point.address}</span>
+                  <div style={{ marginTop: "0.65rem", fontSize: "0.8rem", fontWeight: "700", color: point.status === 'sature' ? '#ef4444' : point.status === 'maintenance' ? '#f59e0b' : '#22c55e' }}>
+                    {point.status.toUpperCase()}
+                  </div>
+                  <div style={{ marginTop: "0.45rem", fontSize: "0.8rem", color: "#233b3d", fontWeight: "600" }}>
+                    Occupation : {point.current_count || 0}/{point.total_capacity || 0} objets ({usagePercent}%)
+                  </div>
                 </div>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
     </div>
   );

@@ -99,18 +99,11 @@ func RegisterLogisticsRoutes(mux *http.ServeMux, repo *Repository, authMiddlewar
 		})
 	}))
 
-	// POST /api/admin/logistics/{item_id}/confirm-deposit — Confirm deposit with code
+	// POST /api/admin/logistics/{item_id}/confirm-deposit — Admin confirms physical deposit
 	mux.Handle("POST /api/admin/logistics/{item_id}/confirm-deposit", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		itemID, _ := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
-		var payload struct {
-			Code string `json:"code"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid payload")
-			return
-		}
 		adminID := getAdminUserID(r)
-		if err := repo.ConfirmDeposit(r.Context(), itemID, payload.Code, adminID); err != nil {
+		if err := repo.ConfirmDeposit(r.Context(), itemID, adminID); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -177,7 +170,7 @@ func RegisterLogisticsRoutes(mux *http.ServeMux, repo *Repository, authMiddlewar
 		itemID, _ := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
 		var p CancelPayload
 		json.NewDecoder(r.Body).Decode(&p)
-		if err := repo.CancelLogistics(r.Context(), itemID, p.Reason); err != nil {
+		if err := repo.CancelLogistics(r.Context(), itemID, p.Reason, p.RevertToStatus); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

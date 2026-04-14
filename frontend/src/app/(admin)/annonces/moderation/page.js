@@ -319,7 +319,8 @@ function ModerationContent() {
         if (!token) return;
 
         try {
-            const url = apiUrl(`/admin/items?status=${statusFilter === "all" ? "" : statusFilter}&q=${searchTerm}`);
+            // Fetch without status filter so KPIs remain stable across tabs
+            const url = apiUrl(`/admin/items?status=&q=${searchTerm}`);
             const response = await fetch(url, {
                 method: "GET",
                 headers: { Authorization: `Bearer ${token}` },
@@ -337,7 +338,7 @@ function ModerationContent() {
         if (isAdmin) {
             fetchAnnonces();
         }
-    }, [isAdmin, statusFilter, searchTerm]);
+    }, [isAdmin, searchTerm]);
 
     const setStatus = async (id, status) => {
         const token = window.localStorage.getItem(TOKEN_KEY);
@@ -358,6 +359,24 @@ function ModerationContent() {
         }
     };
 
+    const deleteAnnonce = async (id) => {
+        if (!confirm("Voulez-vous vraiment supprimer définitivement cette annonce ?")) return;
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        try {
+            const response = await fetch(apiUrl(`/admin/items/${id}`), {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (response.ok) {
+                fetchAnnonces();
+            } else {
+                alert("Erreur lors de la suppression de l'annonce.");
+            }
+        } catch (err) {
+            alert("Erreur réseau: " + err.message);
+        }
+    };
+
     if (!isAdmin) {
         return <div style={{ padding: "1.5rem", color: "var(--text-muted)" }}>Chargement...</div>;
     }
@@ -365,16 +384,20 @@ function ModerationContent() {
     const filtered = annonces.filter((annonce) => {
         const text = `${annonce.title || ""} ${annonce.city || ""} ${getAnnonceAuthor(annonce)}`.toLowerCase();
         const matchesSearch = text.includes(searchTerm.toLowerCase());
-        const moderationStatuses = ["en attente", "refusee"];
+        const moderationStatuses = ["en attente", "refusee", "desactivee"];
         const currentStatus = normalizeStatus(annonce.status);
+        
+        // Treat "desactivee" exactly like "refusee" for the status filters
+        const effectiveFilterStatus = currentStatus === "desactivee" ? "refusee" : currentStatus;
         const isInModerationQueue = moderationStatuses.includes(currentStatus);
-        const matchesStatus = statusFilter === "all" ? isInModerationQueue : currentStatus === statusFilter;
+        
+        const matchesStatus = statusFilter === "all" ? isInModerationQueue : effectiveFilterStatus === statusFilter;
         return matchesSearch && matchesStatus;
     });
 
     const pendingCount = annonces.filter((a) => normalizeStatus(a.status) === "en attente").length;
-    const refusedCount = annonces.filter((a) => normalizeStatus(a.status) === "refusee").length;
-    const moderationCount = annonces.filter((a) => ["en attente", "refusee"].includes(normalizeStatus(a.status))).length;
+    const refusedCount = annonces.filter((a) => ["refusee", "desactivee"].includes(normalizeStatus(a.status))).length;
+    const moderationCount = pendingCount + refusedCount;
 
     return (
         <div style={styles.container}>
@@ -406,7 +429,7 @@ function ModerationContent() {
             </div>
 
             <div style={styles.grid}>
-                {annonces.map((annonce) => (
+                {filtered.map((annonce) => (
                     <div
                         key={annonce.id}
                         className="annonce-card"
@@ -458,26 +481,41 @@ function ModerationContent() {
                             )}
 
                             <div style={styles.cardActions}>
-                                <button
-                                    className="moderation-action-btn"
-                                    style={styles.actionBtn("accept")}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setStatus(annonce.id, "actif");
-                                    }}
-                                >
-                                    <Check size={16} /> Valider
-                                </button>
-                                <button
-                                    className="moderation-action-btn"
-                                    style={styles.actionBtn("reject")}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setStatus(annonce.id, "refusee");
-                                    }}
-                                >
-                                    <X size={16} /> Refuser
-                                </button>
+                                {normalizeStatus(annonce.status) === "en attente" ? (
+                                    <>
+                                        <button
+                                            className="moderation-action-btn"
+                                            style={styles.actionBtn("accept")}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setStatus(annonce.id, "actif");
+                                            }}
+                                        >
+                                            <Check size={16} /> Valider
+                                        </button>
+                                        <button
+                                            className="moderation-action-btn"
+                                            style={styles.actionBtn("reject")}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                router.push(`/annonces/${annonce.id}`);
+                                            }}
+                                        >
+                                            <X size={16} /> Refuser
+                                        </button>
+                                    </>
+                                ) : (normalizeStatus(annonce.status) === "refusee" || normalizeStatus(annonce.status) === "desactivee") ? (
+                                    <button
+                                        className="moderation-action-btn"
+                                        style={{...styles.actionBtn("reject"), flex: 1.5}}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteAnnonce(annonce.id);
+                                        }}
+                                    >
+                                        <X size={16} /> Supprimer
+                                    </button>
+                                ) : null}
                                 <button
                                     className="moderation-action-btn"
                                     style={styles.actionBtn("view")}

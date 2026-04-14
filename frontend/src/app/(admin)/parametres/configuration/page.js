@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Tag, Plus, Pencil, Trash2, Check, X, GripVertical, Package, Shield, Layers, Loader2, MapPin } from "lucide-react";
+import { Tag, Plus, Pencil, Trash2, Check, X, GripVertical, Package, Shield, Layers, Loader2, MapPin, QrCode } from "lucide-react";
 import AdminModal from "../../../components/admin/AdminModal";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 
@@ -172,6 +172,113 @@ function ConfigSection({ icon: Icon, title, description, count, loading, childre
     );
 }
 
+// ── Composant Génération de Codes ─────────────────────────────────────────────
+function CodeConfigSection() {
+    const [config, setConfig] = useState({ length: 6, noAmbiguous: true, useSpecial: false, useSpaces: false });
+    const [saving, setSaving] = useState(false);
+    const [savedState, setSavedState] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const loadConfig = async () => {
+            try {
+                const res = await fetch(apiUrl("/admin/code-config"), { headers: buildAuthHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    setConfig(data);
+                }
+            } catch (e) {
+                console.error("Erreur chargement config codes", e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadConfig();
+    }, []);
+
+    const saveConfig = async () => {
+        setSaving(true);
+        try {
+            const res = await fetch(apiUrl("/admin/code-config"), {
+                method: "PUT",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify(config)
+            });
+            if (res.ok) {
+                setSavedState(true);
+                setTimeout(() => setSavedState(false), 2000);
+            } else {
+                alert("Erreur lors de la sauvegarde.");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Erreur lors de la sauvegarde.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <section style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.4rem" }}>
+                    <QrCode size={18} strokeWidth={2} style={{ color: "var(--forest-deep)" }} />
+                    <h2 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-main)" }}>Codes d'autorisation</h2>
+                </div>
+                <div style={{ background: "var(--surface-hover)", borderRadius: "24px", padding: "1.5rem", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Loader2 size={24} style={spinStyle} />
+                </div>
+            </section>
+        );
+    }
+
+    return (
+        <section style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.4rem" }}>
+                <QrCode size={18} strokeWidth={2} style={{ color: "var(--forest-deep)" }} />
+                <h2 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-main)" }}>Codes d'autorisation</h2>
+            </div>
+            <div style={{ background: "var(--surface-hover)", borderRadius: "24px", padding: "1.5rem", flex: 1, display: "flex", flexDirection: "column", gap: "1.2rem" }}>
+                <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                    Configurez le format des codes générés pour le dépôt et la récupération des objets.
+                </div>
+                
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                    <label style={{ fontSize: "0.85rem", fontWeight: "600", color: "var(--text-main)" }}>Longueur du code</label>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                        <input type="number" min={4} max={16} value={config.length} onChange={e => setConfig({...config, length: parseInt(e.target.value)||6})} style={{...textInput, width: "100px", textAlign: "center", fontWeight: "600"}} />
+                        <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>caractères</span>
+                    </div>
+                </div>
+                
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", background: "rgba(255,255,255,0.6)", padding: "1rem", borderRadius: "16px", border: "1px solid rgba(35,59,61,0.06)" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", cursor: "pointer", fontSize: "0.88rem", fontWeight: "500", color: "var(--text-main)" }}>
+                        <input type="checkbox" checked={config.noAmbiguous} onChange={e => setConfig({...config, noAmbiguous: e.target.checked})} style={{ width: "16px", height: "16px", accentColor: "var(--forest-deep)" }} />
+                        Exclure "0, O, 1, I" (ambigus)
+                    </label>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", cursor: "pointer", fontSize: "0.88rem", fontWeight: "500", color: "var(--text-main)" }}>
+                        <input type="checkbox" checked={config.useSpecial} onChange={e => setConfig({...config, useSpecial: e.target.checked})} style={{ width: "16px", height: "16px", accentColor: "var(--forest-deep)" }} />
+                        Inclure caractères spéciaux (!@#)
+                    </label>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", cursor: "pointer", fontSize: "0.88rem", fontWeight: "500", color: "var(--text-main)" }}>
+                        <input type="checkbox" checked={config.useSpaces} onChange={e => setConfig({...config, useSpaces: e.target.checked})} style={{ width: "16px", height: "16px", accentColor: "var(--forest-deep)" }} />
+                        Regrouper avec des espaces (ex: ABC 123)
+                    </label>
+                </div>
+
+                <div style={{ marginTop: "auto", paddingTop: "0.5rem" }}>
+                    <button onClick={saveConfig} disabled={saving} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", width: "100%", padding: "0.75rem", borderRadius: "14px", background: savedState ? "#10b981" : "var(--black)", color: "white", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.9rem", transition: "background 0.2s" }}>
+                        {saving ? <Loader2 size={16} style={spinStyle} /> : (savedState ? <Check size={16} /> : <Check size={16} />)}
+                        {savedState ? "Enregistré" : "Enregistrer format"}
+                    </button>
+                </div>
+            </div>
+        </section>
+    );
+}
+
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function ConfigurationPage() {
     // Catégories
@@ -208,6 +315,13 @@ export default function ConfigurationPage() {
     const [addDpTypeModal, setAddDpTypeModal] = useState(false);
     const [newDpType, setNewDpType] = useState({ label: "" });
     const [addingDpType, setAddingDpType] = useState(false);
+
+    // Motifs de moderation
+    const [moderationReasons, setModerationReasons] = useState([]);
+    const [reasonLoading, setReasonLoading] = useState(true);
+    const [addReasonModal, setAddReasonModal] = useState(false);
+    const [newReason, setNewReason] = useState({ label: "" });
+    const [addingReason, setAddingReason] = useState(false);
 
     const [toast, setToast] = useState(null);
 
@@ -273,7 +387,19 @@ export default function ConfigurationPage() {
         finally { setDpTypeLoading(false); }
     }, []);
 
-    useEffect(() => { fetchCategories(); fetchConditions(); fetchMaterials(); fetchCountries(); fetchDpTypes(); }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries, fetchDpTypes]);
+    // ── Fetch motifs de moderation
+    const fetchModerationReasons = useCallback(async () => {
+        setReasonLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/moderation-reasons"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setModerationReasons(data.items || []);
+        } catch { showToast("Impossible de charger les motifs de moderation.", "error"); }
+        finally { setReasonLoading(false); }
+    }, []);
+
+    useEffect(() => { fetchCategories(); fetchConditions(); fetchMaterials(); fetchCountries(); fetchDpTypes(); fetchModerationReasons(); }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries, fetchDpTypes, fetchModerationReasons]);
 
     // ── CRUD catégories
     const handleSaveCat = async (updated) => {
@@ -440,6 +566,39 @@ export default function ConfigurationPage() {
         finally { setAddingDpType(false); }
     };
 
+    // ── CRUD motifs de moderation
+    const handleSaveReason = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/moderation-reasons/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setModerationReasons(prev => prev.map(r => r.id === saved.id ? saved : r));
+            showToast("Motif de moderation mis a jour.");
+        } catch (e) { showToast(e.message || "Erreur de mise a jour.", "error"); }
+    };
+    const handleDeleteReason = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/moderation-reasons/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            setModerationReasons(prev => prev.filter(r => r.id !== id));
+            showToast("Motif de moderation supprime.");
+        } catch { showToast("Impossible de supprimer.", "error"); }
+    };
+    const handleAddReason = async () => {
+        if (!newReason.label.trim()) return;
+        setAddingReason(true);
+        try {
+            const res = await fetch(apiUrl("/admin/moderation-reasons"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newReason.label.trim() }) });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setModerationReasons(prev => [...prev, created]);
+            setNewReason({ label: "" });
+            setAddReasonModal(false);
+            showToast("Motif de moderation ajoute.");
+        } catch (e) { showToast(e.message && e.message.includes("already exists") ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
+        finally { setAddingReason(false); }
+    };
+
     return (
         <div style={{ width: "100%", padding: "1rem 3rem 4rem 1rem", animation: "fadeIn 0.4s ease-out", maxWidth: "100%" }}>
 
@@ -494,6 +653,16 @@ export default function ConfigurationPage() {
                 >
                     {dpTypes.map(t => <ConditionRow key={t.id} cond={t} onSave={handleSaveDPType} onDelete={handleDeleteDPType} />)}
                 </ConfigSection>
+
+                <ConfigSection
+                    icon={Shield} title="Motifs de modération" addLabel="Nouveau motif"
+                    count={moderationReasons.length} loading={reasonLoading} onAdd={() => setAddReasonModal(true)}
+                >
+                    {moderationReasons.map(reason => <ConditionRow key={reason.id} cond={reason} onSave={handleSaveReason} onDelete={handleDeleteReason} />)}
+                </ConfigSection>
+
+                {/* ── Génération de Codes ── */}
+                <CodeConfigSection />
             </div>
 
             {/* ── Modal ajout catégorie ── */}
@@ -598,6 +767,24 @@ export default function ConfigurationPage() {
                         <button onClick={handleAddDPType} disabled={!newDpType.label.trim() || addingDpType}
                             style={{ border: "none", background: newDpType.label.trim() ? "var(--black)" : "var(--border)", color: newDpType.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newDpType.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
                             {addingDpType ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Modal ajout motif de moderation ── */}
+            <AdminModal open={addReasonModal} title="Nouveau motif de modération" onClose={() => { setAddReasonModal(false); setNewReason({ label: "" }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Libellé *</label>
+                        <input autoFocus placeholder="Ex : Contenu non conforme a la charte" value={newReason.label} onChange={e => setNewReason({ label: e.target.value })} onKeyDown={e => { if (e.key === "Enter") handleAddReason(); }}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddReasonModal(false); setNewReason({ label: "" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddReason} disabled={!newReason.label.trim() || addingReason}
+                            style={{ border: "none", background: newReason.label.trim() ? "var(--black)" : "var(--border)", color: newReason.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newReason.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingReason ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
                         </button>
                     </div>
                 </div>

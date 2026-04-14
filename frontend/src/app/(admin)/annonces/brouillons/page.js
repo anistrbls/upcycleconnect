@@ -280,14 +280,35 @@ function BrouillonsContent() {
         };
     }, [router]);
 
+    const fetchAnnonces = async () => {
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+
+        try {
+            const response = await fetch(apiUrl("/my-items"), {
+                method: "GET",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const allItems = data.items || [];
+                // Ne garder que les brouillons
+                const draftsOnly = allItems.filter(a => a.status === "brouillon");
+                setAnnonces(draftsOnly);
+            }
+        } catch (err) {
+            console.error("Failed to fetch drafts", err);
+        }
+    };
+
     // Charger les annonces au montage du composant
     useEffect(() => {
-        const localData = JSON.parse(localStorage.getItem("user_annonces") || "[]");
-        // Filtrer pour ne garder que les brouillons
-        const draftsOnly = localData.filter(a => a.status === "brouillon");
-        setAnnonces(draftsOnly);
+        if (!isAdmin) {
+            fetchAnnonces();
+        }
+    }, [isAdmin]);
 
-        // Vérifier le paramètre de succès
+    useEffect(() => {
         if (searchParams.get("success") === "true") {
             setShowToast(true);
             const timer = setTimeout(() => {
@@ -303,17 +324,26 @@ function BrouillonsContent() {
         setShowDeleteModal(true);
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (!deleteTargetId) return;
 
-        setAnnonces(prev => prev.filter(a => a.id !== deleteTargetId));
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        try {
+            const response = await fetch(apiUrl(`/items/${deleteTargetId}`), {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` }
+            });
 
-        const localData = JSON.parse(localStorage.getItem("user_annonces") || "[]");
-        const nextLocalData = localData.filter(a => a.id !== deleteTargetId);
-        localStorage.setItem("user_annonces", JSON.stringify(nextLocalData));
-
-        setShowDeleteModal(false);
-        setDeleteTargetId(null);
+            if (response.ok) {
+                setAnnonces(prev => prev.filter(a => a.id !== deleteTargetId));
+                setShowDeleteModal(false);
+                setDeleteTargetId(null);
+            } else {
+                alert("Erreur lors de la suppression du brouillon.");
+            }
+        } catch (err) {
+            alert("Erreur réseau: " + err.message);
+        }
     };
 
     const handleEdit = (id) => {

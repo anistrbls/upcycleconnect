@@ -2,9 +2,11 @@ package items
 
 import (
 	"context"
+	"database/sql"
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 )
 
@@ -129,14 +131,127 @@ func (r *Repository) EnsureLogisticsSchema() error {
 
 // ── Code generation ──────────────────────────────────────────────────────────
 
-func generateCode(length int) string {
-	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no 0/O/1/I to avoid confusion
-	b := make([]byte, length)
+func generateCode(config CodeConfig) string {
+	charset := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	if !config.NoAmbiguous {
+		charset += "01OI"
+	}
+	specialCharset := "!@#$%^"
+	if config.UseSpecial {
+		charset += specialCharset
+	}
+
+	b := make([]byte, config.Length)
 	for i := range b {
 		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
 		b[i] = charset[n.Int64()]
 	}
-	return string(b)
+	
+	// Guarantee at least one special character if requested
+	if config.UseSpecial {
+		hasSpecial := false
+		for i := range b {
+			if strings.ContainsRune(specialCharset, rune(b[i])) {
+				hasSpecial = true
+				break
+			}
+		}
+		if !hasSpecial {
+			idx, _ := rand.Int(rand.Reader, big.NewInt(int64(config.Length)))
+			sIdx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(specialCharset))))
+			b[idx.Int64()] = specialCharset[sIdx.Int64()]
+		}
+	}
+
+	res := string(b)
+	if config.UseSpaces && len(res) > 3 {
+		var spaced []rune
+		for i, r := range res {
+			if i > 0 && i%3 == 0 {
+				spaced = append(spaced, ' ')
+			}
+			spaced = append(spaced, r)
+		}
+		res = string(spaced)
+	}
+
+	return res
+}
+
+// ── Business Days & Holidays ─────────────────────────────────────────────────
+
+// Calculate Easter Sunday for a given year using Meeus/Jones/Butcher algorithm
+func easterDay(year int) time.Time {
+	a := year % 19
+	b := year / 100
+	c := year % 100
+	d := b / 4
+	e := b % 4
+	f := (b + 8) / 25
+	g := (b - f + 1) / 3
+	h := (19*a + b - d - g + 15) % 30
+	i := c / 4
+	k := c % 4
+	l := (32 + 2*e + 2*i - h - k) % 7
+	m := (a + 11*h + 22*l) / 451
+	month := (h + l - 7*m + 114) / 31
+	day := ((h + l - 7*m + 114) % 31) + 1
+	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+}
+
+// Check if a date is a French public holiday
+func isFrenchHoliday(date time.Time) bool {
+	d := date.Day()
+	m := date.Month()
+
+	// Fixed holidays
+	if m == time.January && d == 1 { return true }   // Jour de l'An
+	if m == time.May && d == 1 { return true }       // Fête du Travail
+	if m == time.May && d == 8 { return true }       // Victoire 1945
+	if m == time.July && d == 14 { return true }     // Fête Nationale
+	if m == time.August && d == 15 { return true }   // Assomption
+	if m == time.November && d == 1 { return true }  // Toussaint
+	if m == time.November && d == 11 { return true } // Armistice 1918
+	if m == time.December && d == 25 { return true } // Noël
+
+	// Variable holidays (Easter based)
+	y := date.Year()
+	easter := easterDay(y)
+
+	// Lundi de Pâques (+1 jour)
+	easterMonday := easter.AddDate(0, 0, 1)
+	if m == easterMonday.Month() && d == easterMonday.Day() { return true }
+
+	// Jeudi de l'Ascension (+39 jours)
+	ascension := easter.AddDate(0, 0, 39)
+	if m == ascension.Month() && d == ascension.Day() { return true }
+
+	// Lundi de Pentecôte (+50 jours)
+	whitMonday := easter.AddDate(0, 0, 50)
+	if m == whitMonday.Month() && d == whitMonday.Day() { return true }
+
+	return false
+}
+
+// Add specifically business days (excluding weekends and French holidays)
+func addFrenchBusinessDays(date time.Time, days int) time.Time {
+	for i := 0; i < days; {
+		date = date.AddDate(0, 0, 1)
+
+		weekday := date.Weekday()
+		// Skip weekend
+		if weekday == time.Saturday || weekday == time.Sunday {
+			continue
+		}
+
+		// Skip French holidays
+		if isFrenchHoliday(date) {
+			continue
+		}
+
+		i++
+	}
+	return date
 }
 
 // ── Repository methods ───────────────────────────────────────────────────────
@@ -299,12 +414,25 @@ func (r *Repository) AssignLogistics(ctx context.Context, itemID int64, p Assign
 	// Validate container has capacity
 	var capacity, currentCount int
 	var containerStatus string
-	err = r.db.QueryRowContext(ctx, `SELECT capacity, current_count, status FROM containers WHERE id = $1 AND deposit_point_id = $2`, p.ContainerID, p.DepositPointID).Scan(&capacity, &currentCount, &containerStatus)
+	var maintenanceStart, maintenanceEnd sql.NullTime
+	err = r.db.QueryRowContext(ctx, `SELECT capacity, current_count, status, maintenance_start, maintenance_end FROM containers WHERE id = $1 AND deposit_point_id = $2`, p.ContainerID, p.DepositPointID).Scan(&capacity, &currentCount, &containerStatus, &maintenanceStart, &maintenanceEnd)
 	if err != nil {
 		return fmt.Errorf("container not found: %w", err)
 	}
-	if containerStatus != "actif" {
-		return fmt.Errorf("container is not active (status: %s)", containerStatus)
+	if containerStatus == "inactif" {
+		return fmt.Errorf("container is inactive")
+	}
+	if containerStatus == "maintenance" {
+		if !maintenanceStart.Valid || !maintenanceEnd.Valid {
+			return fmt.Errorf("container maintenance schedule is invalid")
+		}
+		now := time.Now()
+		if !now.Before(maintenanceStart.Time) && !now.After(maintenanceEnd.Time) {
+			return fmt.Errorf("container is in maintenance window")
+		}
+	}
+	if containerStatus != "actif" && containerStatus != "maintenance" && containerStatus != "inactif" {
+		return fmt.Errorf("container is not assignable (status: %s)", containerStatus)
 	}
 	if currentCount >= capacity {
 		return fmt.Errorf("container is full (%d/%d)", currentCount, capacity)
@@ -335,9 +463,11 @@ func (r *Repository) GenerateDepositCode(ctx context.Context, itemID int64) (str
 		return "", fmt.Errorf("cannot generate code from status %q", status)
 	}
 
-	code := generateCode(6)
+	config, _ := r.GetCodeConfig(ctx)
+	if config.Length < 4 { config.Length = 6 }
+	code := generateCode(config)
 	now := time.Now()
-	expires := now.Add(DepositCodeTTL)
+	expires := addFrenchBusinessDays(now, 3)
 
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE item_logistics SET
@@ -352,26 +482,18 @@ func (r *Repository) GenerateDepositCode(ctx context.Context, itemID int64) (str
 
 // ── Transition: Confirm deposit ──────────────────────────────────────────────
 
-func (r *Repository) ConfirmDeposit(ctx context.Context, itemID int64, code string, adminID int64) error {
-	var storedCode string
-	var expiresAt *time.Time
+func (r *Repository) ConfirmDeposit(ctx context.Context, itemID int64, adminID int64) error {
 	var status string
 
 	err := r.db.QueryRowContext(ctx,
-		`SELECT workflow_status, deposit_code, deposit_code_expires_at FROM item_logistics WHERE item_id = $1`,
+		`SELECT workflow_status FROM item_logistics WHERE item_id = $1`,
 		itemID,
-	).Scan(&status, &storedCode, &expiresAt)
+	).Scan(&status)
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
 	if status != WFDepositCodeSent {
 		return fmt.Errorf("cannot confirm deposit from status %q", status)
-	}
-	if storedCode != code {
-		return fmt.Errorf("invalid deposit code")
-	}
-	if expiresAt != nil && time.Now().After(*expiresAt) {
-		return fmt.Errorf("deposit code has expired")
 	}
 
 	now := time.Now()
@@ -434,7 +556,9 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 		return "", fmt.Errorf("cannot reserve from status %q", status)
 	}
 
-	pickupCode := generateCode(8)
+	config, _ := r.GetCodeConfig(ctx)
+	if config.Length < 4 { config.Length = 8 }
+	pickupCode := generateCode(config)
 	now := time.Now()
 	reservationExpires := now.Add(ReservationTTL)
 	pickupExpires := now.Add(PickupCodeTTL)
@@ -507,10 +631,11 @@ func (r *Repository) ConfirmPickup(ctx context.Context, itemID int64, code strin
 // ── Transition: Cancel ───────────────────────────────────────────────────────
 
 type CancelPayload struct {
-	Reason string `json:"reason"`
+	Reason         string `json:"reason"`
+	RevertToStatus string `json:"revert_to_status"`
 }
 
-func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason string) error {
+func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason string, revertTo string) error {
 	var status string
 	var containerID *int64
 	var wasDeposited bool
@@ -524,7 +649,21 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 	}
 
 	if status == WFClosed || status == WFCancelled {
-		return fmt.Errorf("cannot cancel from status %q", status)
+		return fmt.Errorf("cannot cancel/revert from status %q", status)
+	}
+
+	if revertTo != "" {
+		isPostDeposit := (status == WFDeposited || status == WFAvailable || status == WFReserved)
+		targetIsPreDeposit := (revertTo == WFValidated || revertTo == WFAssigned || revertTo == WFDepositCodeSent || revertTo == WFDepositExpired)
+
+		_, err = r.db.ExecContext(ctx, `UPDATE item_logistics SET workflow_status = $1, updated_at = NOW() WHERE item_id = $2`, revertTo, itemID)
+		
+		if isPostDeposit && targetIsPreDeposit && wasDeposited && containerID != nil {
+			r.db.ExecContext(ctx, `UPDATE containers SET current_count = GREATEST(current_count - 1, 0) WHERE id = $1`, *containerID)
+			r.db.ExecContext(ctx, `UPDATE item_logistics SET deposited_at = NULL, deposit_confirmed_by = NULL WHERE item_id = $1`, itemID)
+			r.UpdateContainerCounts(ctx, *containerID)
+		}
+		return err
 	}
 
 	now := time.Now()
@@ -546,6 +685,32 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 	}
 
 	return nil
+}
+
+// ResetLogisticsForModeration removes logistics state when a user edits an item
+// so it leaves the logistics pipeline until it is validated again by moderation.
+func (r *Repository) ResetLogisticsForModeration(ctx context.Context, itemID int64) error {
+	var containerID *int64
+	var wasDeposited bool
+
+	err := r.db.QueryRowContext(ctx,
+		`SELECT container_id, (deposited_at IS NOT NULL) FROM item_logistics WHERE item_id = $1`,
+		itemID,
+	).Scan(&containerID, &wasDeposited)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return err
+	}
+
+	if wasDeposited && containerID != nil {
+		r.db.ExecContext(ctx, `UPDATE containers SET current_count = GREATEST(current_count - 1, 0) WHERE id = $1`, *containerID)
+		r.UpdateContainerCounts(ctx, *containerID)
+	}
+
+	_, err = r.db.ExecContext(ctx, `DELETE FROM item_logistics WHERE item_id = $1`, itemID)
+	return err
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────

@@ -22,11 +22,12 @@ import {
     Info,
     Clock,
     Box,
-    Terminal,
     QrCode,
+    AlertCircle,
+    Trash2,
 } from "lucide-react";
 
-const STATUS_LABELS = { actif: "Actif", vendu: "Vendu", "en attente": "En attente", brouillon: "Brouillon", refusee: "Refusee", desactivee: "Desactivee" };
+const STATUS_LABELS = { actif: "Actif", vendu: "Vendu", "en attente": "En attente", brouillon: "Brouillon", refusee: "Refusée", desactivee: "Désactivée" };
 const STATUS_COLORS = {
     actif:        { bg: "rgba(62,104,108,0.12)", color: "var(--forest-deep)" },
     vendu:        { bg: "rgba(35,59,61,0.12)",   color: "var(--text-main)" },
@@ -37,15 +38,15 @@ const STATUS_COLORS = {
 };
 
 const WF_LABELS = {
-    validated: "Validee",
-    assigned: "Point assigne",
-    deposit_code_sent: "Pret pour depot",
-    deposited: "Depose",
-    available: "Disponible",
-    reserved: "Reserve",
-    closed: "Recupere / Termine",
-    cancelled: "Annule",
-    deposit_expired: "Expire",
+    validated: "Validation en cours",
+    assigned: "Point de dépôt attribué",
+    deposit_code_sent: "Code de dépôt envoyé",
+    deposited: "Objet déposé",
+    available: "Disponible au retrait",
+    reserved: "Réservé",
+    closed: "Annonce finalisée",
+    cancelled: "Suivi interrompu",
+    deposit_expired: "Code de dépôt expiré",
 };
 
 const WF_COLORS = {
@@ -235,11 +236,18 @@ function AnnonceDetailContent() {
     const params             = useParams();
     const router             = useRouter();
     const [annonce,      setAnnonce]      = useState(null);
+    const [isLoadingAnnonce, setIsLoadingAnnonce] = useState(true);
+    const [isAnnonceNotFound, setIsAnnonceNotFound] = useState(false);
     const [activePhoto,  setActivePhoto]  = useState(0);
     const [isAdmin,      setIsAdmin]      = useState(false);
+    const [currentUserID, setCurrentUserID] = useState(null);
+    const [ownsAnnonce, setOwnsAnnonce] = useState(false);
     const [showSoldModal, setShowSoldModal] = useState(false);
+    const [showCancelModal, setShowCancelModal] = useState(false);
     const [showDeactivateModal, setShowDeactivateModal] = useState(false);
-    const [deactivateReason, setDeactivateReason] = useState("");
+    const [moderationActionType, setModerationActionType] = useState(""); // "refus" | "desactivation"
+    const [moderationReasons, setModerationReasons] = useState([]);
+    const [selectedModerationReason, setSelectedModerationReason] = useState("");
     const [deactivateDetails, setDeactivateDetails] = useState("");
     const [authorProfile, setAuthorProfile] = useState({
         name: "Auteur inconnu",
@@ -271,6 +279,7 @@ function AnnonceDetailContent() {
                 const data = await response.json();
                 if (isMounted) {
                     setIsAdmin(data?.user?.role === "admin");
+                    setCurrentUserID(data?.user?.id);
                 }
             } catch {
                 // Layout gère deja les cas d'auth.
@@ -286,6 +295,8 @@ function AnnonceDetailContent() {
     useEffect(() => {
         const fetchDetail = async () => {
             const token = window.localStorage.getItem(TOKEN_KEY);
+            setIsLoadingAnnonce(true);
+            setIsAnnonceNotFound(false);
             try {
                 const response = await fetch(apiUrl(`/items/${params.id}`), {
                     method: "GET",
@@ -294,9 +305,14 @@ function AnnonceDetailContent() {
                 if (response.ok) {
                     const data = await response.json();
                     setAnnonce({ ...data, status: normalizeStatus(data.status) });
+                } else if (response.status === 404) {
+                    setAnnonce(null);
+                    setIsAnnonceNotFound(true);
                 }
             } catch (err) {
                 console.error("Failed to fetch ad detail", err);
+            } finally {
+                setIsLoadingAnnonce(false);
             }
         };
 
@@ -304,6 +320,63 @@ function AnnonceDetailContent() {
             fetchDetail();
         }
     }, [params.id]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const checkOwnership = async () => {
+            const token = window.localStorage.getItem(TOKEN_KEY);
+            if (!token || !params?.id) return;
+
+            try {
+                const response = await fetch(apiUrl("/my-items"), {
+                    method: "GET",
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!response.ok) return;
+
+                const data = await response.json();
+                const isOwner = Array.isArray(data?.items)
+                    ? data.items.some((item) => String(item?.id) === String(params.id))
+                    : false;
+
+                if (isMounted) {
+                    setOwnsAnnonce(isOwner);
+                }
+            } catch {
+                // Ignore ownership fallback failures; primary owner check still applies.
+            }
+        };
+
+        checkOwnership();
+        return () => {
+            isMounted = false;
+        };
+    }, [params?.id]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadModerationReasons = async () => {
+            try {
+                const response = await fetch(apiUrl("/moderation-reasons"), {
+                    method: "GET",
+                });
+                if (!response.ok) return;
+                const data = await response.json();
+                if (isMounted) {
+                    setModerationReasons(Array.isArray(data?.items) ? data.items : []);
+                }
+            } catch {
+                // Keep modal usable with "Autre" fallback.
+            }
+        };
+
+        loadModerationReasons();
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     useEffect(() => {
         if (!annonce) return;
@@ -343,7 +416,13 @@ function AnnonceDetailContent() {
         });
     }, [annonce]);
 
-    if (!annonce) return (
+    if (isLoadingAnnonce) return (
+        <div style={{ padding: "4rem 2rem", textAlign: "center", color: "var(--text-muted)" }}>
+            Chargement de l'annonce...
+        </div>
+    );
+
+    if (isAnnonceNotFound || !annonce) return (
         <div style={{ padding: "4rem 2rem", textAlign: "center", color: "var(--text-muted)" }}>
             Annonce introuvable.
         </div>
@@ -352,35 +431,79 @@ function AnnonceDetailContent() {
     const photos = annonce.photos?.length ? annonce.photos : [annonce.image];
     const isDon  = annonce.type === "don";
 
+    const buildUserUpdatePayload = (status) => ({
+        title: annonce.title || "",
+        description: annonce.description || "",
+        type: annonce.type || "don",
+        price: Number(annonce.price || 0),
+        category: annonce.category || "",
+        condition: annonce.condition || "",
+        material: annonce.material || "",
+        quantity: String(annonce.quantity || "1"),
+        city: annonce.city || "",
+        country: annonce.country || "France",
+        zip: annonce.zip || "",
+        deliveryMode: annonce.deliveryMode || "",
+        dimensions: annonce.dimensions || "",
+        image: annonce.image || "",
+        photos: Array.isArray(annonce.photos) ? annonce.photos : [],
+        reference: annonce.reference || "",
+        status,
+    });
+
     const persistAnnonceUpdate = async (patch) => {
         const normalizedPatch = patch.status ? { ...patch, status: normalizeStatus(patch.status) } : patch;
         const token = window.localStorage.getItem(TOKEN_KEY);
         
         try {
-            const response = await fetch(apiUrl(`/admin/items/${annonce.id}/status`), {
-                method: "PATCH",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify({ status: normalizedPatch.status })
-            });
+            let response;
+            if (isAdmin) {
+                const bodyPayload = {
+                    status: normalizedPatch.status,
+                    moderationNote: patch.moderationNote || "",
+                    moderationDetails: patch.moderationDetails || "",
+                };
+                response = await fetch(apiUrl(`/admin/items/${annonce.id}/status`), {
+                    method: "PATCH",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`
+                    },
+                    body: JSON.stringify(bodyPayload)
+                });
+            } else {
+                response = await fetch(apiUrl(`/items/${annonce.id}`), {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`
+                    },
+                    body: JSON.stringify(buildUserUpdatePayload(normalizedPatch.status || annonce.status))
+                });
+            }
 
             if (response.ok) {
                 setAnnonce({ ...annonce, ...normalizedPatch });
+                return true;
             }
+            return false;
         } catch (err) {
             alert("Erreur lors de la mise à jour : " + err.message);
+            return false;
         }
     };
 
-    const setAsDraft = () => {
+    const setAsDraft = async () => {
         if (annonce.status === "brouillon") {
             router.push("/annonces/brouillons");
             return;
         }
-        persistAnnonceUpdate({ status: "brouillon" });
-        router.push("/annonces/brouillons");
+        const updated = await persistAnnonceUpdate({ status: "brouillon" });
+        if (updated) {
+            router.push("/annonces/brouillons");
+        } else {
+            alert("Impossible de passer l'annonce en brouillon.");
+        }
     };
 
     const markAsSold = () => {
@@ -397,27 +520,96 @@ function AnnonceDetailContent() {
         persistAnnonceUpdate({ status: "actif" });
     };
 
-    const setAsRejected = () => {
-        persistAnnonceUpdate({ status: "refusee" });
+    const setAsPending = () => {
+        persistAnnonceUpdate({ status: "en attente" });
     };
 
-    const deactivateAnnonce = () => {
-        const reason = deactivateReason.trim();
+    const handleOpenModerationModal = (type) => {
+        setModerationActionType(type);
+        setSelectedModerationReason("");
+        setShowDeactivateModal(true);
+    };
+
+    const submitModerationModal = () => {
+        const reason = selectedModerationReason.trim();
         if (!reason) {
-            alert("Veuillez renseigner un motif de desactivation.");
+            alert("Veuillez selectionner un motif.");
             return;
         }
 
+        const details = deactivateDetails.trim();
+        const isOtherReason = reason === "__other__";
+        if (isOtherReason && !details) {
+            alert("Veuillez detailler le motif si vous choisissez Autre.");
+            return;
+        }
+
+        const newStatus = moderationActionType === "refus" ? "refusee" : "desactivee";
+
         persistAnnonceUpdate({
-            status: "desactivee",
-            moderationNote: reason,
-            moderationDetails: deactivateDetails.trim(),
+            status: newStatus,
+            moderationNote: isOtherReason ? "Autre" : reason,
+            moderationDetails: details,
             moderatedAt: new Date().toISOString(),
         });
 
         setShowDeactivateModal(false);
-        setDeactivateReason("");
+        setSelectedModerationReason("");
         setDeactivateDetails("");
+        setModerationActionType("");
+    };
+
+    const deleteAnnonce = async () => {
+        if (!confirm("Voulez-vous vraiment supprimer definitivement cette annonce ?")) return;
+        
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        try {
+            const url = isAdmin ? apiUrl(`/admin/items/${annonce.id}`) : apiUrl(`/items/${annonce.id}`);
+            const response = await fetch(url, {
+                method: "DELETE",
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
+            if (response.ok) {
+                router.push(isAdmin ? "/annonces/moderation" : "/annonces/mes-annonces");
+            } else {
+                alert("Erreur lors de la suppression de l'annonce.");
+            }
+        } catch (err) {
+            alert("Erreur réseau: " + err.message);
+        }
+    };
+
+    const cancelAnnonce = () => setShowCancelModal(true);
+
+    const confirmCancelAnnonce = async () => {
+        setShowCancelModal(false);
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        try {
+            const response = await fetch(apiUrl(`/items/cancel/${annonce.id}`), {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
+
+            if (response.ok) {
+                router.push("/annonces/mes-annonces");
+            } else {
+                const data = await response.json().catch(() => ({}));
+                alert(data?.error || "Impossible d'annuler cette annonce.");
+            }
+        } catch (err) {
+            alert("Erreur réseau: " + err.message);
+        }
+    };
+
+    const resubmitAnnonce = async () => {
+        const updated = await persistAnnonceUpdate({ status: "en attente" });
+        if (updated) {
+            router.push("/annonces/mes-annonces");
+        }
     };
 
     const copyShareLink = async () => {
@@ -434,20 +626,19 @@ function AnnonceDetailContent() {
     const goToEditAnnonce = () => {
         try {
             const existingAnnonces = JSON.parse(localStorage.getItem("user_annonces") || "[]");
-            const alreadyExists = existingAnnonces.some((a) => String(a.id) === String(annonce.id));
 
-            if (!alreadyExists) {
-                const normalized = {
-                    ...annonce,
-                    category: annonce.category || "",
-                    condition: annonce.condition || "",
-                    material: annonce.material || "",
-                    quantity: annonce.quantity || "1",
-                    deliveryMode: annonce.deliveryMode || "main_propre",
-                    dimensions: annonce.dimensions || "",
-                };
-                localStorage.setItem("user_annonces", JSON.stringify([normalized, ...existingAnnonces]));
-            }
+            const normalized = {
+                ...annonce,
+                category: annonce.category || "",
+                condition: annonce.condition || "",
+                material: annonce.material || "",
+                quantity: annonce.quantity || "1",
+                deliveryMode: annonce.deliveryMode || "main_propre",
+                dimensions: annonce.dimensions || "",
+            };
+
+            const withoutCurrent = existingAnnonces.filter((a) => String(a.id) !== String(annonce.id));
+            localStorage.setItem("user_annonces", JSON.stringify([normalized, ...withoutCurrent]));
         } catch {}
 
         router.push(`/annonces/deposer?id=${annonce.id}`);
@@ -455,7 +646,31 @@ function AnnonceDetailContent() {
 
     const prev = () => setActivePhoto(i => (i - 1 + photos.length) % photos.length);
     const next = () => setActivePhoto(i => (i + 1) % photos.length);
+    const annonceOwnerId =
+        annonce?.userId ??
+        annonce?.user_id ??
+        annonce?.ownerId ??
+        annonce?.owner_id ??
+        annonce?.authorId ??
+        annonce?.author_id ??
+        annonce?.seller?.id ??
+        annonce?.user?.id ??
+        null;
+    const canManageAnnonce =
+        !isAdmin &&
+        (
+            (currentUserID !== null &&
+                annonceOwnerId !== null &&
+                String(currentUserID) === String(annonceOwnerId)) ||
+            ownsAnnonce
+        );
     const statusKey = normalizeStatus(annonce.status);
+    const workflowKey = String(annonce.workflowStatus || "").toLowerCase();
+    const isDraftAnnonce = statusKey === "brouillon";
+    const isRefusedAnnonce = ["refusee", "desactivee", "desactive"].includes(statusKey);
+    const isAfterDeposit = ["deposited", "available", "reserved", "collected", "closed"].includes(workflowKey);
+    const isValidatedBeforeDeposit = statusKey === "actif" && !isAfterDeposit;
+    const isPendingAnnonce = statusKey === "en attente";
     const statusLabel = STATUS_LABELS[statusKey] || statusKey;
     const descriptionParts = (annonce.description || "Aucune description fournie.").split("\n\n");
     const savesCount = Number(annonce.savesCount || 0);
@@ -490,19 +705,35 @@ function AnnonceDetailContent() {
         const color = WF_COLORS[wf] || "var(--text-muted)";
         const panelBackground = `linear-gradient(135deg, ${color}14 0%, rgba(255,255,255,0.98) 34%, rgba(246,249,248,0.98) 100%)`;
         const nextStep =
-            (wf === "validated" && "Assignation par l'admin") ||
-            (wf === "assigned" && "Envoi du code de depot") ||
-            (wf === "deposit_code_sent" && "Depot physique de l'objet") ||
-            (wf === "deposited" && "Validation de mise en ligne") ||
-            (wf === "available" && "Attente de reservation") ||
-            (wf === "reserved" && "Attente de recuperation") ||
-            (wf === "closed" && "Cycle termine") ||
-            (wf === "cancelled" && "Action annulee") ||
-            (wf === "deposit_expired" && "Redemander un code") ||
+            (wf === "validated" && "L'équipe UpcycleConnect valide actuellement votre annonce.") ||
+            (wf === "assigned" && "L'équipe UpcycleConnect va générer votre code de dépôt.") ||
+            (wf === "deposit_code_sent" && "Vous pouvez déposer votre objet au point attribué avec votre code.") ||
+            (wf === "deposited" && "Votre dépôt est en cours de vérification par l'équipe UpcycleConnect.") ||
+            (wf === "available" && "Votre objet est disponible pour les professionnels intéressés.") ||
+            (wf === "reserved" && "Un professionnel est en train d'organiser le retrait.") ||
+            (wf === "closed" && "Le parcours logistique est terminé.") ||
+            (wf === "cancelled" && "Le suivi logistique a été interrompu.") ||
+            (wf === "deposit_expired" && "Votre code de dépôt a expiré. Un nouveau code est nécessaire.") ||
             "Suivi logistique en cours";
-        const codeLabel = wf === "reserved" ? "Code de recuperation" : "Code de depot";
+        const currentStepLabel =
+            (wf === "validated" && "Validation de l'annonce") ||
+            (wf === "assigned" && "Génération du code de dépôt") ||
+            (wf === "deposit_code_sent" && "Dépôt de l'objet") ||
+            (wf === "deposited" && "Vérification du dépôt") ||
+            (wf === "available" && "Disponibilité pour retrait") ||
+            (wf === "reserved" && "Retrait en préparation") ||
+            (wf === "closed" && "Parcours terminé") ||
+            (wf === "cancelled" && "Suivi interrompu") ||
+            (wf === "deposit_expired" && "Code de dépôt expiré") ||
+            "Suivi en cours";
+        const shouldShowCode = wf === "deposit_code_sent" || wf === "reserved";
+        const codeLabel = wf === "reserved" ? "Code de retrait" : "Code de dépôt";
         const codeValue = wf === "reserved" ? annonce.pickupCode : annonce.depositCode;
+        const codeExpires = wf === "reserved" ? annonce.pickupCodeExpiresAt : annonce.depositCodeExpiresAt;
         const codeColor = wf === "reserved" ? "#f59e0b" : color;
+        const codeHelpText = wf === "reserved"
+            ? "À présenter lors du retrait de l'objet."
+            : "À conserver et présenter au point de dépôt lors de la remise.";
 
         return (
             <div style={{
@@ -511,11 +742,9 @@ function AnnonceDetailContent() {
                 background: panelBackground,
                 borderRadius: "28px",
                 padding: "1.4rem",
-                border: "1px solid rgba(35,59,61,0.08)",
                 display: "flex",
                 flexDirection: "column",
                 gap: "1.15rem",
-                boxShadow: "0 22px 50px rgba(20, 32, 34, 0.06)"
             }}>
                 <div style={{
                     position: "absolute",
@@ -549,16 +778,16 @@ function AnnonceDetailContent() {
 
                         <div style={{ display: "grid", gap: "0.45rem" }}>
                             <div style={{ display: "inline-flex", alignItems: "center", width: "fit-content", padding: "0.38rem 0.72rem", borderRadius: "999px", background: `${color}12`, color: color, fontSize: "0.7rem", fontWeight: "800", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                                Statut logistique
+                                Suivi logistique
                             </div>
                             <div style={{ fontSize: "1.34rem", fontWeight: "800", color: "var(--text-main)", lineHeight: "1.1", letterSpacing: "-0.03em" }}>{label}</div>
                             <div style={{ fontSize: "0.92rem", lineHeight: "1.6", color: "var(--text-muted)", maxWidth: "56ch" }}>
-                                Cette annonce suit un parcours encadre. La prochaine action attendue est : <span style={{ color: "var(--text-main)", fontWeight: "700" }}>{nextStep}</span>.
+                                <span style={{ color: "var(--text-main)", fontWeight: "700" }}>{nextStep}</span>
                             </div>
                         </div>
                     </div>
 
-                    {codeValue && (
+                    {shouldShowCode && codeValue && (
                         <div style={{
                             flex: "0 0 auto",
                             minWidth: "220px",
@@ -570,8 +799,13 @@ function AnnonceDetailContent() {
                         }}>
                             <div style={{ fontSize: "0.68rem", fontWeight: "800", textTransform: "uppercase", color: codeColor, letterSpacing: "0.08em", marginBottom: "0.35rem" }}>{codeLabel}</div>
                             <div style={{ fontSize: "1.48rem", fontWeight: "900", color: "var(--text-main)", letterSpacing: "0.14em", fontFamily: "monospace", marginBottom: "0.3rem" }}>{codeValue}</div>
+                            {codeExpires && (
+                                <div style={{ fontSize: "0.72rem", fontWeight: "700", color: "var(--state-critical)", marginBottom: "0.4rem" }}>
+                                    Expire le : {codeExpires}
+                                </div>
+                            )}
                             <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: "1.45" }}>
-                                A communiquer tel quel au point de passage concerne.
+                                {codeHelpText}
                             </div>
                         </div>
                     )}
@@ -584,7 +818,7 @@ function AnnonceDetailContent() {
                                 <MapPin size={16} />
                             </div>
                             <div>
-                                <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Point de depot</div>
+                                <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Point de dépôt</div>
                                 <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)" }}>{annonce.depositPointName}</div>
                             </div>
                         </div>
@@ -595,7 +829,7 @@ function AnnonceDetailContent() {
                                 <Box size={16} />
                             </div>
                             <div>
-                                <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Conteneur</div>
+                                <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Conteneur attribué</div>
                                 <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)" }}>{annonce.containerName}</div>
                             </div>
                         </div>
@@ -606,8 +840,8 @@ function AnnonceDetailContent() {
                             <Info size={16} />
                         </div>
                         <div>
-                            <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Prochaine etape</div>
-                            <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)", lineHeight: "1.45" }}>{nextStep}</div>
+                            <div style={{ fontSize: "0.64rem", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Étape en cours</div>
+                            <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)", lineHeight: "1.45" }}>{currentStepLabel}</div>
                         </div>
                     </div>
                 </div>
@@ -652,7 +886,37 @@ function AnnonceDetailContent() {
                     </div>
                 </div>
 
-                <LogisticsStatus />
+                {!(annonce.status === "refusee" || annonce.status === "desactivee" || annonce.status === "desactive") && (
+                    <LogisticsStatus />
+                )}
+
+                {(annonce.status === "refusee" || annonce.status === "desactivee" || annonce.status === "desactive") && annonce.moderationNote && (
+                    <div style={{
+                        background: "var(--state-critical-bg)",
+                        borderRadius: "16px",
+                        padding: "1.2rem",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "1rem"
+                    }}>
+                        <div style={{ color: "var(--state-critical)", marginTop: "0.1rem" }}>
+                            <AlertCircle size={20} />
+                        </div>
+                        <div>
+                            <h4 style={{ margin: "0 0 0.25rem", color: "var(--state-critical)", fontSize: "0.95rem", fontWeight: "700" }}>
+                                {annonce.status === "refusee" ? "Annonce refusée par la modération" : "Annonce désactivée par la modération"}
+                            </h4>
+                            <p style={{ margin: "0 0 0.5rem", color: "var(--text-main)", fontSize: "0.9rem", lineHeight: "1.5" }}>
+                                <strong>Motif :</strong> {annonce.moderationNote}
+                            </p>
+                            {annonce.moderationDetails && (
+                                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.85rem", lineHeight: "1.5" }}>
+                                    <em>Détails complémentaires :</em> {annonce.moderationDetails}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(360px, 0.8fr)", gap: "1.5rem", alignItems: "stretch" }}>
                     <div style={{ background: "var(--black)", borderRadius: "28px", padding: "1rem", border: "1px solid rgba(18, 25, 26, 0.08)" }}>
@@ -764,15 +1028,24 @@ function AnnonceDetailContent() {
                                 {isAdmin ? (
                                     <>
                                         {statusKey === "actif" ? (
-                                            <button className="action-button action-button-danger" onClick={() => setShowDeactivateModal(true)} style={actionBtn("danger")}>
+                                            <button className="action-button action-button-danger" onClick={() => handleOpenModerationModal("desactivation")} style={actionBtn("danger")}>
                                                 Desactiver l'annonce
                                             </button>
+                                        ) : (statusKey === "refusee" || statusKey === "desactivee" || statusKey === "desactive") ? (
+                                            <>
+                                                <button className="action-button action-button-primary" onClick={setAsPending} style={actionBtn("primary")}>
+                                                    Repasser en attente
+                                                </button>
+                                                <button className="action-button action-button-danger" onClick={deleteAnnonce} style={actionBtn("danger")}>
+                                                    Supprimer l'annonce
+                                                </button>
+                                            </>
                                         ) : (
                                             <>
                                                 <button className="action-button action-button-primary" onClick={setAsActive} style={actionBtn("primary")}>
                                                     <CheckCircle2 size={16} /> Valider l'annonce
                                                 </button>
-                                                <button className="action-button action-button-danger" onClick={setAsRejected} style={actionBtn("danger")}>
+                                                <button className="action-button action-button-danger" onClick={() => handleOpenModerationModal("refus")} style={actionBtn("danger")}>
                                                     Marquer comme refusee
                                                 </button>
                                             </>
@@ -781,17 +1054,61 @@ function AnnonceDetailContent() {
                                             Retour a la moderation
                                         </button>
                                     </>
-                                ) : (
+                                ) : canManageAnnonce ? (
                                     <>
-                                        <button className="action-button action-button-primary" onClick={setAsDraft} style={actionBtn("primary")}>Mettre en brouillon</button>
-                                        <button className="action-button action-button-neutral" onClick={goToEditAnnonce} style={actionBtn("neutral")}>
-                                            <Pencil size={15} /> Modifier l'annonce
-                                        </button>
-                                        <button className="action-button action-button-danger" onClick={markAsSold} style={actionBtn("danger")}>
-                                            <CheckCircle2 size={16} /> {annonce.status === "vendu" ? "Annonce deja vendue" : "Marquer comme vendue"}
-                                        </button>
+                                        {isAfterDeposit ? (
+                                            <div style={{ fontSize: "0.86rem", color: "var(--text-muted)", lineHeight: "1.5" }}>
+                                                Cette annonce est verrouillée après le dépôt. Aucune modification ou annulation n'est possible.
+                                            </div>
+                                        ) : isRefusedAnnonce ? (
+                                            <>
+                                                <button className="action-button action-button-primary" onClick={resubmitAnnonce} style={actionBtn("primary")}>
+                                                    Renvoyer en validation
+                                                </button>
+                                                <button className="action-button action-button-neutral" onClick={goToEditAnnonce} style={actionBtn("neutral")}>
+                                                    <Pencil size={15} /> Modifier l'annonce
+                                                </button>
+                                                <button className="action-button action-button-danger" onClick={deleteAnnonce} style={actionBtn("danger")}>
+                                                    <Trash2 size={16} color="#ff8080" /> Supprimer / abandonner
+                                                </button>
+                                            </>
+                                        ) : isDraftAnnonce ? (
+                                            <>
+                                                <button className="action-button action-button-primary" onClick={resubmitAnnonce} style={actionBtn("primary")}>
+                                                    Soumettre en validation
+                                                </button>
+                                                <button className="action-button action-button-neutral" onClick={goToEditAnnonce} style={actionBtn("neutral")}>
+                                                    <Pencil size={15} /> Modifier l'annonce
+                                                </button>
+                                                <button className="action-button action-button-danger" onClick={deleteAnnonce} style={actionBtn("danger")}>
+                                                    <Trash2 size={16} color="#ff8080" /> Supprimer
+                                                </button>
+                                            </>
+                                        ) : isValidatedBeforeDeposit ? (
+                                            <>
+                                                <button className="action-button action-button-neutral" onClick={goToEditAnnonce} style={actionBtn("neutral")}>
+                                                    <Pencil size={15} /> Modifier (champs limités)
+                                                </button>
+                                                <button className="action-button action-button-danger" onClick={cancelAnnonce} style={actionBtn("danger")}>
+                                                    Annuler l'annonce
+                                                </button>
+                                            </>
+                                        ) : isPendingAnnonce ? (
+                                            <>
+                                                <button className="action-button action-button-neutral" onClick={goToEditAnnonce} style={actionBtn("neutral")}>
+                                                    <Pencil size={15} /> Modifier l'annonce
+                                                </button>
+                                                <button className="action-button action-button-danger" onClick={cancelAnnonce} style={actionBtn("danger")}>
+                                                    Annuler l'annonce
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button className="action-button action-button-neutral" onClick={goToEditAnnonce} style={actionBtn("neutral")}>
+                                                <Pencil size={15} /> Modifier l'annonce
+                                            </button>
+                                        )}
                                     </>
-                                )}
+                                ) : null}
                             </div>
                             </div>
                         </div>
@@ -1012,19 +1329,20 @@ function AnnonceDetailContent() {
                         animation: "fadeIn 0.2s ease-out",
                     }}>
                         <h3 style={{ margin: "0 0 0.5rem", fontSize: "1.25rem", fontWeight: "600", color: "var(--text-main)" }}>
-                            Desactiver cette annonce
+                            {moderationActionType === "refus" ? "Refuser cette annonce" : "Desactiver cette annonce"}
                         </h3>
                         <p style={{ margin: "0 0 1rem", color: "var(--text-muted)", fontSize: "0.95rem", lineHeight: "1.5" }}>
-                            Cette annonce n'apparaitra plus dans les annonces actives. Renseignez un motif pour tracer la moderation.
+                            {moderationActionType === "refus" 
+                                ? "L'annonce ne sera pas publiee. Renseignez un motif pour informer l'utilisateur."
+                                : "Cette annonce n'apparaitra plus dans les annonces actives. Renseignez un motif pour tracer la moderation."}
                         </p>
 
                         <label style={{ display: "block", fontSize: "0.82rem", fontWeight: "600", color: "var(--text-main)", marginBottom: "0.35rem" }}>
                             Motif (obligatoire)
                         </label>
-                        <input
-                            value={deactivateReason}
-                            onChange={(e) => setDeactivateReason(e.target.value)}
-                            placeholder="Ex: Non conforme a la charte, contenu trompeur..."
+                        <select
+                            value={selectedModerationReason}
+                            onChange={(e) => setSelectedModerationReason(e.target.value)}
                             style={{
                                 width: "100%",
                                 border: "1px solid rgba(35, 59, 61, 0.16)",
@@ -1034,11 +1352,18 @@ function AnnonceDetailContent() {
                                 fontSize: "0.92rem",
                                 marginBottom: "0.9rem",
                                 outline: "none",
+                                background: "white",
                             }}
-                        />
+                        >
+                            <option value="">Selectionnez un motif</option>
+                            {moderationReasons.map((reason) => (
+                                <option key={reason.id} value={reason.label}>{reason.label}</option>
+                            ))}
+                            <option value="__other__">Autre (je detaille)</option>
+                        </select>
 
                         <label style={{ display: "block", fontSize: "0.82rem", fontWeight: "600", color: "var(--text-main)", marginBottom: "0.35rem" }}>
-                            Details (optionnel)
+                            Details {selectedModerationReason === "__other__" ? "(obligatoire)" : "(optionnel)"}
                         </label>
                         <textarea
                             value={deactivateDetails}
@@ -1062,7 +1387,6 @@ function AnnonceDetailContent() {
                             <button
                                 onClick={() => {
                                     setShowDeactivateModal(false);
-                                    setDeactivateReason("");
                                     setDeactivateDetails("");
                                 }}
                                 style={{
@@ -1079,7 +1403,7 @@ function AnnonceDetailContent() {
                                 Annuler
                             </button>
                             <button
-                                onClick={deactivateAnnonce}
+                                onClick={submitModerationModal}
                                 style={{
                                     padding: "0.75rem 1.5rem",
                                     borderRadius: "12px",
@@ -1091,7 +1415,70 @@ function AnnonceDetailContent() {
                                     cursor: "pointer",
                                 }}
                             >
-                                Confirmer la desactivation
+                                {moderationActionType === "refus" ? "Confirmer le refus" : "Confirmer la desactivation"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showCancelModal && (
+                <div style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0, 0, 0, 0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 1000,
+                }}>
+                    <div style={{
+                        background: "white",
+                        borderRadius: "20px",
+                        padding: "2rem",
+                        maxWidth: "440px",
+                        width: "90%",
+                        boxShadow: "0 20px 60px rgba(0, 0, 0, 0.15)",
+                        animation: "fadeIn 0.2s ease-out",
+                    }}>
+                        <h3 style={{ margin: "0 0 0.5rem", fontSize: "1.2rem", fontWeight: "700", color: "var(--text-main)" }}>
+                            Annuler l'annonce ?
+                        </h3>
+                        <p style={{ margin: "0 0 1.75rem", color: "var(--text-muted)", fontSize: "0.92rem", lineHeight: "1.6" }}>
+                            Cette action stoppera le parcours logistique en cours. L'annonce sera marquée comme annulée et ne pourra plus être modifiée.
+                        </p>
+                        <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+                            <button
+                                onClick={() => setShowCancelModal(false)}
+                                style={{
+                                    padding: "0.72rem 1.4rem",
+                                    borderRadius: "12px",
+                                    border: "1px solid rgba(35, 59, 61, 0.2)",
+                                    background: "#FFFFFF",
+                                    color: "var(--text-main)",
+                                    fontSize: "0.92rem",
+                                    fontWeight: "500",
+                                    cursor: "pointer",
+                                    fontFamily: "inherit",
+                                }}
+                            >
+                                Conserver l'annonce
+                            </button>
+                            <button
+                                onClick={confirmCancelAnnonce}
+                                style={{
+                                    padding: "0.72rem 1.4rem",
+                                    borderRadius: "12px",
+                                    border: "none",
+                                    background: "var(--state-critical-bg)",
+                                    color: "var(--state-critical)",
+                                    fontSize: "0.92rem",
+                                    fontWeight: "700",
+                                    cursor: "pointer",
+                                    fontFamily: "inherit",
+                                }}
+                            >
+                                Oui, annuler l'annonce
                             </button>
                         </div>
                     </div>

@@ -122,6 +122,7 @@ const styles = {
         color: status === "vendu" ? "white" :
             status === "actif" ? "white" :
             status === "en attente" ? "#EAF5F4" :
+            status === "refusee" ? "#ff8080" :
             "#EAF5F4",
         backdropFilter: "blur(8px)",
         WebkitBackdropFilter: "blur(8px)",
@@ -359,6 +360,8 @@ function MesAnnoncesContent() {
     const [filterStatus, setFilterStatus] = useState("");
     const [annonces, setAnnonces] = useState([]);
     const [showToast, setShowToast] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
+    const [toastVariant, setToastVariant] = useState("success");
     const [isAdmin, setIsAdmin] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deleteTargetId, setDeleteTargetId] = useState(null);
@@ -391,7 +394,10 @@ function MesAnnoncesContent() {
             });
             if (response.ok) {
                 const data = await response.json();
-                setAnnonces(data.items || []);
+                const allItems = data.items || [];
+                // Ne pas afficher les brouillons dans "Mes annonces"
+                const filtered = isAdmin ? allItems : allItems.filter(a => a.status !== "brouillon");
+                setAnnonces(filtered);
             }
         } catch (err) {
             console.error("Failed to fetch ads", err);
@@ -410,11 +416,23 @@ function MesAnnoncesContent() {
 
         // Vérifier le paramètre de succès
         if (searchParams.get("success") === "true") {
+            setToastVariant("success");
+            setToastMessage("Votre annonce a bien été mise en ligne !");
             setShowToast(true);
             const timer = setTimeout(() => {
                 setShowToast(false);
                 router.replace("/annonces/mes-annonces");
             }, 5000);
+            return () => clearTimeout(timer);
+        }
+        if (searchParams.get("info") === "no_changes") {
+            setToastVariant("info");
+            setToastMessage("Aucune modification enregistrée.");
+            setShowToast(true);
+            const timer = setTimeout(() => {
+                setShowToast(false);
+                router.replace("/annonces/mes-annonces");
+            }, 4000);
             return () => clearTimeout(timer);
         }
     }, [searchParams, router]);
@@ -431,20 +449,35 @@ function MesAnnoncesContent() {
         setShowDeleteModal(true);
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (!deleteTargetId) return;
 
-        // Supprimer localement du state
-        setAnnonces(prev => prev.filter(a => a.id !== deleteTargetId));
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        try {
+            const url = isAdmin ? apiUrl(`/admin/items/${deleteTargetId}`) : apiUrl(`/items/${deleteTargetId}`);
+            const response = await fetch(url, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` }
+            });
 
-        // Supprimer du localStorage si elle y était
-        const localData = JSON.parse(localStorage.getItem("user_annonces") || "[]");
-        const nextLocalData = localData.filter(a => a.id !== deleteTargetId);
-        localStorage.setItem("user_annonces", JSON.stringify(nextLocalData));
+            if (response.ok) {
+                // Supprimer localement du state
+                setAnnonces(prev => prev.filter(a => a.id !== deleteTargetId));
 
-        // Fermer la modal
-        setShowDeleteModal(false);
-        setDeleteTargetId(null);
+                // Supprimer du localStorage si elle y était
+                const localData = JSON.parse(localStorage.getItem("user_annonces") || "[]");
+                const nextLocalData = localData.filter(a => a.id !== deleteTargetId);
+                localStorage.setItem("user_annonces", JSON.stringify(nextLocalData));
+
+                // Fermer la modal
+                setShowDeleteModal(false);
+                setDeleteTargetId(null);
+            } else {
+                alert("Erreur lors de la suppression de l'annonce.");
+            }
+        } catch (err) {
+            alert("Erreur réseau: " + err.message);
+        }
     };
 
     const handleEdit = (id) => {
@@ -473,11 +506,19 @@ function MesAnnoncesContent() {
     return (
         <div style={styles.container}>
             {showToast && (
-                <div style={styles.toast}>
-                    <div style={{ background: "var(--green-leaf)", borderRadius: "50%", padding: "2px", display: "flex" }}>
-                        <Check size={16} color="var(--black)" />
+                <div style={{
+                    ...styles.toast,
+                    background: toastVariant === "info" ? "rgba(35,59,61,0.92)" : "var(--black)",
+                }}>
+                    <div style={{
+                        background: toastVariant === "info" ? "rgba(255,255,255,0.15)" : "var(--green-leaf)",
+                        borderRadius: "50%",
+                        padding: "2px",
+                        display: "flex",
+                    }}>
+                        <Check size={16} color={toastVariant === "info" ? "rgba(255,255,255,0.85)" : "var(--black)"} />
                     </div>
-                    <span style={{ fontWeight: "500", fontSize: "0.95rem" }}>Votre annonce a bien été mise en ligne !</span>
+                    <span style={{ fontWeight: "500", fontSize: "0.95rem" }}>{toastMessage}</span>
                 </div>
             )}
             <header style={styles.header}>
@@ -573,7 +614,15 @@ function MesAnnoncesContent() {
             </div>
 
             <div style={styles.grid}>
-                {filteredAnnonces.map((annonce) => (
+                {filteredAnnonces.map((annonce) => {
+                    const statusKey = normalizeStatus(annonce.status);
+                    const workflowKey = String(annonce.workflowStatus || "").toLowerCase();
+                    const isAfterDeposit = ["deposited", "available", "reserved", "collected", "closed"].includes(workflowKey);
+                    const isCancelled = workflowKey === "cancelled";
+                    const canEdit = !isAdmin && !isCancelled && statusKey !== "vendu" && !isAfterDeposit;
+                    const canDelete = !isAdmin && ["brouillon", "refusee", "desactivee", "desactive"].includes(statusKey) && !isCancelled;
+
+                    return (
                     <div
                         key={annonce.__listKey || annonce.id}
                         className="annonce-card"
@@ -615,15 +664,33 @@ function MesAnnoncesContent() {
                             )}
                             <div style={styles.tagsRow}>
                                 <span style={styles.tag}>{annonce.type === "don" ? "Don" : "Vente"}</span>
-                                {annonce.workflowStatus && (
-                                    <span style={{ ...styles.tag, background: "rgba(99,102,241,0.25)", color: "#c7d2fe", border: "1px solid rgba(99,102,241,0.4)" }}>
-                                        {annonce.workflowStatus === 'deposit_code_sent' ? `À déposer (${annonce.depositCode})` : 
-                                         annonce.workflowStatus === 'deposited' ? 'Déposé' :
-                                         annonce.workflowStatus === 'reserved' ? 'Réservé' :
-                                         annonce.workflowStatus === 'collected' ? 'Récupéré' : 
-                                         annonce.workflowStatus === 'closed' ? 'Terminé' : 'En transit'}
-                                    </span>
-                                )}
+                                {annonce.workflowStatus && (() => {
+                                    const wfColor =
+                                        annonce.workflowStatus === 'validated'         ? '#6366f1' :
+                                        annonce.workflowStatus === 'assigned'          ? '#8b5cf6' :
+                                        annonce.workflowStatus === 'deposit_code_sent' ? '#f59e0b' :
+                                        annonce.workflowStatus === 'deposited'         ? '#10b981' :
+                                        annonce.workflowStatus === 'available'         ? '#059669' :
+                                        annonce.workflowStatus === 'reserved'          ? '#ec4899' :
+                                        annonce.workflowStatus === 'collected'         ? '#2563eb' :
+                                        annonce.workflowStatus === 'closed'            ? '#475569' :
+                                        annonce.workflowStatus === 'deposit_expired'   ? '#ef4444' :
+                                        '#94a3b8';
+                                    const wfLabel =
+                                        annonce.workflowStatus === 'validated'         ? 'Sortie modération' :
+                                        annonce.workflowStatus === 'assigned'          ? 'Génération du code de dépôt' :
+                                        annonce.workflowStatus === 'deposit_code_sent' ? `À déposer (${annonce.depositCode})` :
+                                        annonce.workflowStatus === 'deposited'         ? 'Déposé' :
+                                        annonce.workflowStatus === 'available'         ? 'Disponible' :
+                                        annonce.workflowStatus === 'reserved'          ? 'Réservé' :
+                                        annonce.workflowStatus === 'collected'         ? 'Récupéré' :
+                                        annonce.workflowStatus === 'closed'            ? 'Terminé' : 'En transit';
+                                    return (
+                                        <span style={{ ...styles.tag, background: `${wfColor}28`, color: wfColor, border: `1px solid ${wfColor}50` }}>
+                                            {wfLabel}
+                                        </span>
+                                    );
+                                })()}
                             </div>
 
                             {isAdmin && annonce.photos && annonce.photos.length > 0 && (
@@ -645,22 +712,26 @@ function MesAnnoncesContent() {
                             )}
 
                             <div style={styles.cardActions}>
-                                <button
-                                    className="action-btn-card"
-                                    style={styles.actionBtn}
-                                    title="Éditer"
-                                    onClick={(e) => { e.stopPropagation(); handleEdit(annonce.id); }}
-                                >
-                                    <Pencil size={16} />
-                                </button>
-                                <button
-                                    className="action-btn-card"
-                                    style={styles.actionBtn}
-                                    title="Supprimer"
-                                    onClick={(e) => { e.stopPropagation(); handleDelete(annonce.id); }}
-                                >
-                                    <Trash2 size={16} color="#ff8080" />
-                                </button>
+                                {canEdit && (
+                                    <button
+                                        className="action-btn-card"
+                                        style={styles.actionBtn}
+                                        title="Éditer"
+                                        onClick={(e) => { e.stopPropagation(); handleEdit(annonce.id); }}
+                                    >
+                                        <Pencil size={16} />
+                                    </button>
+                                )}
+                                {canDelete && (
+                                    <button
+                                        className="action-btn-card"
+                                        style={styles.actionBtn}
+                                        title="Supprimer"
+                                        onClick={(e) => { e.stopPropagation(); handleDelete(annonce.id); }}
+                                    >
+                                        <Trash2 size={16} color="#ff8080" />
+                                    </button>
+                                )}
                                 <button
                                     className="view-btn-card"
                                     style={styles.viewBtn}
@@ -671,7 +742,7 @@ function MesAnnoncesContent() {
                             </div>
                         </div>
                     </div>
-                ))}
+                )})}
             </div>
 
             {showDeleteModal && (

@@ -41,10 +41,15 @@ type Item struct {
 	UserRegistrationDate string    `json:"userRegistrationDate,omitempty"`
 	WorkflowStatus       string    `json:"workflowStatus"`
 	DepositCode          string    `json:"depositCode"`
+	DepositCodeExpiresAt string    `json:"depositCodeExpiresAt,omitempty"`
 	PickupCode           string    `json:"pickupCode"`
+	PickupCodeExpiresAt  string    `json:"pickupCodeExpiresAt,omitempty"`
 	DepositPointName     string    `json:"depositPointName"`
 	ContainerName        string    `json:"containerName"`
 	Date                 string    `json:"date"` // Formatted date for frontend
+	ModerationNote       string    `json:"moderationNote"`
+	ModerationDetails    string    `json:"moderationDetails"`
+	ModeratedAt          string    `json:"moderatedAt,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
@@ -66,8 +71,11 @@ type CreatePayload struct {
 	Image        string   `json:"image"`
 	Photos       []string `json:"photos"`
 	Reference    string   `json:"reference"`
+	Status       string   `json:"status"`
 }
 
 type UpdateStatusPayload struct {
-	Status string `json:"status"`
+	Status            string `json:"status"`
+	ModerationNote    string `json:"moderationNote"`
+	ModerationDetails string `json:"moderationDetails"`
 }

@@ -255,9 +255,32 @@ const DEFAULT_COUNTRIES = [
     { id: 3, label: "Belgique", emoji: "🇧🇪", zip_length: 4 },
 ];
 
+const LOCKED_WORKFLOW_STATES = ["deposited", "available", "reserved", "collected", "closed"];
+const LIMITED_EDIT_BLOCKED_FIELDS = new Set([
+    "type",
+    "price",
+    "category",
+    "condition",
+    "material",
+    "quantity",
+    "city",
+    "country",
+    "zip",
+    "deliveryMode",
+    "dimensions",
+]);
+
+const normalizeStatus = (status) => {
+    if (!status) return "en attente";
+    const value = String(status).toLowerCase();
+    if (value === "refuse" || value === "refusee" || value === "refusée") return "refusee";
+    return value;
+};
+
 export default function DeposerAnnoncePage() {
     const router = useRouter();
     const fileInputRef = useRef(null);
+    const initialEditSnapshotRef = useRef(null);
     const [type, setType] = useState("don"); // 'don' ou 'vente'
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [photos, setPhotos] = useState([]); // Array of { file, preview }
@@ -266,6 +289,11 @@ export default function DeposerAnnoncePage() {
     const [conditions, setConditions] = useState(DEFAULT_CONDITIONS);
     const [materials, setMaterials] = useState(DEFAULT_MATERIALS);
     const [countries, setCountries] = useState(DEFAULT_COUNTRIES);
+    const [editPolicy, setEditPolicy] = useState({
+        sourceStatus: "",
+        isLimited: false,
+        isLocked: false,
+    });
 
     const [formData, setFormData] = useState({
         title: "",
@@ -317,15 +345,95 @@ export default function DeposerAnnoncePage() {
     const searchParams = useSearchParams();
     const editId = searchParams.get("id");
 
+    const normalizeForCompare = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+
+    const buildComparableSnapshot = ({
+        type: itemType,
+        form,
+        photoPreviews,
+    }) => {
+        const safePhotos = Array.isArray(photoPreviews) ? photoPreviews.map((p) => String(p || "")) : [];
+        return {
+            title: normalizeForCompare(form.title),
+            description: normalizeForCompare(form.description),
+            type: normalizeForCompare(itemType),
+            price: Number(form.price || 0),
+            category: normalizeForCompare(getMatch(categories, form.category)),
+            condition: normalizeForCompare(getMatch(conditions, form.condition)),
+            material: normalizeForCompare(getMatch(materials, form.material)),
+            quantity: normalizeForCompare(form.quantity || "1"),
+            city: normalizeForCompare(form.city),
+            country: normalizeForCompare(getMatch(countries, form.country, "France")),
+            zip: normalizeForCompare(form.zip),
+            deliveryMode: normalizeForCompare(form.deliveryMode),
+            dimensions: normalizeForCompare(form.dimensions),
+            image: safePhotos[coverIndex] || "",
+            photos: safePhotos,
+        };
+    };
+
+    const hasMeaningfulChanges = (nextSnapshot) => {
+        const initialSnapshot = initialEditSnapshotRef.current;
+        if (!initialSnapshot) return true;
+
+        const keysToCompare = disableRestrictedFields
+            ? ["title", "description", "image", "photos"]
+            : ["title", "description", "type", "price", "category", "condition", "material", "quantity", "city", "country", "zip", "deliveryMode", "dimensions", "image", "photos"];
+
+        return keysToCompare.some((key) => {
+            const left = initialSnapshot[key];
+            const right = nextSnapshot[key];
+            if (Array.isArray(left) || Array.isArray(right)) {
+                return JSON.stringify(left || []) !== JSON.stringify(right || []);
+            }
+            return left !== right;
+        });
+    };
+
 
     useEffect(() => {
-        if (editId) {
-            const existingAnnonces = JSON.parse(localStorage.getItem("user_annonces") || "[]");
-            const annonceToEdit = existingAnnonces.find(a => a.id.toString() === editId.toString());
+        if (!editId) return;
 
-            if (annonceToEdit) {
-                setType(annonceToEdit.type);
-                setFormData({
+        const hydrateForm = (annonceToEdit) => {
+            if (!annonceToEdit) return;
+
+            const normalizedStatus = normalizeStatus(annonceToEdit.status);
+            const workflowStatus = String(annonceToEdit.workflowStatus || "").toLowerCase();
+            const isAfterDeposit = LOCKED_WORKFLOW_STATES.includes(workflowStatus);
+            const isValidatedBeforeDeposit = normalizedStatus === "actif" && Boolean(workflowStatus) && !isAfterDeposit;
+
+            setEditPolicy({
+                sourceStatus: normalizedStatus,
+                isLimited: isValidatedBeforeDeposit,
+                isLocked: isAfterDeposit,
+            });
+
+            setType(annonceToEdit.type);
+            setFormData({
+                title: annonceToEdit.title || "",
+                category: annonceToEdit.category || "",
+                description: annonceToEdit.description || "",
+                condition: annonceToEdit.condition || "",
+                material: annonceToEdit.material || "",
+                quantity: annonceToEdit.quantity || "1",
+                price: annonceToEdit.price || "",
+                city: annonceToEdit.city || "",
+                country: annonceToEdit.country || "France",
+                zip: annonceToEdit.zip || "",
+                deliveryMode: annonceToEdit.deliveryMode || "main_propre",
+                dimensions: annonceToEdit.dimensions || "",
+                confirm: true
+            });
+
+            const initialPhotoPreviews = annonceToEdit.image ? [annonceToEdit.image] : [];
+            if (initialPhotoPreviews.length > 0) {
+                setPhotos([{ preview: initialPhotoPreviews[0], file: null }]);
+                setCoverIndex(0);
+            }
+
+            initialEditSnapshotRef.current = buildComparableSnapshot({
+                type: annonceToEdit.type || "don",
+                form: {
                     title: annonceToEdit.title || "",
                     category: annonceToEdit.category || "",
                     description: annonceToEdit.description || "",
@@ -338,24 +446,45 @@ export default function DeposerAnnoncePage() {
                     zip: annonceToEdit.zip || "",
                     deliveryMode: annonceToEdit.deliveryMode || "main_propre",
                     dimensions: annonceToEdit.dimensions || "",
-                    confirm: true
+                },
+                photoPreviews: initialPhotoPreviews,
+            });
+        };
+
+        const loadAnnonceToEdit = async () => {
+            const token = window.localStorage.getItem(TOKEN_KEY);
+            try {
+                const response = await fetch(apiUrl(`/items/${editId}`), {
+                    method: "GET",
+                    headers: { Authorization: `Bearer ${token}` },
                 });
 
-                // Simuler une photo si elle existe
-                if (annonceToEdit.image) {
-                    setPhotos([{ preview: annonceToEdit.image, file: null }]);
-                    setCoverIndex(0);
+                if (response.ok) {
+                    const annonce = await response.json();
+                    hydrateForm(annonce);
+                    return;
                 }
+                alert("Impossible de charger les donnees de l'annonce a modifier.");
+            } catch {
+                alert("Impossible de charger les donnees de l'annonce a modifier.");
             }
-        }
+        };
+
+        loadAnnonceToEdit();
     }, [editId]);
 
+    const disableRestrictedFields = editPolicy.isLimited || editPolicy.isLocked;
+    const disableAllEdits = editPolicy.isLocked;
+    const canSaveDraft = !editId || editPolicy.sourceStatus === "brouillon";
+
     const handleFileChange = (e) => {
+        if (disableAllEdits) return;
         const files = Array.from(e.target.files);
         addFiles(files);
     };
 
     const addFiles = async (files) => {
+        if (disableAllEdits) return;
         if (photos.length + files.length > 10) {
             alert("Vous ne pouvez pas ajouter plus de 10 photos.");
             return;
@@ -382,6 +511,7 @@ export default function DeposerAnnoncePage() {
     };
 
     const removePhoto = (index) => {
+        if (disableAllEdits) return;
         setPhotos(prev => {
             const next = [...prev];
             // Plus besoin de revokeObjectURL avec du Base64
@@ -399,6 +529,7 @@ export default function DeposerAnnoncePage() {
     };
 
     const onBoxClick = () => {
+        if (disableAllEdits) return;
         fileInputRef.current?.click();
     };
 
@@ -408,20 +539,50 @@ export default function DeposerAnnoncePage() {
 
     const onDrop = (e) => {
         e.preventDefault();
+        if (disableAllEdits) return;
         const files = Array.from(e.dataTransfer.files);
         addFiles(files);
     };
 
     const handleChange = (key, val) => {
+        if (disableAllEdits) return;
+        if (disableRestrictedFields && LIMITED_EDIT_BLOCKED_FIELDS.has(key)) return;
         setFormData(prev => ({ ...prev, [key]: val }));
     };
 
     const handleSubmit = (e, statusText = "en attente") => {
         if (e) e.preventDefault();
 
+        if (disableAllEdits) {
+            alert("Cette annonce est verrouillee apres depot et ne peut plus etre modifiee.");
+            return;
+        }
+
         if (!formData.confirm) {
             alert("Veuillez confirmer la charte de qualite avant de continuer.");
             return;
+        }
+
+        const normalizedPrice = String(formData.price ?? "").replace(",", ".").trim();
+        const parsedPrice = Number.parseFloat(normalizedPrice);
+        let effectiveType = type;
+        let effectivePrice = 0;
+
+        if (type === "vente") {
+            if (!Number.isFinite(parsedPrice)) {
+                alert("Veuillez saisir un prix valide.");
+                return;
+            }
+
+            if (parsedPrice === 0) {
+                effectiveType = "don";
+                effectivePrice = 0;
+            } else if (parsedPrice < 1) {
+                alert("Le prix minimum pour une vente est 1 EUR. Sinon, publiez en don.");
+                return;
+            } else {
+                effectivePrice = parsedPrice;
+            }
         }
 
         const payload = {
@@ -430,16 +591,33 @@ export default function DeposerAnnoncePage() {
             condition: getMatch(conditions, formData.condition),
             material: getMatch(materials, formData.material),
             country: getMatch(countries, formData.country, "France"),
-            type,
-            price: type === "vente" ? parseFloat(formData.price) || 0 : 0,
+            type: effectiveType,
+            price: effectiveType === "vente" ? effectivePrice : 0,
             image: photos.length > 0 ? photos[coverIndex]?.preview : "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?q=80&w=500&auto=format&fit=crop",
-            photos: photos.map(p => p.preview)
+            photos: photos.map(p => p.preview),
+            status: statusText
         };
+
+        if (editId) {
+            const candidateSnapshot = buildComparableSnapshot({
+                type: effectiveType,
+                form: {
+                    ...formData,
+                    price: String(effectiveType === "vente" ? effectivePrice : 0),
+                },
+                photoPreviews: photos.map((p) => p.preview),
+            });
+
+            if (!hasMeaningfulChanges(candidateSnapshot)) {
+                router.push("/annonces/mes-annonces?info=no_changes");
+                return;
+            }
+        }
 
         const token = window.localStorage.getItem(TOKEN_KEY);
         
         const method = editId ? "PUT" : "POST";
-        const url = editId ? apiUrl(`/admin/items/${editId}`) : apiUrl("/items");
+        const url = editId ? apiUrl(`/items/${editId}`) : apiUrl("/items");
 
         fetch(url, {
             method,
@@ -495,6 +673,34 @@ export default function DeposerAnnoncePage() {
                 <p className="activities-label">Espace Particulier</p>
                 <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.5rem 0", letterSpacing: "-0.02em" }}>Déposer une annonce</h1>
                 <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>Partagez vos objets et participez à l'économie circulaire d'UpcycleConnect.</p>
+                {editId && disableRestrictedFields && !disableAllEdits && (
+                    <div style={{
+                        marginTop: "0.9rem",
+                        background: "rgba(224, 158, 25, 0.1)",
+                        border: "1px solid rgba(224, 158, 25, 0.3)",
+                        borderRadius: "12px",
+                        padding: "0.7rem 0.9rem",
+                        color: "#9B6400",
+                        fontSize: "0.85rem",
+                        lineHeight: "1.45"
+                    }}>
+                        Modification limitee : vous pouvez mettre a jour le titre, la description et les photos uniquement.
+                    </div>
+                )}
+                {editId && disableAllEdits && (
+                    <div style={{
+                        marginTop: "0.9rem",
+                        background: "rgba(239, 68, 68, 0.1)",
+                        border: "1px solid rgba(239, 68, 68, 0.25)",
+                        borderRadius: "12px",
+                        padding: "0.7rem 0.9rem",
+                        color: "#B12E2E",
+                        fontSize: "0.85rem",
+                        lineHeight: "1.45"
+                    }}>
+                        Cette annonce est verrouillee apres depot. Aucune modification n'est possible.
+                    </div>
+                )}
             </header>
 
             <form onSubmit={handleSubmit} style={styles.grid}>
@@ -513,6 +719,7 @@ export default function DeposerAnnoncePage() {
                             ref={fileInputRef}
                             style={{ display: "none" }}
                             onChange={handleFileChange}
+                            disabled={disableAllEdits}
                         />
 
                         <div
@@ -549,6 +756,7 @@ export default function DeposerAnnoncePage() {
                                                         setCoverIndex(prev => prev > 0 ? prev - 1 : photos.length - 1);
                                                     }}
                                                     style={{ position: "absolute", top: "50%", transform: "translateY(-50%)", left: "12px", padding: "8px", borderRadius: "50%", border: "1px solid rgba(255, 255, 255, 0.25)", background: "rgba(255, 255, 255, 0.15)", backdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3 }}
+                                                    disabled={disableAllEdits}
                                                 >
                                                     <ChevronLeft size={20} />
                                                 </button>
@@ -559,6 +767,7 @@ export default function DeposerAnnoncePage() {
                                                         setCoverIndex(prev => prev < photos.length - 1 ? prev + 1 : 0);
                                                     }}
                                                     style={{ position: "absolute", top: "50%", transform: "translateY(-50%)", right: "12px", padding: "8px", borderRadius: "50%", border: "1px solid rgba(255, 255, 255, 0.25)", background: "rgba(255, 255, 255, 0.15)", backdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3 }}
+                                                    disabled={disableAllEdits}
                                                 >
                                                     <ChevronRight size={20} />
                                                 </button>
@@ -573,6 +782,7 @@ export default function DeposerAnnoncePage() {
                                             }}
                                             style={{ position: "absolute", top: "12px", right: "12px", padding: "8px", borderRadius: "50%", border: "1px solid rgba(255, 255, 255, 0.3)", background: "rgba(0, 0, 0, 0.4)", backdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 4 }}
                                             title="Supprimer cette photo"
+                                            disabled={disableAllEdits}
                                         >
                                             <Trash2 size={16} />
                                         </button>
@@ -587,6 +797,7 @@ export default function DeposerAnnoncePage() {
                                                         setCoverIndex(index);
                                                     }}
                                                     style={{ border: coverIndex === index ? "2px solid white" : "1px solid rgba(255, 255, 255, 0.16)", padding: "0px", borderRadius: "14px", overflow: "hidden", cursor: "pointer", background: "rgba(255, 255, 255, 0.08)", backdropFilter: "blur(8px)", opacity: coverIndex === index ? 1 : 0.6, transition: "0.2s", minWidth: "64px", width: "64px", height: "64px", position: "relative" }}
+                                                    disabled={disableAllEdits}
                                                 >
                                                     <img alt="" src={photo.preview} style={{ position: "absolute", inset: "0px", width: "100%", height: "100%", objectFit: "cover" }} />
                                                     {coverIndex === index && (
@@ -604,6 +815,7 @@ export default function DeposerAnnoncePage() {
                                                     }}
                                                     style={{ border: "1px dashed rgba(255, 255, 255, 0.4)", padding: "0px", borderRadius: "14px", cursor: "pointer", background: "rgba(255, 255, 255, 0.04)", backdropFilter: "blur(8px)", transition: "0.2s", minWidth: "64px", width: "64px", height: "64px", display: "flex", alignItems: "center", justifyContent: "center", color: "white", flexShrink: 0 }}
                                                     title="Ajouter une photo"
+                                                    disabled={disableAllEdits}
                                                 >
                                                     <Plus size={24} />
                                                 </button>
@@ -625,7 +837,11 @@ export default function DeposerAnnoncePage() {
                             <button
                                 type="button"
                                 style={styles.typeBtn(type === "don")}
-                                onClick={() => setType("don")}
+                                onClick={() => {
+                                    if (disableRestrictedFields) return;
+                                    setType("don");
+                                }}
+                                disabled={disableRestrictedFields}
                             >
                                 <div style={{ marginBottom: "0.25rem", color: type === "don" ? "#FFFFFF" : "var(--text-main)", opacity: type === "don" ? 1 : 0.6 }}>
                                     <Gift size={24} strokeWidth={2} />
@@ -636,7 +852,11 @@ export default function DeposerAnnoncePage() {
                             <button
                                 type="button"
                                 style={styles.typeBtn(type === "vente")}
-                                onClick={() => setType("vente")}
+                                onClick={() => {
+                                    if (disableRestrictedFields) return;
+                                    setType("vente");
+                                }}
+                                disabled={disableRestrictedFields}
                             >
                                 <div style={{ marginBottom: "0.25rem", color: type === "vente" ? "#FFFFFF" : "var(--text-main)", opacity: type === "vente" ? 1 : 0.6 }}>
                                     <Tag size={24} strokeWidth={2} />
@@ -654,6 +874,7 @@ export default function DeposerAnnoncePage() {
                                 required
                                 value={formData.title}
                                 onChange={e => handleChange("title", e.target.value)}
+                                disabled={disableAllEdits}
                             />
                         </div>
 
@@ -665,6 +886,7 @@ export default function DeposerAnnoncePage() {
                                     required
                                     value={getMatch(categories, formData.category)}
                                     onChange={e => handleChange("category", e.target.value)}
+                                    disabled={disableRestrictedFields}
                                 >
                                     <option value="">Sélectionner...</option>
                                     {categories.map(cat => (
@@ -682,6 +904,7 @@ export default function DeposerAnnoncePage() {
                                     style={styles.input}
                                     value={formData.quantity}
                                     onChange={e => handleChange("quantity", e.target.value)}
+                                    disabled={disableRestrictedFields}
                                 />
                             </div>
                         </div>
@@ -695,10 +918,16 @@ export default function DeposerAnnoncePage() {
                                         style={{ ...styles.input, width: "100%", paddingLeft: "2.5rem" }}
                                         placeholder="0.00"
                                         required
+                                        min="0"
+                                        step="0.01"
                                         value={formData.price}
                                         onChange={e => handleChange("price", e.target.value)}
+                                        disabled={disableRestrictedFields}
                                     />
                                     <span style={{ position: "absolute", left: "1rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontWeight: "600" }}>€</span>
+                                </div>
+                                <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginTop: "0.35rem" }}>
+                                    0 EUR bascule automatiquement en don. En vente, le minimum est 1 EUR.
                                 </div>
                             </div>
                         )}
@@ -717,6 +946,7 @@ export default function DeposerAnnoncePage() {
                                 required
                                 value={formData.description}
                                 onChange={e => handleChange("description", e.target.value)}
+                                disabled={disableAllEdits}
                             />
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
@@ -727,6 +957,7 @@ export default function DeposerAnnoncePage() {
                                     required
                                     value={getMatch(conditions, formData.condition)}
                                     onChange={e => handleChange("condition", e.target.value)}
+                                    disabled={disableRestrictedFields}
                                 >
                                     <option value="">Sélectionner...</option>
                                     {conditions.map(cond => (
@@ -738,7 +969,7 @@ export default function DeposerAnnoncePage() {
                             </div>
                             <div style={styles.formGroup}>
                                 <label style={styles.label}>Matériau</label>
-                                <select style={styles.select} value={getMatch(materials, formData.material)} onChange={e => handleChange("material", e.target.value)}>
+                                <select style={styles.select} value={getMatch(materials, formData.material)} onChange={e => handleChange("material", e.target.value)} disabled={disableRestrictedFields}>
                                     <option value="">Sélectionner...</option>
                                     {materials.map(mat => (
                                         <option key={mat.id} value={mat.label}>
@@ -758,7 +989,7 @@ export default function DeposerAnnoncePage() {
                         
                         <div style={styles.formGroup}>
                             <label style={styles.label}>Pays *</label>
-                            <select style={styles.select} required value={getMatch(countries, formData.country, "France")} onChange={e => handleChange("country", e.target.value)}>
+                            <select style={styles.select} required value={getMatch(countries, formData.country, "France")} onChange={e => handleChange("country", e.target.value)} disabled={disableRestrictedFields}>
                                 {countries.map(c => (
                                     <option key={c.id} value={c.label}>
                                         {c.emoji} {c.label}
@@ -770,7 +1001,7 @@ export default function DeposerAnnoncePage() {
                         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem" }}>
                             <div style={styles.formGroup}>
                                 <label style={styles.label}>Ville *</label>
-                                <input style={styles.input} placeholder="Avenue, Ville" required value={formData.city} onChange={e => handleChange("city", e.target.value)} />
+                                <input style={styles.input} placeholder="Avenue, Ville" required value={formData.city} onChange={e => handleChange("city", e.target.value)} disabled={disableRestrictedFields} />
                             </div>
                             <div style={styles.formGroup}>
                                 <label style={styles.label}>Code postal *</label>
@@ -786,7 +1017,8 @@ export default function DeposerAnnoncePage() {
                                     onChange={e => {
                                         const val = e.target.value.replace(/\D/g, "");
                                         handleChange("zip", val);
-                                    }} 
+                                    }}
+                                    disabled={disableRestrictedFields}
                                 />
                             </div>
                         </div>
@@ -832,6 +1064,7 @@ export default function DeposerAnnoncePage() {
                                 cursor: "pointer",
                                 transition: "background-color 0.2s ease, box-shadow 0.2s ease",
                                 boxShadow: formData.confirm ? "0 0 0 1px rgba(62,104,108,0.2)" : "0 0 0 1px rgba(35,59,61,0.08)",
+                                opacity: disableAllEdits ? 0.6 : 1,
                             }}
                         >
                             <span
@@ -861,10 +1094,12 @@ export default function DeposerAnnoncePage() {
                             className="action-btn"
                             style={{ padding: "0.8rem 2rem", background: "white", color: "var(--text-main)", border: "none" }}
                             onClick={() => handleSubmit(null, "brouillon")}
+                            disabled={!canSaveDraft || disableAllEdits}
+                            title={!canSaveDraft ? "Une annonce deja soumise ne peut pas revenir en brouillon." : undefined}
                         >
                             Enregistrer en brouillon
                         </button>
-                        <button type="submit" className="action-btn primary" style={{ padding: "0.8rem 3rem", fontWeight: "600" }}>
+                        <button type="submit" className="action-btn primary" style={{ padding: "0.8rem 3rem", fontWeight: "600" }} disabled={disableAllEdits}>
                             {editId ? "Enregistrer les modifications" : "Publier l'annonce"}
                         </button>
                     </div>

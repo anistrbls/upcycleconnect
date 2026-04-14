@@ -95,6 +95,9 @@ func main() {
 	if err := ensureDepositPointTypesSchema(); err != nil {
 		log.Fatalf("failed to init deposit_point_types schema: %v", err)
 	}
+	if err := ensureModerationReasonsSchema(); err != nil {
+		log.Fatalf("failed to init moderation_reasons schema: %v", err)
+	}
 	log.Println("✓ Item materials schema initialized")
 
 	mux := http.NewServeMux()
@@ -144,6 +147,11 @@ func main() {
 	mux.HandleFunc("GET /api/deposit-point-types", depositPointTypesPublicHandler)
 	mux.Handle("/api/admin/deposit-point-types", authMiddleware(http.HandlerFunc(depositPointTypesAdminHandler)))
 	mux.Handle("/api/admin/deposit-point-types/", authMiddleware(http.HandlerFunc(depositPointTypeByIDAdminHandler)))
+
+	// === Moderation Reasons ===
+	mux.HandleFunc("GET /api/moderation-reasons", moderationReasonsPublicHandler)
+	mux.Handle("/api/admin/moderation-reasons", authMiddleware(http.HandlerFunc(moderationReasonsAdminHandler)))
+	mux.Handle("/api/admin/moderation-reasons/", authMiddleware(http.HandlerFunc(moderationReasonByIDAdminHandler)))
 
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
 	users.RegisterRoutes(mux, db, authMiddleware)
@@ -1748,22 +1756,23 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
-	var userEmail, userRole, passwordHash string
-	var status string
-
+	var userID int64
+	var userEmail, userRole, passwordHash, status string
 	// 1. Vérifier si c'est le super-admin (env)
 	if email == adminEmail {
 		userEmail = adminEmail
 		userRole = "admin"
 		passwordHash = string(adminPasswordHash)
 		status = "active"
+		// Récupérer l'ID de l'admin en base
+		_ = db.QueryRow("SELECT id FROM users WHERE email = $1", adminEmail).Scan(&userID)
 	} else {
 		// 2. Sinon, chercher en base de données
 		err := db.QueryRow(`
-			SELECT email, role, password_hash, status
+			SELECT id, email, role, password_hash, status
 			FROM users
 			WHERE email = $1
-		`, email).Scan(&userEmail, &userRole, &passwordHash, &status)
+		`, email).Scan(&userID, &userEmail, &userRole, &passwordHash, &status)
 
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -1790,11 +1799,12 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(jwtExpiration)
 	claims := jwt.MapClaims{
-		"sub":   userEmail,
-		"email": userEmail,
-		"role":  userRole,
-		"iat":   now.Unix(),
-		"exp":   expiresAt.Unix(),
+		"sub":    userEmail,
+		"userId": userID,
+		"email":  userEmail,
+		"role":   userRole,
+		"iat":    now.Unix(),
+		"exp":    expiresAt.Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -1828,14 +1838,24 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email, _ := claims["email"].(string)
-	role, _ := claims["role"].(string)
+	var idVal any
+	idVal = claims["userId"]
+	if idVal == nil {
+		// Fallback for old tokens
+		email, _ := claims["sub"].(string)
+		var dbID int64
+		err := db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&dbID)
+		if err == nil {
+			idVal = dbID
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"authenticated": true,
-		"user": map[string]string{
-			"email": email,
-			"role":  role,
+		"user": map[string]any{
+			"id":    idVal,
+			"email": claims["email"],
+			"role":  claims["role"],
 		},
 	})
 }
@@ -1848,6 +1868,232 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Moderation Reasons — motifs de refus/desactivation
+// ─────────────────────────────────────────────────────────────────────────────
+
+type moderationReasonPayload struct {
+	Label string `json:"label"`
+}
+
+func ensureModerationReasonsSchema() error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS moderation_reasons (
+			id         BIGSERIAL PRIMARY KEY,
+			label      TEXT NOT NULL UNIQUE,
+			position   INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_moderation_reasons_position ON moderation_reasons(position)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM moderation_reasons`).Scan(&count); err != nil {
+		return err
+	}
+
+	if count == 0 {
+		defaults := []string{
+			"Contenu non conforme a la charte",
+			"Description ou titre trompeur",
+			"Objet interdit ou non autorise",
+			"Informations de contact non autorisees",
+			"Annonce en doublon",
+		}
+		for i, label := range defaults {
+			if _, err := db.Exec(`INSERT INTO moderation_reasons (label, position) VALUES ($1, $2)`, label, i); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func moderationReasonsPublicHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`SELECT id, label FROM moderation_reasons ORDER BY position ASC, id ASC`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list moderation reasons")
+		return
+	}
+	defer rows.Close()
+
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id int64
+		var label string
+		if err := rows.Scan(&id, &label); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse moderation reason")
+			return
+		}
+		result = append(result, map[string]interface{}{"id": id, "label": label})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+}
+
+func moderationReasonsAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`SELECT id, label, position, created_at, updated_at FROM moderation_reasons ORDER BY position ASC, id ASC`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list moderation reasons")
+			return
+		}
+		defer rows.Close()
+
+		result := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id int64
+			var label string
+			var pos int
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &label, &pos, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse moderation reason")
+				return
+			}
+			result = append(result, map[string]interface{}{
+				"id": id,
+				"label": label,
+				"position": pos,
+				"createdAt": createdAt.UTC().Format(time.RFC3339),
+				"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+
+	case http.MethodPost:
+		var payload moderationReasonPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO moderation_reasons (label, position)
+			VALUES ($1, (SELECT COALESCE(MAX(position), -1) + 1 FROM moderation_reasons))
+			RETURNING id, created_at, updated_at
+		`, label).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "moderation reason label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not create moderation reason")
+			return
+		}
+
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM moderation_reasons WHERE id = $1`, id).Scan(&pos)
+
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id,
+			"label": label,
+			"position": pos,
+			"createdAt": createdAt.UTC().Format(time.RFC3339),
+			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func moderationReasonByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok || claims["role"] != "admin" {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+
+	id, err := parseIDFromPath(r.URL.Path, "/api/admin/moderation-reasons/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid reason id")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var payload moderationReasonPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+
+		label := strings.TrimSpace(payload.Label)
+		if label == "" {
+			writeError(w, http.StatusBadRequest, "label is required")
+			return
+		}
+
+		var createdAt, updatedAt time.Time
+		res := db.QueryRow(`
+			UPDATE moderation_reasons SET label = $1, updated_at = NOW()
+			WHERE id = $2 RETURNING created_at, updated_at
+		`, label, id)
+		if err := res.Scan(&createdAt, &updatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "reason not found")
+				return
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "unique") {
+				writeError(w, http.StatusConflict, "moderation reason label already exists")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update moderation reason")
+			return
+		}
+
+		var pos int
+		_ = db.QueryRow(`SELECT position FROM moderation_reasons WHERE id = $1`, id).Scan(&pos)
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id,
+			"label": label,
+			"position": pos,
+			"createdAt": createdAt.UTC().Format(time.RFC3339),
+			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM moderation_reasons WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete moderation reason")
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			writeError(w, http.StatusNotFound, "reason not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

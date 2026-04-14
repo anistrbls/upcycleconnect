@@ -376,10 +376,11 @@ export default function LogisticsDashboard() {
     // Data for assignment
     const [points, setPoints] = useState([]);
     const [assignment, setAssignment] = useState({ pointId: "", containerId: "" });
-    const [depositCodeInput, setDepositCodeInput] = useState("");
+
     const [reserveNameInput, setReserveNameInput] = useState("");
     const [pickupCodeInput, setPickupCodeInput] = useState("");
     const [cancelReasonInput, setCancelReasonInput] = useState("");
+    const [revertToStatusInput, setRevertToStatusInput] = useState("");
 
     const fetchLogistics = useCallback(async () => {
         setLoading(true);
@@ -433,17 +434,16 @@ export default function LogisticsDashboard() {
         try {
             const res = await fetch(apiUrl(`/admin/logistics/${selectedItem.item_id}/confirm-deposit`), {
                 method: "POST",
-                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ code: depositCodeInput.toUpperCase() })
+                headers: buildAuthHeaders(),
             });
             if (res.ok) {
                 setShowDepositModal(false);
-                setDepositCodeInput("");
                 fetchLogistics();
             } else {
-                alert("Code invalide ou expiré");
+                const data = await res.json().catch(() => ({}));
+                alert(data?.error || "Impossible de confirmer le dépôt.");
             }
-        } catch (e) { alert("Erreur"); }
+        } catch (e) { alert("Erreur réseau"); }
     };
 
     const handleMakeAvailable = async (id) => {
@@ -493,14 +493,46 @@ export default function LogisticsDashboard() {
             const res = await fetch(apiUrl(`/admin/logistics/${selectedItem.item_id}/cancel`), {
                 method: "POST",
                 headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ reason: cancelReasonInput })
+                body: JSON.stringify({ 
+                    reason: cancelReasonInput,
+                    revert_to_status: revertToStatusInput === "completely_cancel" ? "" : revertToStatusInput
+                })
             });
             if (res.ok) {
                 setShowCancelModal(false);
                 setCancelReasonInput("");
+                setRevertToStatusInput("");
                 fetchLogistics();
+            } else {
+                const err = await res.json();
+                alert(err.error || "Erreur d'annulation");
             }
         } catch (e) { console.error(e); }
+    };
+
+    const handleHardDeleteCancelledItem = async () => {
+        if (!selectedItem?.item_id) return;
+        const ok = window.confirm("Cette action va supprimer definitivement l'annonce et son historique logistique. Continuer ?");
+        if (!ok) return;
+        try {
+            const res = await fetch(apiUrl(`/admin/items/${selectedItem.item_id}`), {
+                method: "DELETE",
+                headers: buildAuthHeaders(),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert(err.error || "Suppression definitive impossible.");
+                return;
+            }
+            setShowCancelModal(false);
+            setSelectedItem(null);
+            setCancelReasonInput("");
+            setRevertToStatusInput("");
+            fetchLogistics();
+        } catch (e) {
+            console.error(e);
+            alert("Erreur reseau lors de la suppression definitive.");
+        }
     };
 
     // --- Helpers ---
@@ -647,8 +679,14 @@ export default function LogisticsDashboard() {
                             <div style={styles.containerGrid}>
                                 {selectedPoint?.containers?.map(c => {
                                     const isFull = c.current_count >= c.capacity;
-                                    const isInactive = c.status !== 'actif';
-                                    const disabled = isFull || isInactive;
+                                    const isInactive = c.status === 'inactif';
+                                    const isMaintenance = c.status === 'maintenance';
+                                    const hasMaintenanceWindow = Boolean(c.maintenance_start && c.maintenance_end);
+                                    const now = Date.now();
+                                    const maintenanceStart = hasMaintenanceWindow ? new Date(c.maintenance_start).getTime() : 0;
+                                    const maintenanceEnd = hasMaintenanceWindow ? new Date(c.maintenance_end).getTime() : 0;
+                                    const isInMaintenanceWindow = isMaintenance && hasMaintenanceWindow && !Number.isNaN(maintenanceStart) && !Number.isNaN(maintenanceEnd) && now >= maintenanceStart && now <= maintenanceEnd;
+                                    const disabled = isFull || isInactive || isInMaintenanceWindow;
                                     return (
                                         <button 
                                             key={c.id} 
@@ -664,6 +702,8 @@ export default function LogisticsDashboard() {
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.current_count}/{c.capacity} objets</div>
                                             </div>
                                             {isFull && <div style={styles.fullBadge}>Plein</div>}
+                                            {!isFull && isInMaintenanceWindow && <div style={styles.fullBadge}>Maintenance</div>}
+                                            {!isFull && !isInMaintenanceWindow && isInactive && <div style={styles.fullBadge}>Indispo</div>}
                                         </button>
                                     );
                                 })}
@@ -678,21 +718,24 @@ export default function LogisticsDashboard() {
                 </div>
             </AdminModal>
 
-            <AdminModal open={showDepositModal} title="Validation du Dépôt" onClose={() => setShowDepositModal(false)}>
+            <AdminModal open={showDepositModal} title="Confirmer le dépôt" onClose={() => setShowDepositModal(false)}>
                 <div style={styles.modalBody}>
-                    <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                        Saisissez le code de dépôt fourni par le particulier pour confirmer la réception de l'objet.
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: '#f8fafb', borderRadius: '16px', padding: '0.85rem 1rem', marginBottom: '1.25rem', border: '1px solid rgba(35,59,61,0.07)' }}>
+                        {selectedItem?.item_image && (
+                            <img
+                                src={selectedItem.item_image}
+                                alt={selectedItem?.title}
+                                style={{ width: '56px', height: '56px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0 }}
+                            />
+                        )}
+                        <div style={{ fontWeight: '700', fontSize: '0.97rem', color: 'var(--text-main)', lineHeight: '1.3' }}>{selectedItem?.item_title}</div>
+                    </div>
+                    <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginBottom: '1.5rem', lineHeight: '1.6' }}>
+                        Confirmez-vous que cet objet a bien été déposé physiquement au point de collecte ?
                     </p>
-                    <input 
-                        placeholder="Ex: AB12CD" 
-                        style={styles.codeInput} 
-                        value={depositCodeInput}
-                        onChange={e => setDepositCodeInput(e.target.value.toUpperCase())}
-                        maxLength={6}
-                    />
                     <div style={styles.modalActions}>
                         <button style={styles.btnSec} onClick={() => setShowDepositModal(false)}>Annuler</button>
-                        <button style={styles.btnPri} disabled={depositCodeInput.length < 4} onClick={handleConfirmDeposit}>Valider le dépôt</button>
+                        <button style={styles.btnPri} onClick={handleConfirmDeposit}>Confirmer le dépôt</button>
                     </div>
                 </div>
             </AdminModal>
@@ -743,24 +786,73 @@ export default function LogisticsDashboard() {
                 </div>
             </AdminModal>
 
-            <AdminModal open={showCancelModal} title="Annulation du flux" onClose={() => setShowCancelModal(false)}>
+            <AdminModal open={showCancelModal} title="Retour ou Annulation du flux" onClose={() => setShowCancelModal(false)}>
                 <div style={styles.modalBody}>
-                    <div style={{ background: '#fee2e2', color: '#ef4444', padding: '1rem', borderRadius: '16px', fontSize: '0.85rem', fontWeight: '500' }}>
-                        Attention : l'annulation remettra l'objet dans l'état initial ou libérera la place dans le conteneur si déjà déposé.
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>Raison de l'annulation</label>
-                        <textarea 
-                            placeholder="Optionnel..." 
-                            style={{ ...styles.input, minHeight: '100px', resize: 'none', fontFamily: 'inherit' }}
-                            value={cancelReasonInput}
-                            onChange={e => setCancelReasonInput(e.target.value)}
-                        />
-                    </div>
-                    <div style={styles.modalActions}>
-                        <button style={styles.btnSec} onClick={() => setShowCancelModal(false)}>Garder le flux</button>
-                        <button style={{ ...styles.btnPri, background: '#ef4444' }} onClick={handleCancel}>Confirmer l'annulation</button>
-                    </div>
+                    {selectedItem?.workflow_status === "cancelled" ? (
+                        <>
+                            <div style={{ background: '#fee2e2', color: '#991b1b', padding: '1rem', borderRadius: '16px', fontSize: '0.85rem', fontWeight: '500', border: '1px solid #fecaca' }}>
+                                Ce flux est deja annule. Vous pouvez supprimer definitivement l'annonce pour la retirer du suivi des flux objets et de la base de donnees.
+                            </div>
+                            <div style={styles.modalActions}>
+                                <button style={styles.btnSec} onClick={() => setShowCancelModal(false)}>Fermer</button>
+                                <button style={{ ...styles.btnPri, background: '#dc2626' }} onClick={handleHardDeleteCancelledItem}>
+                                    Supprimer definitivement l'annonce
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div style={{ background: '#fffbeb', color: '#b45309', padding: '1rem', borderRadius: '16px', fontSize: '0.85rem', fontWeight: '500', border: '1px solid #fef3c7' }}>
+                                Vous pouvez revenir à une étape précédente ou annuler complètement le flux logistique (ce qui libérera la place si l'objet est déjà déposé).
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Action souhaitée</label>
+                                <select 
+                                    style={styles.select}
+                                    value={revertToStatusInput}
+                                    onChange={e => setRevertToStatusInput(e.target.value)}
+                                >
+                                    <option value="">Sélectionnez l'action...</option>
+                                    <optgroup label="Revenir à une étape précédente">
+                                        {selectedItem && (() => {
+                                            const flow = ['validated', 'assigned', 'deposit_code_sent', 'deposited', 'available', 'reserved'];
+                                            const idx = flow.indexOf(selectedItem.workflow_status);
+                                            if (idx > 0) {
+                                                return flow.slice(0, idx).map(st => (
+                                                    <option key={st} value={st}>Revenir au statut : {STATUS_MAP[st]?.label}</option>
+                                                ));
+                                            }
+                                            return null;
+                                        })()}
+                                    </optgroup>
+                                    <optgroup label="Annulation totale">
+                                        <option value="completely_cancel">Annuler totalement le flux</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            {revertToStatusInput === "completely_cancel" && (
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Raison de l'annulation totale</label>
+                                    <textarea 
+                                        placeholder="Optionnel..." 
+                                        style={{ ...styles.input, minHeight: '80px', resize: 'none', fontFamily: 'inherit' }}
+                                        value={cancelReasonInput}
+                                        onChange={e => setCancelReasonInput(e.target.value)}
+                                    />
+                                </div>
+                            )}
+                            <div style={styles.modalActions}>
+                                <button style={styles.btnSec} onClick={() => setShowCancelModal(false)}>Fermer sans rien faire</button>
+                                <button 
+                                    style={{ ...styles.btnPri, background: revertToStatusInput === "completely_cancel" ? '#ef4444' : 'var(--black)' }} 
+                                    onClick={handleCancel}
+                                    disabled={!revertToStatusInput}
+                                >
+                                    {revertToStatusInput === "completely_cancel" ? "Confirmer l'annulation totale" : "Confirmer le retour"}
+                                </button>
+                            </div>
+                        </>
+                    )}
                 </div>
             </AdminModal>
 
