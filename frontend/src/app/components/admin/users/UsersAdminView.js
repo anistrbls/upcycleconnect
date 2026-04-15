@@ -12,7 +12,7 @@ import { listUsers, createUser, updateUser, deleteUser, setUserStatus } from "..
 const SUBPAGE_FILTERS = {
     "tous-utilisateurs": {},
     "particuliers": { role: "particulier" },
-    "prestataires": { role: "prestataire" },
+    "professionnels": { role: "professionnel" },
     "salaries": { role: "salarie" },
     "admins": { role: "admin" },
 };
@@ -140,7 +140,7 @@ export default function UsersAdminView({ subpage }) {
     const SUBPAGE_TITLES = {
         "tous-utilisateurs": "Tous les utilisateurs",
         "particuliers": "Particuliers",
-        "prestataires": "Professionnels",
+        "professionnels": "Professionnels",
         "salaries": "Salariés",
         "admins": "Administrateurs",
     };

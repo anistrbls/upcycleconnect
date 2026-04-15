@@ -4,7 +4,7 @@ import "time"
 
 const (
 	RoleParticulier = "particulier"
-	RolePrestataire = "prestataire"
+	RoleProfessionnel = "professionnel"
 	RoleSalarie     = "salarie"
 	RoleAdmin       = "admin"
 )
@@ -75,7 +75,7 @@ type ListFilters struct {
 
 func NormalizeRole(raw string) string {
 	switch raw {
-	case RoleParticulier, RolePrestataire, RoleSalarie, RoleAdmin:
+	case RoleParticulier, RoleProfessionnel, RoleSalarie, RoleAdmin:
 		return raw
 	}
 	return ""

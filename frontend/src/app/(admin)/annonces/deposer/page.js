@@ -255,7 +255,7 @@ const DEFAULT_COUNTRIES = [
     { id: 3, label: "Belgique", emoji: "🇧🇪", zip_length: 4 },
 ];
 
-const LOCKED_WORKFLOW_STATES = ["deposited", "available", "reserved", "collected", "closed"];
+const LOCKED_WORKFLOW_STATES = ["deposited", "available", "pending_payment", "reserved", "picked_up"];
 const LIMITED_EDIT_BLOCKED_FIELDS = new Set([
     "type",
     "price",
@@ -464,9 +464,9 @@ export default function DeposerAnnoncePage() {
                     hydrateForm(annonce);
                     return;
                 }
-                alert("Impossible de charger les donnees de l'annonce a modifier.");
+                alert("Impossible de charger les données de l'annonce à modifier.");
             } catch {
-                alert("Impossible de charger les donnees de l'annonce a modifier.");
+                alert("Impossible de charger les données de l'annonce à modifier.");
             }
         };
 
@@ -1136,7 +1136,7 @@ export default function DeposerAnnoncePage() {
 
                     <img
                         src="/img/recyclage-materiau.jpg"
-                        alt="Document de reference matieres"
+                        alt="Document de référence matières"
                         style={{ width: "100%", display: "block", borderRadius: "20px" }}
                     />
                 </aside>

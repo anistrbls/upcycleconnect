@@ -44,7 +44,7 @@ const WF_LABELS = {
     deposited: "Objet déposé",
     available: "Disponible au retrait",
     reserved: "Réservé",
-    closed: "Annonce finalisée",
+    picked_up: "Annonce récupérée",
     cancelled: "Suivi interrompu",
     deposit_expired: "Code de dépôt expiré",
 };
@@ -56,7 +56,7 @@ const WF_COLORS = {
     deposited: "#10b981",
     available: "#059669",
     reserved: "#f59e0b",
-    closed: "#636868",
+    picked_up: "#636868",
     cancelled: "#ef4444",
     deposit_expired: "#71717a"
 };
@@ -282,7 +282,7 @@ function AnnonceDetailContent() {
                     setCurrentUserID(data?.user?.id);
                 }
             } catch {
-                // Layout gère deja les cas d'auth.
+                // Layout gère déjà les cas d'auth.
             }
         };
 
@@ -540,7 +540,7 @@ function AnnonceDetailContent() {
         const details = deactivateDetails.trim();
         const isOtherReason = reason === "__other__";
         if (isOtherReason && !details) {
-            alert("Veuillez detailler le motif si vous choisissez Autre.");
+            alert("Veuillez détailler le motif si vous choisissez Autre.");
             return;
         }
 
@@ -560,7 +560,7 @@ function AnnonceDetailContent() {
     };
 
     const deleteAnnonce = async () => {
-        if (!confirm("Voulez-vous vraiment supprimer definitivement cette annonce ?")) return;
+        if (!confirm("Voulez-vous vraiment supprimer définitivement cette annonce ?")) return;
         
         const token = window.localStorage.getItem(TOKEN_KEY);
         try {
@@ -668,7 +668,7 @@ function AnnonceDetailContent() {
     const workflowKey = String(annonce.workflowStatus || "").toLowerCase();
     const isDraftAnnonce = statusKey === "brouillon";
     const isRefusedAnnonce = ["refusee", "desactivee", "desactive"].includes(statusKey);
-    const isAfterDeposit = ["deposited", "available", "reserved", "collected", "closed"].includes(workflowKey);
+    const isAfterDeposit = ["deposited", "available", "pending_payment", "reserved", "picked_up"].includes(workflowKey);
     const isValidatedBeforeDeposit = statusKey === "actif" && !isAfterDeposit;
     const isPendingAnnonce = statusKey === "en attente";
     const statusLabel = STATUS_LABELS[statusKey] || statusKey;
@@ -711,7 +711,7 @@ function AnnonceDetailContent() {
             (wf === "deposited" && "Votre dépôt est en cours de vérification par l'équipe UpcycleConnect.") ||
             (wf === "available" && "Votre objet est disponible pour les professionnels intéressés.") ||
             (wf === "reserved" && "Un professionnel est en train d'organiser le retrait.") ||
-            (wf === "closed" && "Le parcours logistique est terminé.") ||
+            (wf === "picked_up" && "Le parcours logistique est terminé.") ||
             (wf === "cancelled" && "Le suivi logistique a été interrompu.") ||
             (wf === "deposit_expired" && "Votre code de dépôt a expiré. Un nouveau code est nécessaire.") ||
             "Suivi logistique en cours";
@@ -722,7 +722,7 @@ function AnnonceDetailContent() {
             (wf === "deposited" && "Vérification du dépôt") ||
             (wf === "available" && "Disponibilité pour retrait") ||
             (wf === "reserved" && "Retrait en préparation") ||
-            (wf === "closed" && "Parcours terminé") ||
+            (wf === "picked_up" && "Parcours terminé") ||
             (wf === "cancelled" && "Suivi interrompu") ||
             (wf === "deposit_expired" && "Code de dépôt expiré") ||
             "Suivi en cours";
@@ -1016,7 +1016,7 @@ function AnnonceDetailContent() {
                                     <div style={{ fontSize: "1rem", fontWeight: "700", color: "var(--text-main)" }}>{interestedCount}</div>
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: "0.68rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.18rem" }}>Reference</div>
+                                    <div style={{ fontSize: "0.68rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.18rem" }}>Référence</div>
                                     <div style={{ fontSize: "1rem", fontWeight: "700", color: "var(--text-main)" }}>#{String(annonce.id).padStart(4, "0")}</div>
                                 </div>
                             </div>
@@ -1051,7 +1051,7 @@ function AnnonceDetailContent() {
                                             </>
                                         )}
                                         <button className="action-button action-button-neutral" onClick={() => router.push("/annonces/moderation")} style={actionBtn("neutral")}>
-                                            Retour a la moderation
+                                            Retour à la modération
                                         </button>
                                     </>
                                 ) : canManageAnnonce ? (
@@ -1196,9 +1196,6 @@ function AnnonceDetailContent() {
                     <section style={{ paddingTop: "0.2rem" }}>
                         <span style={sectionLabel}>Description</span>
                         <div style={{ display: "grid", gap: "1rem", maxWidth: "78ch" }}>
-                            <p style={{ fontSize: "0.86rem", lineHeight: "1.7", color: "var(--text-muted)", margin: 0, maxWidth: "62ch" }}>
-                                Informations utiles pour la gestion de cette annonce et sa consultation par son proprietaire.
-                            </p>
                             {descriptionParts.map((part, index) => (
                                 <p key={index} style={{ fontSize: "0.98rem", lineHeight: "1.9", color: "var(--text-main)", margin: 0 }}>
                                     {part}
@@ -1213,11 +1210,11 @@ function AnnonceDetailContent() {
                             {[
                                 { label: "Categorie", val: annonce.category || "N/A", icon: <Tag size={13} /> },
                                 { label: "Type", val: isDon ? "Don" : "Vente", icon: isDon ? <Gift size={13} /> : <Tag size={13} /> },
-                                { label: "Etat", val: annonce.condition || "N/A", icon: <CheckCircle2 size={13} /> },
-                                { label: "Matiere", val: annonce.material || "N/A", icon: <Package size={13} /> },
+                                { label: "État", val: annonce.condition || "N/A", icon: <CheckCircle2 size={13} /> },
+                                { label: "Matière", val: annonce.material || "N/A", icon: <Package size={13} /> },
                                 { label: "Ville", val: `${annonce.city}${annonce.zip ? " · " + annonce.zip : ""}`, icon: <MapPin size={13} /> },
-                                { label: "Publiee le", val: annonce.date, icon: <Calendar size={13} /> },
-                                { label: "Reference", val: `#${String(annonce.id).padStart(4, "0")}`, icon: <Package size={13} /> },
+                                { label: "Publiée le", val: annonce.date, icon: <Calendar size={13} /> },
+                                { label: "Référence", val: `#${String(annonce.id).padStart(4, "0")}`, icon: <Package size={13} /> },
                             ].map(({ label, val, icon }) => (
                                 <div key={label} style={{ paddingBottom: "0.85rem", borderBottom: "1px solid rgba(35,59,61,0.08)" }}>
                                     <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.38rem" }}>{label}</div>
@@ -1333,7 +1330,7 @@ function AnnonceDetailContent() {
                         </h3>
                         <p style={{ margin: "0 0 1rem", color: "var(--text-muted)", fontSize: "0.95rem", lineHeight: "1.5" }}>
                             {moderationActionType === "refus" 
-                                ? "L'annonce ne sera pas publiee. Renseignez un motif pour informer l'utilisateur."
+                                ? "L'annonce ne sera pas publiée. Renseignez un motif pour informer l'utilisateur."
                                 : "Cette annonce n'apparaitra plus dans les annonces actives. Renseignez un motif pour tracer la moderation."}
                         </p>
 

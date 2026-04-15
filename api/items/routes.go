@@ -435,6 +435,7 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 
 	// Logistics Workflow Routes
 	RegisterLogisticsRoutes(mux, repo, authMiddleware)
+	RegisterProfessionalRoutes(mux, repo, authMiddleware)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

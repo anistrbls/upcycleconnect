@@ -63,6 +63,10 @@ export default function AdminLayout({ children }) {
             router.push("/annonces/mes-annonces");
             return;
         }
+        if (isPro && moduleKey === "annonces") {
+            router.push("/annonces/disponible");
+            return;
+        }
         router.push(getDefaultSubRoute(moduleKey));
     };
 
@@ -80,15 +84,20 @@ export default function AdminLayout({ children }) {
 
     const isSalarie = user?.role === "salarie";
     const isAdmin = user?.role === "admin";
-    const userRoleLabel = user?.role === "salarie" ? "Salarié" : user?.role === "particulier" ? "Particulier" : user?.role === "prestataire" ? "Professionnel" : user?.role;
+    const isPro = user?.role === "professionnel";
+    const userRoleLabel = user?.role === "salarie" ? "Salarié" : user?.role === "particulier" ? "Particulier" : user?.role === "professionnel" ? "Professionnel" : user?.role;
     const adminAnnoncesSubNav = [
         { key: "mes-annonces", label: "Annonces actives", shortLabel: "Actives" },
         { key: "moderation", label: "Modération", shortLabel: "Modération" },
         { key: "points-depot", label: "Points de dépôt", shortLabel: "Dépôts" },
         { key: "logistique", label: "Suivi logistique", shortLabel: "Logistique" },
     ];
-    const visibleSubNav = isAdmin && activeModule.key === "annonces"
-        ? adminAnnoncesSubNav
+    const proAnnoncesSubNav = [
+        { key: "disponible", label: "Annonces disponibles", shortLabel: "Disponibles" },
+        { key: "mes-recuperations", label: "Mes récupérations", shortLabel: "Récupérations" },
+    ];
+    const visibleSubNav = activeModule.key === "annonces"
+        ? (isAdmin ? adminAnnoncesSubNav : (isPro ? proAnnoncesSubNav : activeModule.subNav))
         : activeModule.subNav;
     const userDisplayName = (() => {
         const email = user?.email || "";
@@ -112,7 +121,7 @@ export default function AdminLayout({ children }) {
     })();
 
     // Modules autorisés pour les utilisateurs non-admins
-    const allowedModulesForUsers = ["vue-globale", "annonces"];
+    const allowedModulesForUsers = isPro ? ["annonces"] : ["vue-globale", "annonces"];
     const isSalarieModule = activeModule.key.startsWith("salarie-");
     const isModuleAllowed = isAdmin || (isSalarie && isSalarieModule) || allowedModulesForUsers.includes(activeModule.key);
 

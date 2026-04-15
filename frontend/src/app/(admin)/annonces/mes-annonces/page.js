@@ -531,7 +531,7 @@ function MesAnnoncesContent() {
                     <button
                         className="action-btn primary"
                         style={{ padding: "0.8rem 1.5rem", display: "flex", alignItems: "center", gap: "0.75rem" }}
-                        onClick={() => window.location.href = "/annonces/deposer"}
+                        onClick={() => router.push("/annonces/deposer")}
                     >
                         <Plus size={20} />
                         <span>Placer une annonce</span>
@@ -617,7 +617,7 @@ function MesAnnoncesContent() {
                 {filteredAnnonces.map((annonce) => {
                     const statusKey = normalizeStatus(annonce.status);
                     const workflowKey = String(annonce.workflowStatus || "").toLowerCase();
-                    const isAfterDeposit = ["deposited", "available", "reserved", "collected", "closed"].includes(workflowKey);
+                    const isAfterDeposit = ["deposited", "available", "pending_payment", "reserved", "picked_up"].includes(workflowKey);
                     const isCancelled = workflowKey === "cancelled";
                     const canEdit = !isAdmin && !isCancelled && statusKey !== "vendu" && !isAfterDeposit;
                     const canDelete = !isAdmin && ["brouillon", "refusee", "desactivee", "desactive"].includes(statusKey) && !isCancelled;
@@ -671,9 +671,10 @@ function MesAnnoncesContent() {
                                         annonce.workflowStatus === 'deposit_code_sent' ? '#f59e0b' :
                                         annonce.workflowStatus === 'deposited'         ? '#10b981' :
                                         annonce.workflowStatus === 'available'         ? '#059669' :
+                                        annonce.workflowStatus === 'pending_payment'   ? '#d97706' :
                                         annonce.workflowStatus === 'reserved'          ? '#ec4899' :
                                         annonce.workflowStatus === 'collected'         ? '#2563eb' :
-                                        annonce.workflowStatus === 'closed'            ? '#475569' :
+                                        annonce.workflowStatus === 'picked_up'         ? '#475569' :
                                         annonce.workflowStatus === 'deposit_expired'   ? '#ef4444' :
                                         '#94a3b8';
                                     const wfLabel =
@@ -682,9 +683,10 @@ function MesAnnoncesContent() {
                                         annonce.workflowStatus === 'deposit_code_sent' ? `À déposer (${annonce.depositCode})` :
                                         annonce.workflowStatus === 'deposited'         ? 'Déposé' :
                                         annonce.workflowStatus === 'available'         ? 'Disponible' :
+                                        annonce.workflowStatus === 'pending_payment'   ? 'Paiement en attente' :
                                         annonce.workflowStatus === 'reserved'          ? 'Réservé' :
                                         annonce.workflowStatus === 'collected'         ? 'Récupéré' :
-                                        annonce.workflowStatus === 'closed'            ? 'Terminé' : 'En transit';
+                                        annonce.workflowStatus === 'picked_up'         ? 'Terminé' : 'En transit';
                                     return (
                                         <span style={{ ...styles.tag, background: `${wfColor}28`, color: wfColor, border: `1px solid ${wfColor}50` }}>
                                             {wfLabel}

@@ -35,7 +35,7 @@ func (r *Repository) EnsureSchema() error {
 			created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			last_login_at     TIMESTAMPTZ,
-			CONSTRAINT users_role_check   CHECK (role   IN ('particulier', 'prestataire', 'salarie', 'admin')),
+			CONSTRAINT users_role_check   CHECK (role   IN ('particulier', 'professionnel', 'salarie', 'admin')),
 			CONSTRAINT users_status_check CHECK (status IN ('active', 'pending', 'suspended'))
 		)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS employment_status TEXT NOT NULL DEFAULT ''`,
@@ -43,7 +43,8 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_note TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`,
-		`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('particulier', 'prestataire', 'salarie', 'admin'))`,
+		`UPDATE users SET role = 'professionnel' WHERE role = 'prestataire'`,
+		`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('particulier', 'professionnel', 'salarie', 'admin'))`,
 		`CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)`,

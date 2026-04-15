@@ -11,6 +11,9 @@ FROM golang:1.22-alpine AS builder
 # On se place dans un dossier /build pour travailler
 WORKDIR /build
 
+# Force l'usage du proxy Go pour eviter les fetch VCS directs pendant le build.
+ENV GOPROXY=https://proxy.golang.org,direct
+
 # On copie d'abord juste les fichiers de dépendances (go.mod et go.sum)
 # L'idée c'est que Docker met en cache les dépendances, donc si on ne touche pas
 # à go.mod, il ne va pas tout retélécharger à chaque build

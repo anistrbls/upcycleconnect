@@ -19,9 +19,9 @@ const STATUS_MAP = {
     'deposit_code_sent': { label: 'En attente Dépôt', color: '#f59e0b', icon: Clock, desc: 'Particulier notifié' },
     'deposited':        { label: 'Déposé', color: '#10b981', icon: Package, desc: 'Dans le conteneur' },
     'available':        { label: 'Disponible', color: '#059669', icon: QrCode, desc: 'Prêt pour les pros' },
+    'pending_payment':  { label: 'Paiement en attente', color: '#d97706', icon: Clock, desc: 'Vente réservée en attente de paiement' },
     'reserved':         { label: 'Réservé', color: '#ec4899', icon: User, desc: 'En attente de retrait' },
-    'collected':        { label: 'Récupéré', color: '#2563eb', icon: Truck, desc: 'Objet retiré' },
-    'closed':           { label: 'Clôturé', color: '#475569', icon: History, desc: 'Cycle terminé' },
+    'picked_up':        { label: 'Récupéré', color: '#2563eb', icon: Truck, desc: 'Objet retiré' },
     'deposit_expired':  { label: 'Code Expiré', color: '#ef4444', icon: AlertCircle, desc: 'Dépôt non effectué' },
     'cancelled':        { label: 'Annulé', color: '#94a3b8', icon: XCircle, desc: 'Action annulée' },
 };
@@ -370,15 +370,15 @@ export default function LogisticsDashboard() {
     const [showAssignModal, setShowAssignModal] = useState(false);
     const [showDepositModal, setShowDepositModal] = useState(false);
     const [showReserveModal, setShowReserveModal] = useState(false);
-    const [showPickupModal, setShowPickupModal] = useState(false);
     const [showCancelModal, setShowCancelModal] = useState(false);
+    const [showPickupModal, setShowPickupModal] = useState(false);
+    const [pickupSubmitting, setPickupSubmitting] = useState(false);
     
     // Data for assignment
     const [points, setPoints] = useState([]);
     const [assignment, setAssignment] = useState({ pointId: "", containerId: "" });
 
     const [reserveNameInput, setReserveNameInput] = useState("");
-    const [pickupCodeInput, setPickupCodeInput] = useState("");
     const [cancelReasonInput, setCancelReasonInput] = useState("");
     const [revertToStatusInput, setRevertToStatusInput] = useState("");
 
@@ -472,20 +472,31 @@ export default function LogisticsDashboard() {
     };
 
     const handleConfirmPickup = async () => {
+        const item = selectedItem;
+        const pickupCode = (item?.pickup_code || "").toUpperCase();
+        if (!pickupCode) {
+            alert("Aucun code de récupération disponible pour cet objet.");
+            return;
+        }
+
         try {
-            const res = await fetch(apiUrl(`/admin/logistics/${selectedItem.item_id}/confirm-pickup`), {
+            setPickupSubmitting(true);
+            const res = await fetch(apiUrl(`/admin/logistics/${item.item_id}/confirm-pickup`), {
                 method: "POST",
                 headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ code: pickupCodeInput.toUpperCase() })
+                body: JSON.stringify({ code: pickupCode })
             });
             if (res.ok) {
                 setShowPickupModal(false);
-                setPickupCodeInput("");
                 fetchLogistics();
             } else {
                 alert("Code invalide ou expiré");
             }
-        } catch (e) { alert("Erreur"); }
+        } catch (e) {
+            alert("Erreur");
+        } finally {
+            setPickupSubmitting(false);
+        }
     };
 
     const handleCancel = async () => {
@@ -512,7 +523,7 @@ export default function LogisticsDashboard() {
 
     const handleHardDeleteCancelledItem = async () => {
         if (!selectedItem?.item_id) return;
-        const ok = window.confirm("Cette action va supprimer definitivement l'annonce et son historique logistique. Continuer ?");
+        const ok = window.confirm("Cette action va supprimer définitivement l'annonce et son historique logistique. Continuer ?");
         if (!ok) return;
         try {
             const res = await fetch(apiUrl(`/admin/items/${selectedItem.item_id}`), {
@@ -767,21 +778,25 @@ export default function LogisticsDashboard() {
                 </div>
             </AdminModal>
 
-            <AdminModal open={showPickupModal} title="Confirmation de Récupération" onClose={() => setShowPickupModal(false)}>
+            <AdminModal open={showPickupModal} title="Confirmer la récupération" onClose={() => setShowPickupModal(false)}>
                 <div style={styles.modalBody}>
-                    <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                        Saisissez le code de récupération à 8 caractères présenté par le professionnel.
+                    <div style={styles.modalItemInfo}>
+                        <img src={selectedItem?.item_image} style={styles.modalImg} />
+                        <div>
+                            <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>{selectedItem?.item_title}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{selectedItem?.reserved_by_name || "Réservation professionnelle"}</div>
+                        </div>
+                    </div>
+
+                    <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', margin: 0, lineHeight: '1.6' }}>
+                        Confirmer la récupération de cet objet ?
                     </p>
-                    <input 
-                        placeholder="ABCDEFGH" 
-                        style={styles.codeInput} 
-                        value={pickupCodeInput}
-                        onChange={e => setPickupCodeInput(e.target.value.toUpperCase())}
-                        maxLength={8}
-                    />
+
                     <div style={styles.modalActions}>
-                        <button style={styles.btnSec} onClick={() => setShowPickupModal(false)}>Annuler</button>
-                        <button style={styles.btnPri} disabled={pickupCodeInput.length < 8} onClick={handleConfirmPickup}>Valider la récupération</button>
+                        <button style={styles.btnSec} onClick={() => setShowPickupModal(false)} disabled={pickupSubmitting}>Annuler</button>
+                        <button style={styles.btnPri} onClick={handleConfirmPickup} disabled={pickupSubmitting}>
+                            {pickupSubmitting ? "Confirmation..." : "Confirmer la récupération"}
+                        </button>
                     </div>
                 </div>
             </AdminModal>
@@ -791,12 +806,12 @@ export default function LogisticsDashboard() {
                     {selectedItem?.workflow_status === "cancelled" ? (
                         <>
                             <div style={{ background: '#fee2e2', color: '#991b1b', padding: '1rem', borderRadius: '16px', fontSize: '0.85rem', fontWeight: '500', border: '1px solid #fecaca' }}>
-                                Ce flux est deja annule. Vous pouvez supprimer definitivement l'annonce pour la retirer du suivi des flux objets et de la base de donnees.
+                                Ce flux est déjà annulé. Vous pouvez supprimer définitivement l'annonce pour la retirer du suivi des flux objets et de la base de données.
                             </div>
                             <div style={styles.modalActions}>
                                 <button style={styles.btnSec} onClick={() => setShowCancelModal(false)}>Fermer</button>
                                 <button style={{ ...styles.btnPri, background: '#dc2626' }} onClick={handleHardDeleteCancelledItem}>
-                                    Supprimer definitivement l'annonce
+                                    Supprimer définitivement l'annonce
                                 </button>
                             </div>
                         </>

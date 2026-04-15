@@ -381,9 +381,9 @@ func (r *Repository) GetUserItemState(itemID, userID int64) (*UserItemState, err
 	state.AfterDeposit = depositedAt.Valid || map[string]bool{
 		WFDeposited: true,
 		WFAvailable: true,
+		WFPendingPayment: true,
 		WFReserved:  true,
-		WFCollected: true,
-		WFClosed:    true,
+		WFPickedUp:  true,
 	}[state.WorkflowStatus]
 
 	return &state, nil

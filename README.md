@@ -134,6 +134,14 @@ Cette commande reconstruit localement `api` et `frontend` puis démarre les serv
 | `ADMIN_PASSWORD` | Mot de passe admin par défaut |
 | `NEXT_PUBLIC_API_URL` | URL API exposee au navigateur (`/api` recommande) |
 | `API_INTERNAL_URL` | URL API utilisee par Next.js cote serveur/proxy |
+| `STRIPE_SECRET_KEY` | Cle secrete Stripe (test/prod) |
+| `STRIPE_WEBHOOK_SECRET` | Secret de signature webhook Stripe |
+| `STRIPE_SUCCESS_URL` | URL de retour Stripe apres paiement valide |
+| `STRIPE_CANCEL_URL` | URL de retour Stripe apres annulation |
+
+Webhook Stripe a configurer dans le dashboard Stripe:
+
+- `POST /api/webhooks/stripe`
 
 ## Structure rapide
 

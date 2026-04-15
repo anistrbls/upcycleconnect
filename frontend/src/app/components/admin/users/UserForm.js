@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import AdminModal from "../AdminModal";
 import { fieldStyle, labelStyle } from "../../../lib/styles";
 
-const ROLES = ["particulier", "prestataire", "salarie", "admin"];
+const ROLES = ["particulier", "professionnel", "salarie", "admin"];
 const STATUSES = [
     { value: "active", label: "Actif" },
     { value: "pending", label: "En attente" },
@@ -26,7 +26,7 @@ const JOB_FUNCTIONS = [
 
 const ROLE_LABELS = {
     particulier: "Particulier",
-    prestataire: "Professionnel",
+    professionnel: "Professionnel",
     salarie: "Salarié",
     admin: "Admin",
 };

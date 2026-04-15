@@ -7,7 +7,7 @@ export default function UserFilters({ query, role, status, onQueryChange, onRole
     const roleOptions = [
         { value: "", label: "Tous les rôles" },
         { value: "particulier", label: "Particuliers" },
-        { value: "prestataire", label: "Professionnels" },
+        { value: "professionnel", label: "Professionnels" },
         { value: "salarie", label: "Salariés" },
         { value: "admin", label: "Admins" },
     ];

@@ -5,7 +5,7 @@ import { formatDateFR } from "../../../lib/formatters";
 // Badges visuels pour rôle et statut
 const ROLE_COLORS = {
     particulier: { bg: "#E5FFBC", color: "#3E686C", label: "Particulier" },
-    prestataire: { bg: "#D6EEF0", color: "#2E5C60", label: "Professionnel" },
+    professionnel: { bg: "#D6EEF0", color: "#2E5C60", label: "Professionnel" },
     salarie: { bg: "#F0E4D7", color: "#7D5A44", label: "Salarié" },
     admin: { bg: "#151A1B", color: "#C8D2D4", label: "Admin" },
 };

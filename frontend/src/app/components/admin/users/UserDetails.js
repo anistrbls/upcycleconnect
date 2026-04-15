@@ -5,7 +5,7 @@ import { formatDateFR, formatDateTimeFR } from "../../../lib/formatters";
 
 const ROLE_LABELS = {
     particulier: "Particulier",
-    prestataire: "Professionnel",
+    professionnel: "Professionnel",
     salarie: "Salarié",
     admin: "Administrateur",
 };
