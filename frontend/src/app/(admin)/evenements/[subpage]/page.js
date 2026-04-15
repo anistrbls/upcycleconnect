@@ -15,6 +15,7 @@ export default function EventsSubPage({ params }) {
     const searchParams = useSearchParams();
     const [events, setEvents] = useState([]);
     const [eventCategories, setEventCategories] = useState([]);
+    const [salaries, setSalaries] = useState([]);
     const [eventsLoading, setEventsLoading] = useState(false);
     const [eventsError, setEventsError] = useState("");
     const [pendingOpenEventId, setPendingOpenEventId] = useState(null);
@@ -66,11 +67,21 @@ export default function EventsSubPage({ params }) {
         setEventCategories(data.items || []);
     };
 
+    const loadSalaries = async () => {
+        const response = await fetch(`${apiUrl("/admin/users")}?role=salarie`, {
+            method: "GET",
+            headers: buildAuthHeaders(),
+        });
+
+        const data = await parseApiResponse(response);
+        setSalaries(data.items || []);
+    };
+
     const refreshEventsData = async () => {
         setEventsLoading(true);
         setEventsError("");
         try {
-            await Promise.all([loadEvents(), loadEventCategories()]);
+            await Promise.all([loadEvents(), loadEventCategories(), loadSalaries()]);
         } catch (err) {
             setEventsError(String(err?.message || "Impossible de charger les événements."));
         } finally {
@@ -168,6 +179,7 @@ export default function EventsSubPage({ params }) {
             <EventAdminView
                 events={events}
                 categories={eventCategories}
+                salaries={salaries}
                 loading={eventsLoading}
                 errorMessage={eventsError}
                 onReload={refreshEventsData}

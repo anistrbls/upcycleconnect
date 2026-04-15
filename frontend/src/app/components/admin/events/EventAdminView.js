@@ -6,7 +6,7 @@ import { EVENT_STATUSES } from "../../../lib/constants";
 import { formatDateFR, toDateTimeInputValue } from "../../../lib/formatters";
 import { fieldStyle, labelStyle, pillInputStyle } from "../../../lib/styles";
 
-export default function EventAdminView({ events, categories, loading, errorMessage, onReload, onCreate, onUpdate, onDelete, onOpenEvent, pendingOpenEventId, onConsumedOpenEvent }) {
+export default function EventAdminView({ events, categories, salaries = [], loading, errorMessage, onReload, onCreate, onUpdate, onDelete, onOpenEvent, pendingOpenEventId, onConsumedOpenEvent }) {
     const [query, setQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [categoryFilter, setCategoryFilter] = useState("all");
@@ -24,7 +24,7 @@ export default function EventAdminView({ events, categories, loading, errorMessa
         lieu: "",
         capacite: "",
         status: "brouillon",
-        intervenant: "",
+        intervenantId: "",
     });
     const hasCategories = categories.length > 0;
 
@@ -51,7 +51,7 @@ export default function EventAdminView({ events, categories, loading, errorMessa
             lieu: "",
             capacite: "",
             status: "brouillon",
-            intervenant: "",
+            intervenantId: "",
         });
         setLocalError("");
     };
@@ -76,7 +76,7 @@ export default function EventAdminView({ events, categories, loading, errorMessa
             lieu: item.lieu || "",
             capacite: item.capacite == null ? "" : String(item.capacite),
             status: item.status || "brouillon",
-            intervenant: item.intervenant || "",
+            intervenantId: item.intervenantId != null ? String(item.intervenantId) : "",
         });
         setLocalError("");
         setFormOpen(true);
@@ -99,7 +99,7 @@ export default function EventAdminView({ events, categories, loading, errorMessa
                 lieu: target.lieu || "",
                 capacite: target.capacite == null ? "" : String(target.capacite),
                 status: target.status || "brouillon",
-                intervenant: target.intervenant || "",
+                intervenantId: target.intervenantId != null ? String(target.intervenantId) : "",
             });
             setLocalError("");
             setFormOpen(true);
@@ -133,6 +133,10 @@ export default function EventAdminView({ events, categories, loading, errorMessa
             setLocalError("Format de date invalide.");
             return;
         }
+        if (!editingEvent && startDate <= new Date()) {
+            setLocalError("La date de début doit être dans le futur.");
+            return;
+        }
         if (endDate < startDate) {
             setLocalError("La date de fin ne peut pas être avant la date de début.");
             return;
@@ -156,7 +160,7 @@ export default function EventAdminView({ events, categories, loading, errorMessa
                 lieu: formState.lieu.trim(),
                 capacite: capacity,
                 status: formState.status,
-                intervenant: formState.intervenant.trim(),
+                intervenantId: formState.intervenantId !== "" ? Number(formState.intervenantId) : null,
             };
 
             if (editingEvent) {
@@ -241,10 +245,10 @@ export default function EventAdminView({ events, categories, loading, errorMessa
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.65rem" }}>
                         <label style={labelStyle}>Categorie<select value={formState.categoryId} onChange={(event) => setFormState((prev) => ({ ...prev, categoryId: event.target.value }))} style={{ ...fieldStyle, appearance: "none" }} required><option value="">Choisir une categorie</option>{categories.map((item) => <option key={item.id} value={String(item.id)}>{item.name}</option>)}</select></label>
                         <label style={labelStyle}>Statut<select value={formState.status} onChange={(event) => setFormState((prev) => ({ ...prev, status: event.target.value }))} style={{ ...fieldStyle, appearance: "none" }}>{EVENT_STATUSES.map((statusName) => <option key={statusName} value={statusName}>{statusName}</option>)}</select></label>
-                        <label style={labelStyle}>Date début<input type="datetime-local" value={formState.dateDebut} onChange={(event) => setFormState((prev) => ({ ...prev, dateDebut: event.target.value }))} style={fieldStyle} required /></label>
-                        <label style={labelStyle}>Date fin<input type="datetime-local" value={formState.dateFin} onChange={(event) => setFormState((prev) => ({ ...prev, dateFin: event.target.value }))} style={fieldStyle} required /></label>
+                        <label style={labelStyle}>Date début<input type="datetime-local" value={formState.dateDebut} min={!editingEvent ? new Date(Date.now() + 60000).toISOString().slice(0, 16) : undefined} onChange={(event) => setFormState((prev) => ({ ...prev, dateDebut: event.target.value }))} style={fieldStyle} required /></label>
+                        <label style={labelStyle}>Date fin<input type="datetime-local" value={formState.dateFin} min={formState.dateDebut || undefined} onChange={(event) => setFormState((prev) => ({ ...prev, dateFin: event.target.value }))} style={fieldStyle} required /></label>
                         <label style={labelStyle}>Lieu<input type="text" value={formState.lieu} onChange={(event) => setFormState((prev) => ({ ...prev, lieu: event.target.value }))} style={fieldStyle} /></label>
-                        <label style={labelStyle}>Intervenant<input type="text" value={formState.intervenant} onChange={(event) => setFormState((prev) => ({ ...prev, intervenant: event.target.value }))} style={fieldStyle} /></label>
+                        <label style={labelStyle}>Intervenant (salarié)<select value={formState.intervenantId} onChange={(event) => setFormState((prev) => ({ ...prev, intervenantId: event.target.value }))} style={{ ...fieldStyle, appearance: "none" }}><option value="">— Aucun —</option>{salaries.map((s) => <option key={s.id} value={String(s.id)}>{s.firstname} {s.lastname}</option>)}</select></label>
                         <label style={labelStyle}>Capacité<input type="number" min="0" value={formState.capacite} onChange={(event) => setFormState((prev) => ({ ...prev, capacite: event.target.value }))} style={fieldStyle} /></label>
                     </div>
                     <div style={{ display: "flex", gap: "0.6rem" }}>

@@ -18,10 +18,10 @@ import (
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 
+	"upcycleconnect/api/items"
 	"upcycleconnect/api/pricing"
 	"upcycleconnect/api/reservations"
 	"upcycleconnect/api/users"
-	"upcycleconnect/api/items"
 )
 
 var db *sql.DB
@@ -142,7 +142,7 @@ func main() {
 	mux.HandleFunc("GET /api/item-countries", itemCountriesPublicHandler)
 	mux.Handle("/api/admin/item-countries", authMiddleware(http.HandlerFunc(itemCountriesAdminHandler)))
 	mux.Handle("/api/admin/item-countries/", authMiddleware(http.HandlerFunc(itemCountryByIDAdminHandler)))
-	
+
 	// === Deposit Point Types ===
 	mux.HandleFunc("GET /api/deposit-point-types", depositPointTypesPublicHandler)
 	mux.Handle("/api/admin/deposit-point-types", authMiddleware(http.HandlerFunc(depositPointTypesAdminHandler)))
@@ -392,16 +392,17 @@ type servicePayload struct {
 }
 
 type eventPayload struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	CategoryID  int64  `json:"categoryId"`
-	Type        string `json:"type"`
-	DateDebut   string `json:"dateDebut"`
-	DateFin     string `json:"dateFin"`
-	Lieu        string `json:"lieu"`
-	Capacite    *int64 `json:"capacite"`
-	Status      string `json:"status"`
-	Intervenant string `json:"intervenant"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	CategoryID    int64  `json:"categoryId"`
+	Type          string `json:"type"`
+	DateDebut     string `json:"dateDebut"`
+	DateFin       string `json:"dateFin"`
+	Lieu          string `json:"lieu"`
+	Capacite      *int64 `json:"capacite"`
+	Status        string `json:"status"`
+	Intervenant   string `json:"intervenant"`
+	IntervenantID *int64 `json:"intervenantId"`
 }
 
 type eventCategoryPayload struct {
@@ -1081,7 +1082,9 @@ func ensureEventsSchema() error {
 			CONSTRAINT events_dates_check CHECK (date_fin >= date_debut)
 		)`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS category_id BIGINT`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS intervenant_id BIGINT REFERENCES users(id) ON DELETE SET NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_events_date_debut ON events(date_debut)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_intervenant_id ON events(intervenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_category_id ON events(category_id)`,
@@ -1207,7 +1210,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		rows, err := db.Query(`
-			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.created_at, e.updated_at
 			FROM events e
 			JOIN event_categories c ON c.id = e.category_id
 			WHERE ($1 = '' OR e.name ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.lieu ILIKE '%' || $1 || '%' OR e.intervenant ILIKE '%' || $1 || '%' OR c.name ILIKE '%' || $1 || '%')
@@ -1241,6 +1244,11 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if !startAt.After(time.Now().UTC()) {
+			writeError(w, http.StatusBadRequest, "la date de début doit être dans le futur")
+			return
+		}
+
 		var categoryName string
 		if err := db.QueryRow(`SELECT name FROM event_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName); err != nil {
 			if err == sql.ErrNoRows {
@@ -1251,6 +1259,28 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var intervenantName string
+		var intervenantID sql.NullInt64
+		if payload.IntervenantID != nil {
+			var role string
+			var firstname, lastname string
+			err := db.QueryRow(`SELECT role, firstname, lastname FROM users WHERE id = $1`, *payload.IntervenantID).Scan(&role, &firstname, &lastname)
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusBadRequest, "intervenant introuvable")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not validate intervenant")
+				return
+			}
+			if role != "salarie" {
+				writeError(w, http.StatusBadRequest, "l'intervenant doit être un salarié")
+				return
+			}
+			intervenantName = strings.TrimSpace(firstname + " " + lastname)
+			intervenantID = sql.NullInt64{Int64: *payload.IntervenantID, Valid: true}
+		}
+
 		var id int64
 		var createdAt, updatedAt time.Time
 		var capacity sql.NullInt64
@@ -1259,8 +1289,8 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err = db.QueryRow(`
-			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING id, created_at, updated_at
 		`,
 			strings.TrimSpace(payload.Name),
@@ -1272,13 +1302,15 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			strings.TrimSpace(payload.Lieu),
 			capacity,
 			normalizeEventStatus(payload.Status),
-			strings.TrimSpace(payload.Intervenant),
+			intervenantName,
+			intervenantID,
 		).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create event")
 			return
 		}
 
+		payload.Intervenant = intervenantName
 		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, categoryName, startAt, endAt, createdAt, updatedAt))
 
 	default:
@@ -1296,7 +1328,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		row := db.QueryRow(`
-			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.created_at, e.updated_at
 			FROM events e
 			JOIN event_categories c ON c.id = e.category_id
 			WHERE e.id = $1
@@ -1331,6 +1363,28 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var intervenantName string
+		var intervenantID sql.NullInt64
+		if payload.IntervenantID != nil {
+			var role string
+			var firstname, lastname string
+			err := db.QueryRow(`SELECT role, firstname, lastname FROM users WHERE id = $1`, *payload.IntervenantID).Scan(&role, &firstname, &lastname)
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusBadRequest, "intervenant introuvable")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not validate intervenant")
+				return
+			}
+			if role != "salarie" {
+				writeError(w, http.StatusBadRequest, "l'intervenant doit être un salarié")
+				return
+			}
+			intervenantName = strings.TrimSpace(firstname + " " + lastname)
+			intervenantID = sql.NullInt64{Int64: *payload.IntervenantID, Valid: true}
+		}
+
 		var createdAt, updatedAt time.Time
 		var capacity sql.NullInt64
 		if payload.Capacite != nil {
@@ -1349,8 +1403,9 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 				capacite = $8,
 				status = $9,
 				intervenant = $10,
+				intervenant_id = $11,
 				updated_at = NOW()
-			WHERE id = $11
+			WHERE id = $12
 			RETURNING created_at, updated_at
 		`,
 			strings.TrimSpace(payload.Name),
@@ -1362,7 +1417,8 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			strings.TrimSpace(payload.Lieu),
 			capacity,
 			normalizeEventStatus(payload.Status),
-			strings.TrimSpace(payload.Intervenant),
+			intervenantName,
+			intervenantID,
 			id,
 		)
 
@@ -1375,6 +1431,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		payload.Intervenant = intervenantName
 		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, categoryName, startAt, endAt, createdAt, updatedAt))
 
 	case http.MethodDelete:
@@ -1468,6 +1525,12 @@ func mapEventPayload(id int64, payload eventPayload, categoryName string, startA
 		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
 	}
 
+	if payload.IntervenantID != nil {
+		data["intervenantId"] = *payload.IntervenantID
+	} else {
+		data["intervenantId"] = nil
+	}
+
 	if payload.Capacite != nil {
 		data["capacite"] = *payload.Capacite
 	} else {
@@ -1482,8 +1545,9 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 	var name, description, categoryName, typeName, lieu, status, intervenant string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
+	var intervenantID sql.NullInt64
 
-	err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &createdAt, &updatedAt)
+	err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1502,6 +1566,12 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 		"intervenant":  intervenant,
 		"createdAt":    createdAt.UTC().Format(time.RFC3339),
 		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+	}
+
+	if intervenantID.Valid {
+		item["intervenantId"] = intervenantID.Int64
+	} else {
+		item["intervenantId"] = nil
 	}
 
 	if capacite.Valid {
@@ -1518,8 +1588,9 @@ func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 	var name, description, categoryName, typeName, lieu, status, intervenant string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
+	var intervenantID sql.NullInt64
 
-	err := row.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &createdAt, &updatedAt)
+	err := row.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1538,6 +1609,12 @@ func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 		"intervenant":  intervenant,
 		"createdAt":    createdAt.UTC().Format(time.RFC3339),
 		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+	}
+
+	if intervenantID.Valid {
+		item["intervenantId"] = intervenantID.Int64
+	} else {
+		item["intervenantId"] = nil
 	}
 
 	if capacite.Valid {
@@ -1967,9 +2044,9 @@ func moderationReasonsAdminHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			result = append(result, map[string]interface{}{
-				"id": id,
-				"label": label,
-				"position": pos,
+				"id":        id,
+				"label":     label,
+				"position":  pos,
 				"createdAt": createdAt.UTC().Format(time.RFC3339),
 				"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 			})
@@ -2010,9 +2087,9 @@ func moderationReasonsAdminHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT position FROM moderation_reasons WHERE id = $1`, id).Scan(&pos)
 
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"id": id,
-			"label": label,
-			"position": pos,
+			"id":        id,
+			"label":     label,
+			"position":  pos,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
@@ -2071,9 +2148,9 @@ func moderationReasonByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT position FROM moderation_reasons WHERE id = $1`, id).Scan(&pos)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id": id,
-			"label": label,
-			"position": pos,
+			"id":        id,
+			"label":     label,
+			"position":  pos,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
