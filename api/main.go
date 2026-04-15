@@ -119,7 +119,18 @@ func main() {
 	})))
 	mux.Handle("/api/admin/offers/overview", authMiddleware(http.HandlerFunc(offersOverviewHandler)))
 	mux.Handle("/api/admin/events", authMiddleware(http.HandlerFunc(eventsHandler)))
-	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(eventByIDHandler)))
+	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasSuffix(path, "/validate") && r.Method == http.MethodPost {
+			eventValidateHandler(w, r)
+			return
+		}
+		if strings.HasSuffix(path, "/reject") && r.Method == http.MethodPost {
+			eventRejectHandler(w, r)
+			return
+		}
+		eventByIDHandler(w, r)
+	})))
 	mux.Handle("/api/admin/event-categories", authMiddleware(http.HandlerFunc(eventCategoriesHandler)))
 	mux.Handle("/api/admin/event-categories/", authMiddleware(http.HandlerFunc(eventCategoryByIDHandler)))
 
@@ -187,6 +198,14 @@ func main() {
 
 	// Module pricing
 	pricing.RegisterRoutes(mux, db, authMiddleware)
+
+	// Module salarié — contenus (conseils + actualités)
+	if err := ensureSalarieContentsSchema(); err != nil {
+		log.Fatalf("Salarie contents schema error: %v", err)
+	}
+	log.Println("✓ Salarie contents schema initialized")
+	mux.Handle("/api/salarie/contents", authMiddleware(http.HandlerFunc(salarieContentsHandler)))
+	mux.Handle("/api/salarie/contents/", authMiddleware(http.HandlerFunc(salarieContentByIDHandler)))
 
 	port := getEnv("API_PORT", "8080")
 
@@ -392,17 +411,23 @@ type servicePayload struct {
 }
 
 type eventPayload struct {
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	CategoryID    int64  `json:"categoryId"`
-	Type          string `json:"type"`
-	DateDebut     string `json:"dateDebut"`
-	DateFin       string `json:"dateFin"`
-	Lieu          string `json:"lieu"`
-	Capacite      *int64 `json:"capacite"`
-	Status        string `json:"status"`
-	Intervenant   string `json:"intervenant"`
-	IntervenantID *int64 `json:"intervenantId"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	CategoryID       int64  `json:"categoryId"`
+	Type             string `json:"type"`
+	DateDebut        string `json:"dateDebut"`
+	DateFin          string `json:"dateFin"`
+	Lieu             string `json:"lieu"`
+	Capacite         *int64 `json:"capacite"`
+	Status           string `json:"status"`
+	Intervenant      string `json:"intervenant"`
+	IntervenantID    *int64 `json:"intervenantId"`
+	ValidationStatus string `json:"validationStatus"`
+	RejectionComment string `json:"rejectionComment"`
+}
+
+type eventRejectPayload struct {
+	Comment string `json:"comment"`
 }
 
 type eventCategoryPayload struct {
@@ -1083,6 +1108,16 @@ func ensureEventsSchema() error {
 		)`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS category_id BIGINT`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS intervenant_id BIGINT REFERENCES users(id) ON DELETE SET NULL`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS validation_status TEXT NOT NULL DEFAULT 'approved'`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS rejection_comment TEXT NOT NULL DEFAULT ''`,
+		`DO $$ BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint WHERE conname = 'events_validation_status_check'
+			) THEN
+				ALTER TABLE events ADD CONSTRAINT events_validation_status_check CHECK (validation_status IN ('pending', 'approved', 'rejected'));
+			END IF;
+		END $$`,
+		`CREATE INDEX IF NOT EXISTS idx_events_validation_status ON events(validation_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_date_debut ON events(date_debut)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_intervenant_id ON events(intervenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)`,
@@ -1209,16 +1244,22 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			categoryID = nil
 		}
 
+		validationStatusFilter := strings.TrimSpace(r.URL.Query().Get("validationStatus"))
+		if validationStatusFilter != "pending" && validationStatusFilter != "approved" && validationStatusFilter != "rejected" {
+			validationStatusFilter = ""
+		}
+
 		rows, err := db.Query(`
-			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.created_at, e.updated_at
 			FROM events e
 			JOIN event_categories c ON c.id = e.category_id
 			WHERE ($1 = '' OR e.name ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.lieu ILIKE '%' || $1 || '%' OR e.intervenant ILIKE '%' || $1 || '%' OR c.name ILIKE '%' || $1 || '%')
 			AND ($2 = '' OR e.status = $2)
 			AND ($3 = '' OR e.type = $3)
 			AND ($4::BIGINT IS NULL OR e.category_id = $4)
+			AND ($5 = '' OR e.validation_status = $5)
 			ORDER BY date_debut ASC, created_at DESC
-		`, q, statusFilter, typeFilter, categoryID)
+		`, q, statusFilter, typeFilter, categoryID, validationStatusFilter)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list events")
 			return
@@ -1281,6 +1322,13 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			intervenantID = sql.NullInt64{Int64: *payload.IntervenantID, Valid: true}
 		}
 
+		callerClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+		callerRole, _ := callerClaims["role"].(string)
+		postValidationStatus := "approved"
+		if callerRole == "salarie" {
+			postValidationStatus = "pending"
+		}
+
 		var id int64
 		var createdAt, updatedAt time.Time
 		var capacity sql.NullInt64
@@ -1289,8 +1337,8 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err = db.QueryRow(`
-			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING id, created_at, updated_at
 		`,
 			strings.TrimSpace(payload.Name),
@@ -1304,6 +1352,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			normalizeEventStatus(payload.Status),
 			intervenantName,
 			intervenantID,
+			postValidationStatus,
 		).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create event")
@@ -1311,6 +1360,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		payload.Intervenant = intervenantName
+		payload.ValidationStatus = postValidationStatus
 		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, categoryName, startAt, endAt, createdAt, updatedAt))
 
 	default:
@@ -1328,7 +1378,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		row := db.QueryRow(`
-			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.created_at, e.updated_at
 			FROM events e
 			JOIN event_categories c ON c.id = e.category_id
 			WHERE e.id = $1
@@ -1385,6 +1435,9 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			intervenantID = sql.NullInt64{Int64: *payload.IntervenantID, Valid: true}
 		}
 
+		putCallerClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+		putCallerRole, _ := putCallerClaims["role"].(string)
+
 		var createdAt, updatedAt time.Time
 		var capacity sql.NullInt64
 		if payload.Capacite != nil {
@@ -1404,9 +1457,11 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 				status = $9,
 				intervenant = $10,
 				intervenant_id = $11,
+				validation_status = CASE WHEN $13 = 'salarie' THEN 'pending' ELSE validation_status END,
+				rejection_comment = CASE WHEN $13 = 'salarie' THEN '' ELSE rejection_comment END,
 				updated_at = NOW()
 			WHERE id = $12
-			RETURNING created_at, updated_at
+			RETURNING created_at, updated_at, validation_status, rejection_comment
 		`,
 			strings.TrimSpace(payload.Name),
 			strings.TrimSpace(payload.Description),
@@ -1420,9 +1475,11 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			intervenantName,
 			intervenantID,
 			id,
+			putCallerRole,
 		)
 
-		if err := result.Scan(&createdAt, &updatedAt); err != nil {
+		var retValidationStatus, retRejectionComment string
+		if err := result.Scan(&createdAt, &updatedAt, &retValidationStatus, &retRejectionComment); err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "event not found")
 				return
@@ -1432,6 +1489,8 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		payload.Intervenant = intervenantName
+		payload.ValidationStatus = retValidationStatus
+		payload.RejectionComment = retRejectionComment
 		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, categoryName, startAt, endAt, createdAt, updatedAt))
 
 	case http.MethodDelete:
@@ -1508,21 +1567,31 @@ func normalizeEventStatus(raw string) string {
 	return ""
 }
 
+func normalizeValidationStatus(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "pending" || value == "approved" || value == "rejected" {
+		return value
+	}
+	return "approved"
+}
+
 func mapEventPayload(id int64, payload eventPayload, categoryName string, startAt time.Time, endAt time.Time, createdAt time.Time, updatedAt time.Time) map[string]interface{} {
 	data := map[string]interface{}{
-		"id":           id,
-		"name":         strings.TrimSpace(payload.Name),
-		"description":  strings.TrimSpace(payload.Description),
-		"categoryId":   payload.CategoryID,
-		"categoryName": categoryName,
-		"type":         normalizeEventType(payload.Type),
-		"dateDebut":    startAt.UTC().Format(time.RFC3339),
-		"dateFin":      endAt.UTC().Format(time.RFC3339),
-		"lieu":         strings.TrimSpace(payload.Lieu),
-		"status":       normalizeEventStatus(payload.Status),
-		"intervenant":  strings.TrimSpace(payload.Intervenant),
-		"createdAt":    createdAt.UTC().Format(time.RFC3339),
-		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+		"id":               id,
+		"name":             strings.TrimSpace(payload.Name),
+		"description":      strings.TrimSpace(payload.Description),
+		"categoryId":       payload.CategoryID,
+		"categoryName":     categoryName,
+		"type":             normalizeEventType(payload.Type),
+		"dateDebut":        startAt.UTC().Format(time.RFC3339),
+		"dateFin":          endAt.UTC().Format(time.RFC3339),
+		"lieu":             strings.TrimSpace(payload.Lieu),
+		"status":           normalizeEventStatus(payload.Status),
+		"intervenant":      strings.TrimSpace(payload.Intervenant),
+		"validationStatus": payload.ValidationStatus,
+		"rejectionComment": payload.RejectionComment,
+		"createdAt":        createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 	}
 
 	if payload.IntervenantID != nil {
@@ -1542,30 +1611,32 @@ func mapEventPayload(id int64, payload eventPayload, categoryName string, startA
 
 func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 	var id, categoryID int64
-	var name, description, categoryName, typeName, lieu, status, intervenant string
+	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
 	var intervenantID sql.NullInt64
 
-	err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &createdAt, &updatedAt)
+	err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	item := map[string]interface{}{
-		"id":           id,
-		"name":         name,
-		"description":  description,
-		"categoryId":   categoryID,
-		"categoryName": categoryName,
-		"type":         typeName,
-		"dateDebut":    dateDebut.UTC().Format(time.RFC3339),
-		"dateFin":      dateFin.UTC().Format(time.RFC3339),
-		"lieu":         lieu,
-		"status":       status,
-		"intervenant":  intervenant,
-		"createdAt":    createdAt.UTC().Format(time.RFC3339),
-		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+		"id":               id,
+		"name":             name,
+		"description":      description,
+		"categoryId":       categoryID,
+		"categoryName":     categoryName,
+		"type":             typeName,
+		"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
+		"dateFin":          dateFin.UTC().Format(time.RFC3339),
+		"lieu":             lieu,
+		"status":           status,
+		"intervenant":      intervenant,
+		"validationStatus": validationStatus,
+		"rejectionComment": rejectionComment,
+		"createdAt":        createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 	}
 
 	if intervenantID.Valid {
@@ -1585,30 +1656,32 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 
 func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 	var id, categoryID int64
-	var name, description, categoryName, typeName, lieu, status, intervenant string
+	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
 	var intervenantID sql.NullInt64
 
-	err := row.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &createdAt, &updatedAt)
+	err := row.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	item := map[string]interface{}{
-		"id":           id,
-		"name":         name,
-		"description":  description,
-		"categoryId":   categoryID,
-		"categoryName": categoryName,
-		"type":         typeName,
-		"dateDebut":    dateDebut.UTC().Format(time.RFC3339),
-		"dateFin":      dateFin.UTC().Format(time.RFC3339),
-		"lieu":         lieu,
-		"status":       status,
-		"intervenant":  intervenant,
-		"createdAt":    createdAt.UTC().Format(time.RFC3339),
-		"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+		"id":               id,
+		"name":             name,
+		"description":      description,
+		"categoryId":       categoryID,
+		"categoryName":     categoryName,
+		"type":             typeName,
+		"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
+		"dateFin":          dateFin.UTC().Format(time.RFC3339),
+		"lieu":             lieu,
+		"status":           status,
+		"intervenant":      intervenant,
+		"validationStatus": validationStatus,
+		"rejectionComment": rejectionComment,
+		"createdAt":        createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 	}
 
 	if intervenantID.Valid {
@@ -1624,6 +1697,77 @@ func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 	}
 
 	return item, nil
+}
+
+func eventValidateHandler(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/validate")
+	id, err := parseIDFromPath(path, "/api/admin/events/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	var updatedAt time.Time
+	err = db.QueryRow(`
+		UPDATE events
+		SET validation_status = 'approved', rejection_comment = '', status = 'planifie', updated_at = NOW()
+		WHERE id = $1
+		RETURNING updated_at
+	`, id).Scan(&updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "event not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not validate event")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":               id,
+		"validationStatus": "approved",
+		"status":           "planifie",
+		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func eventRejectHandler(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/reject")
+	id, err := parseIDFromPath(path, "/api/admin/events/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	var rejectPayload eventRejectPayload
+	if err := json.NewDecoder(r.Body).Decode(&rejectPayload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	comment := strings.TrimSpace(rejectPayload.Comment)
+	var updatedAt time.Time
+	err = db.QueryRow(`
+		UPDATE events
+		SET validation_status = 'rejected', rejection_comment = $1, updated_at = NOW()
+		WHERE id = $2
+		RETURNING updated_at
+	`, comment, id).Scan(&updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "event not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not reject event")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":               id,
+		"validationStatus": "rejected",
+		"rejectionComment": comment,
+		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
+	})
 }
 
 func eventCategoriesHandler(w http.ResponseWriter, r *http.Request) {
@@ -1945,6 +2089,183 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Salarié — contenus (conseils + actualités)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func ensureSalarieContentsSchema() error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS salarie_contents (
+		id         BIGSERIAL PRIMARY KEY,
+		user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		type       TEXT NOT NULL,
+		title      TEXT NOT NULL,
+		body       TEXT NOT NULL DEFAULT '',
+		status     TEXT NOT NULL DEFAULT 'brouillon',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		CONSTRAINT salarie_contents_type_check CHECK (type IN ('conseil', 'actualite')),
+		CONSTRAINT salarie_contents_status_check CHECK (status IN ('brouillon', 'publie', 'archive', 'en_attente'))
+	)`)
+	return err
+}
+
+func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`
+			SELECT id, user_id, type, title, body, status, created_at, updated_at
+			FROM salarie_contents
+			ORDER BY created_at DESC
+		`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list contents")
+			return
+		}
+		defer rows.Close()
+		items := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, userID int64
+			var contentType, title, body, status string
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &userID, &contentType, &title, &body, &status, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse content")
+				return
+			}
+			items = append(items, map[string]interface{}{
+				"id": id, "userId": userID, "type": contentType, "title": title,
+				"body": body, "status": status,
+				"createdAt": createdAt.UTC().Format(time.RFC3339),
+				"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+
+	case http.MethodPost:
+		claims := r.Context().Value("authClaims")
+		if claims == nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		authClaims, assertOk := claims.(jwt.MapClaims)
+		if !assertOk {
+			writeError(w, http.StatusUnauthorized, "invalid claims")
+			return
+		}
+		email, _ := authClaims["sub"].(string)
+		var userID int64
+		if err := db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+
+		var payload struct {
+			Type   string `json:"type"`
+			Title  string `json:"title"`
+			Body   string `json:"body"`
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if payload.Type != "conseil" && payload.Type != "actualite" {
+			writeError(w, http.StatusBadRequest, "type must be 'conseil' or 'actualite'")
+			return
+		}
+		if strings.TrimSpace(payload.Title) == "" {
+			writeError(w, http.StatusBadRequest, "title is required")
+			return
+		}
+		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
+		if payload.Status == "" {
+			payload.Status = "brouillon"
+		}
+		if !validStatuses[payload.Status] {
+			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO salarie_contents (user_id, type, title, body, status)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id, created_at, updated_at
+		`, userID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create content")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "userId": userID, "type": payload.Type,
+			"title": strings.TrimSpace(payload.Title), "body": strings.TrimSpace(payload.Body),
+			"status":    payload.Status,
+			"createdAt": createdAt.UTC().Format(time.RFC3339),
+			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/api/salarie/contents/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var payload struct {
+			Title  string `json:"title"`
+			Body   string `json:"body"`
+			Status string `json:"status"`
+			Type   string `json:"type"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
+		if !validStatuses[payload.Status] {
+			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+		var updatedAt time.Time
+		res := db.QueryRow(`
+			UPDATE salarie_contents SET title = $1, body = $2, status = $3, updated_at = NOW()
+			WHERE id = $4 RETURNING updated_at
+		`, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, id)
+		if err := res.Scan(&updatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update content")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "status": payload.Status, "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM salarie_contents WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete content")
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			writeError(w, http.StatusNotFound, "content not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

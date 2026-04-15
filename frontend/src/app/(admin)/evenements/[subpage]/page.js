@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import EventAdminView from "../../../components/admin/events/EventAdminView";
 import EventCategoryAdminView from "../../../components/admin/events/EventCategoryAdminView";
 import EventPlanningView from "../../../components/admin/events/EventPlanningView";
+import EventValidationView from "../../../components/admin/events/EventValidationView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
@@ -90,7 +91,7 @@ export default function EventsSubPage({ params }) {
     };
 
     useEffect(() => {
-        if (subpage === "tous-evenements" || subpage === "planning" || subpage === "categories-evenements") {
+        if (subpage === "tous-evenements" || subpage === "planning" || subpage === "categories-evenements" || subpage === "validation") {
             refreshEventsData();
         }
     }, [subpage]);
@@ -159,6 +160,25 @@ export default function EventsSubPage({ params }) {
         await refreshEventsData();
     };
 
+    const validateEvent = async (id) => {
+        const response = await fetch(apiUrl(`/admin/events/${id}/validate`), {
+            method: "POST",
+            headers: buildAuthHeaders(),
+        });
+        await parseApiResponse(response);
+        await refreshEventsData();
+    };
+
+    const rejectEvent = async (id, comment) => {
+        const response = await fetch(apiUrl(`/admin/events/${id}/reject`), {
+            method: "POST",
+            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ comment }),
+        });
+        await parseApiResponse(response);
+        await refreshEventsData();
+    };
+
     const openEventFromPlanning = (eventItem) => {
         if (!eventItem?.id) {
             return;
@@ -209,6 +229,19 @@ export default function EventsSubPage({ params }) {
 
     if (subpage === "planning") {
         return <EventPlanningView events={events} onOpenEvent={openEventFromPlanning} />;
+    }
+
+    if (subpage === "validation") {
+        return (
+            <EventValidationView
+                events={events}
+                loading={eventsLoading}
+                errorMessage={eventsError}
+                onReload={refreshEventsData}
+                onValidate={validateEvent}
+                onReject={rejectEvent}
+            />
+        );
     }
 
     return <ModulePlaceholder moduleLabel={activeModule.label} subLabel={activeSub.label} />;

@@ -94,6 +94,7 @@ export const NAV_MODULES = [
         icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2",
         subNav: [
             { key: "tous-evenements", label: "Tous les événements", shortLabel: "Tous" },
+            { key: "validation", label: "Validation", shortLabel: "Validation" },
             { key: "categories-evenements", label: "Catégories", shortLabel: "Catégories" },
             { key: "inscriptions", label: "Inscriptions", shortLabel: "Inscriptions" },
             { key: "intervenants", label: "Intervenants", shortLabel: "Intervenants" },
@@ -141,7 +142,61 @@ export const NAV_MODULES = [
     },
 ];
 
-export const getModuleByKey = (moduleKey) => NAV_MODULES.find((module) => module.key === moduleKey) || NAV_MODULES[0];
+export const SALARIE_MODULES = [
+    {
+        key: "salarie-tableau-de-bord",
+        label: "Tableau de bord",
+        shortLabel: "Dashboard",
+        icon: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+        subNav: [
+            { key: "resume", label: "Résumé", shortLabel: "Résumé" },
+            { key: "prochains-evenements", label: "Prochains événements", shortLabel: "Événements" },
+            { key: "en-attente", label: "En attente", shortLabel: "En attente" },
+        ],
+    },
+    {
+        key: "salarie-formations",
+        label: "Formations & événements",
+        shortLabel: "Formations",
+        icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2",
+        subNav: [
+            { key: "liste", label: "Liste", shortLabel: "Liste" },
+            { key: "creer", label: "Créer", shortLabel: "Créer" },
+        ],
+    },
+    {
+        key: "salarie-planning",
+        label: "Planning",
+        shortLabel: "Planning",
+        icon: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z",
+        subNav: [
+            { key: "agenda", label: "Agenda", shortLabel: "Agenda" },
+        ],
+    },
+    {
+        key: "salarie-contenu",
+        label: "Contenu",
+        shortLabel: "Contenu",
+        icon: "M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z",
+        subNav: [
+            { key: "conseils", label: "Conseils", shortLabel: "Conseils" },
+            { key: "actualites", label: "Actualités", shortLabel: "Actualités" },
+        ],
+    },
+    {
+        key: "salarie-moderation",
+        label: "Modération",
+        shortLabel: "Modération",
+        icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+        subNav: [
+            { key: "a-moderer", label: "À modérer", shortLabel: "À modérer" },
+        ],
+    },
+];
+
+export const ALL_MODULES = [...NAV_MODULES, ...SALARIE_MODULES];
+
+export const getModuleByKey = (moduleKey) => ALL_MODULES.find((module) => module.key === moduleKey) || NAV_MODULES[0];
 
 export const getSubNavItem = (moduleKey, subKey) => {
     const module = getModuleByKey(moduleKey);

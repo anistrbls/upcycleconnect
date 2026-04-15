@@ -280,11 +280,23 @@ export default function EventAdminView({ events, categories, salaries = [], load
                                 minHeight: "360px",
                             }}
                         >
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start", flexWrap: "wrap" }}>
                                 <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>{item.name}</h3>
-                                <span className="db-badge" style={{ background: item.status === "valide" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>
-                                    {item.status}
-                                </span>
+                                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                    {item.validationStatus === "pending" && (
+                                        <span className="db-badge" style={{ background: "#FFF3E0", color: "#A56A2A" }}>
+                                            En attente
+                                        </span>
+                                    )}
+                                    {item.validationStatus === "rejected" && (
+                                        <span className="db-badge" style={{ background: "#FDE8E8", color: "#B24A4A" }}>
+                                            Refusé
+                                        </span>
+                                    )}
+                                    <span className="db-badge" style={{ background: item.status === "valide" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>
+                                        {item.status}
+                                    </span>
+                                </div>
                             </div>
 
                             <p

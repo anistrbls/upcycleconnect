@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../lib/api";
-import { getDefaultSubRoute, getModuleByKey, NAV_MODULES } from "../lib/constants";
+import { getDefaultSubRoute, getModuleByKey, NAV_MODULES, SALARIE_MODULES } from "../lib/constants";
 import { Icon } from "../components/admin/Icon";
 
 export default function AdminLayout({ children }) {
@@ -78,6 +78,7 @@ export default function AdminLayout({ children }) {
         );
     }
 
+    const isSalarie = user?.role === "salarie";
     const isAdmin = user?.role === "admin";
     const userRoleLabel = user?.role === "salarie" ? "Salarié" : user?.role === "particulier" ? "Particulier" : user?.role === "prestataire" ? "Professionnel" : user?.role;
     const adminAnnoncesSubNav = [
@@ -112,11 +113,14 @@ export default function AdminLayout({ children }) {
 
     // Modules autorisés pour les utilisateurs non-admins
     const allowedModulesForUsers = ["vue-globale", "annonces"];
-    const isModuleAllowed = isAdmin || allowedModulesForUsers.includes(activeModule.key);
+    const isSalarieModule = activeModule.key.startsWith("salarie-");
+    const isModuleAllowed = isAdmin || (isSalarie && isSalarieModule) || allowedModulesForUsers.includes(activeModule.key);
 
     // Filtrer la sidebar
     const displayedModules = isAdmin
         ? NAV_MODULES
+        : isSalarie
+        ? SALARIE_MODULES
         : NAV_MODULES.filter(m => allowedModulesForUsers.includes(m.key));
 
     return (
@@ -132,7 +136,7 @@ export default function AdminLayout({ children }) {
                 </div>
 
                 <div className="topbar-center">
-                    {(isAdmin || activeModule.key === "annonces") && visibleSubNav.map((subItem) => (
+                    {(isAdmin || isSalarieModule || activeModule.key === "annonces") && visibleSubNav.map((subItem) => (
                         <button
                             key={subItem.key}
                             className={`action-btn ${currentSubKey === subItem.key ? "primary" : ""}`}
