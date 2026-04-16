@@ -94,7 +94,6 @@ export const NAV_MODULES = [
         icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2",
         subNav: [
             { key: "tous-evenements", label: "Tous les événements", shortLabel: "Tous" },
-            { key: "validation", label: "Validation", shortLabel: "Validation" },
             { key: "categories-evenements", label: "Catégories", shortLabel: "Catégories" },
             { key: "inscriptions", label: "Inscriptions", shortLabel: "Inscriptions" },
             { key: "intervenants", label: "Intervenants", shortLabel: "Intervenants" },
@@ -121,8 +120,7 @@ export const NAV_MODULES = [
         icon: "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3",
         subNav: [
             { key: "conteneurs", label: "Conteneurs", shortLabel: "Conteneurs" },
-            { key: "validations-ops", label: "Validations", shortLabel: "Validations" },
-            { key: "moderations", label: "Modérations", shortLabel: "Modérations" },
+            { key: "validations", label: "Validation", shortLabel: "Validation" },
             { key: "notifications", label: "Notifications", shortLabel: "Notif." },
             { key: "documents", label: "Documents", shortLabel: "Docs" },
         ],

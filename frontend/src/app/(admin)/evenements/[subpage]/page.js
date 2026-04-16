@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import EventAdminView from "../../../components/admin/events/EventAdminView";
 import EventCategoryAdminView from "../../../components/admin/events/EventCategoryAdminView";
 import EventPlanningView from "../../../components/admin/events/EventPlanningView";
-import EventValidationView from "../../../components/admin/events/EventValidationView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
@@ -229,19 +228,6 @@ export default function EventsSubPage({ params }) {
 
     if (subpage === "planning") {
         return <EventPlanningView events={events} onOpenEvent={openEventFromPlanning} />;
-    }
-
-    if (subpage === "validation") {
-        return (
-            <EventValidationView
-                events={events}
-                loading={eventsLoading}
-                errorMessage={eventsError}
-                onReload={refreshEventsData}
-                onValidate={validateEvent}
-                onReject={rejectEvent}
-            />
-        );
     }
 
     return <ModulePlaceholder moduleLabel={activeModule.label} subLabel={activeSub.label} />;

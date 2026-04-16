@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import SalarieContenuView from "../../../components/salarie/SalarieContenuView";
+import SalarieConseilFeedView from "../../../components/salarie/SalarieConseilFeedView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
@@ -9,6 +10,7 @@ import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 export default function SalarieContenuPage({ params }) {
     const { subpage } = use(params);
     const [contents, setContents] = useState([]);
+    const [feedItems, setFeedItems] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
@@ -25,8 +27,14 @@ export default function SalarieContenuPage({ params }) {
         setLoading(true);
         setError("");
         try {
-            const res = await fetch(apiUrl("/salarie/contents"), { headers: buildAuthHeaders() });
-            if (res.ok) { const d = await res.json(); setContents(d.items || []); }
+            const [ownRes, feedRes] = await Promise.all([
+                fetch(apiUrl("/salarie/contents"), { headers: buildAuthHeaders() }),
+                subpage === "conseils"
+                    ? fetch(apiUrl("/salarie/contents/feed"), { headers: buildAuthHeaders() })
+                    : Promise.resolve(null),
+            ]);
+            if (ownRes.ok) { const d = await ownRes.json(); setContents(d.items || []); }
+            if (feedRes?.ok) { const d = await feedRes.json(); setFeedItems(d.items || []); }
         } catch (err) {
             setError(String(err?.message || "Impossible de charger le contenu."));
         } finally {
@@ -34,7 +42,7 @@ export default function SalarieContenuPage({ params }) {
         }
     };
 
-    useEffect(() => { loadContents(); }, []);
+    useEffect(() => { loadContents(); }, [subpage]);
 
     const handleCreate = async (payload) => {
         const res = await fetch(apiUrl("/salarie/contents"), {
@@ -65,15 +73,27 @@ export default function SalarieContenuPage({ params }) {
         await loadContents();
     };
 
-    const contentType = subpage === "conseils" ? "conseil" : subpage === "actualites" ? "actualite" : null;
+    if (subpage === "conseils") {
+        return (
+            <SalarieConseilFeedView
+                feedItems={feedItems}
+                ownItems={contents}
+                loading={loading}
+                errorMessage={error}
+                onCreate={handleCreate}
+                onUpdate={handleUpdate}
+                onDelete={handleDelete}
+            />
+        );
+    }
 
-    if (contentType) {
+    if (subpage === "actualites") {
         return (
             <SalarieContenuView
                 contents={contents}
                 loading={loading}
                 errorMessage={error}
-                type={contentType}
+                type="actualite"
                 onCreate={handleCreate}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
@@ -83,3 +103,4 @@ export default function SalarieContenuPage({ params }) {
 
     return <ModulePlaceholder moduleLabel={activeModule.label} subLabel={activeSub?.label || subpage} />;
 }
+

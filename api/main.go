@@ -205,7 +205,21 @@ func main() {
 	}
 	log.Println("✓ Salarie contents schema initialized")
 	mux.Handle("/api/salarie/contents", authMiddleware(http.HandlerFunc(salarieContentsHandler)))
+	mux.Handle("/api/salarie/contents/feed", authMiddleware(http.HandlerFunc(salarieContentsFeedHandler)))
 	mux.Handle("/api/salarie/contents/", authMiddleware(http.HandlerFunc(salarieContentByIDHandler)))
+	mux.Handle("/api/admin/salarie-contents", authMiddleware(http.HandlerFunc(adminSalarieContentsHandler)))
+	mux.Handle("/api/admin/salarie-contents/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasSuffix(path, "/validate") && r.Method == http.MethodPost {
+			adminSalarieContentValidateHandler(w, r)
+			return
+		}
+		if strings.HasSuffix(path, "/reject") && r.Method == http.MethodPost {
+			adminSalarieContentRejectHandler(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})))
 
 	port := getEnv("API_PORT", "8080")
 
@@ -2108,17 +2122,29 @@ func ensureSalarieContentsSchema() error {
 		CONSTRAINT salarie_contents_type_check CHECK (type IN ('conseil', 'actualite')),
 		CONSTRAINT salarie_contents_status_check CHECK (status IN ('brouillon', 'publie', 'archive', 'en_attente'))
 	)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE salarie_contents ADD COLUMN IF NOT EXISTS rejection_comment TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 
 func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		getClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+		getEmail, _ := getClaims["sub"].(string)
+		var getCallerID int64
+		if err := db.QueryRow(`SELECT id FROM users WHERE email = $1`, getEmail).Scan(&getCallerID); err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
 		rows, err := db.Query(`
-			SELECT id, user_id, type, title, body, status, created_at, updated_at
+			SELECT id, user_id, type, title, body, status, rejection_comment, created_at, updated_at
 			FROM salarie_contents
+			WHERE user_id = $1
 			ORDER BY created_at DESC
-		`)
+		`, getCallerID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list contents")
 			return
@@ -2127,15 +2153,15 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		items := make([]map[string]interface{}, 0)
 		for rows.Next() {
 			var id, userID int64
-			var contentType, title, body, status string
+			var contentType, title, body, status, rejectionComment string
 			var createdAt, updatedAt time.Time
-			if err := rows.Scan(&id, &userID, &contentType, &title, &body, &status, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &userID, &contentType, &title, &body, &status, &rejectionComment, &createdAt, &updatedAt); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse content")
 				return
 			}
 			items = append(items, map[string]interface{}{
 				"id": id, "userId": userID, "type": contentType, "title": title,
-				"body": body, "status": status,
+				"body": body, "status": status, "rejectionComment": rejectionComment,
 				"createdAt": createdAt.UTC().Format(time.RFC3339),
 				"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 			})
@@ -2189,11 +2215,16 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 
 		var id int64
 		var createdAt, updatedAt time.Time
+		// Un salarié ne peut pas publier directement : force en_attente si le statut demandé est publie
+		postStatus := payload.Status
+		if postStatus == "publie" {
+			postStatus = "en_attente"
+		}
 		err := db.QueryRow(`
 			INSERT INTO salarie_contents (user_id, type, title, body, status)
 			VALUES ($1, $2, $3, $4, $5)
 			RETURNING id, created_at, updated_at
-		`, userID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status).Scan(&id, &createdAt, &updatedAt)
+		`, userID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), postStatus).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create content")
 			return
@@ -2201,7 +2232,7 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": id, "userId": userID, "type": payload.Type,
 			"title": strings.TrimSpace(payload.Title), "body": strings.TrimSpace(payload.Body),
-			"status":    payload.Status,
+			"status":    postStatus,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
@@ -2209,6 +2240,51 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func salarieContentsFeedHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	// Identifier l'utilisateur courant pour marquer ses propres conseils
+	var callerUserID int64
+	if claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims); ok {
+		email, _ := claims["sub"].(string)
+		db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&callerUserID)
+	}
+	rows, err := db.Query(`
+		SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.title, sc.body, sc.created_at
+		FROM salarie_contents sc
+		JOIN users u ON u.id = sc.user_id
+		WHERE sc.type = 'conseil' AND sc.status = 'publie'
+		ORDER BY sc.created_at DESC
+	`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load feed")
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id, userID int64
+		var firstname, lastname, title, body string
+		var createdAt time.Time
+		if err := rows.Scan(&id, &userID, &firstname, &lastname, &title, &body, &createdAt); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse feed item")
+			return
+		}
+		items = append(items, map[string]interface{}{
+			"id":         id,
+			"userId":     userID,
+			"authorName": strings.TrimSpace(firstname + " " + lastname),
+			"title":      title,
+			"body":       body,
+			"isOwn":      userID == callerUserID,
+			"createdAt":  createdAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 }
 
 func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
@@ -2235,9 +2311,15 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid status")
 			return
 		}
+		// Un salarié ne peut pas se publier lui-même
+		putClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+		putRole, _ := putClaims["role"].(string)
+		if putRole == "salarie" && payload.Status == "publie" {
+			payload.Status = "en_attente"
+		}
 		var updatedAt time.Time
 		res := db.QueryRow(`
-			UPDATE salarie_contents SET title = $1, body = $2, status = $3, updated_at = NOW()
+			UPDATE salarie_contents SET title = $1, body = $2, status = $3, rejection_comment = CASE WHEN $3 = 'en_attente' THEN '' ELSE rejection_comment END, updated_at = NOW()
 			WHERE id = $4 RETURNING updated_at
 		`, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, id)
 		if err := res.Scan(&updatedAt); err != nil {
@@ -2266,6 +2348,114 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin — modération des contenus salarié
+// ─────────────────────────────────────────────────────────────────────────────
+
+func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
+
+	rows, err := db.Query(`
+		SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.created_at, sc.updated_at
+		FROM salarie_contents sc
+		JOIN users u ON u.id = sc.user_id
+		WHERE ($1 = '' OR sc.status = $1)
+		AND ($2 = '' OR sc.type = $2)
+		ORDER BY sc.created_at DESC
+	`, statusFilter, typeFilter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list contents")
+		return
+	}
+	defer rows.Close()
+
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id, userID int64
+		var firstname, lastname, contentType, title, body, status, rejectionComment string
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&id, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &createdAt, &updatedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse content")
+			return
+		}
+		items = append(items, map[string]interface{}{
+			"id": id, "userId": userID,
+			"authorName":       strings.TrimSpace(firstname + " " + lastname),
+			"type":             contentType,
+			"title":            title,
+			"body":             body,
+			"status":           status,
+			"rejectionComment": rejectionComment,
+			"createdAt":        createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func adminSalarieContentValidateHandler(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/validate")
+	id, err := parseIDFromPath(path, "/api/admin/salarie-contents/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var updatedAt time.Time
+	err = db.QueryRow(`
+		UPDATE salarie_contents SET status = 'publie', rejection_comment = '', updated_at = NOW()
+		WHERE id = $1 RETURNING updated_at
+	`, id).Scan(&updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "content not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not validate content")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "status": "publie", "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
+}
+
+func adminSalarieContentRejectHandler(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/reject")
+	id, err := parseIDFromPath(path, "/api/admin/salarie-contents/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var body struct {
+		Comment string `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	comment := strings.TrimSpace(body.Comment)
+	var updatedAt time.Time
+	err = db.QueryRow(`
+		UPDATE salarie_contents SET status = 'brouillon', rejection_comment = $1, updated_at = NOW()
+		WHERE id = $2 RETURNING updated_at
+	`, comment, id).Scan(&updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "content not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not reject content")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "status": "brouillon", "rejectionComment": comment, "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

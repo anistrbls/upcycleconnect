@@ -5,13 +5,20 @@ import AdminModal from "../admin/AdminModal";
 import { fieldStyle, labelStyle, pillInputStyle } from "../../lib/styles";
 
 const CONTENT_TYPES = ["conseil", "actualite"];
-const CONTENT_STATUSES = ["brouillon", "publie", "archive"];
+const CONTENT_STATUSES = ["brouillon", "en_attente"];
 
 const STATUS_COLORS = {
     brouillon: "#E6EDEE",
     en_attente: "#FFF3E0",
     publie: "#E5FFBC",
     archive: "#F0F0F0",
+};
+
+const STATUS_LABELS = {
+    brouillon: "Brouillon",
+    en_attente: "En attente de validation",
+    publie: "Publié",
+    archive: "Archivé",
 };
 
 export default function SalarieContenuView({ contents = [], loading, errorMessage, type, onCreate, onUpdate, onDelete }) {
@@ -86,10 +93,13 @@ export default function SalarieContenuView({ contents = [], loading, errorMessag
                 <form onSubmit={handleSubmit} style={{ display: "grid", gap: "0.75rem" }}>
                     <label style={labelStyle}>Titre<input type="text" value={formState.title} onChange={e => setFormState(p => ({ ...p, title: e.target.value }))} style={fieldStyle} required /></label>
                     <label style={labelStyle}>Contenu<textarea rows={6} value={formState.body} onChange={e => setFormState(p => ({ ...p, body: e.target.value }))} style={{ ...fieldStyle, resize: "vertical" }} required /></label>
-                    <label style={labelStyle}>Statut<select value={formState.status} onChange={e => setFormState(p => ({ ...p, status: e.target.value }))} style={{ ...fieldStyle, appearance: "none" }}>{CONTENT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
+                    <label style={labelStyle}>Statut<select value={formState.status} onChange={e => setFormState(p => ({ ...p, status: e.target.value }))} style={{ ...fieldStyle, appearance: "none" }}>
+                        <option value="brouillon">Brouillon (non soumis)</option>
+                        <option value="en_attente">Soumettre pour validation</option>
+                    </select></label>
                     {localError && <p style={{ color: "#a23b3b", fontSize: "0.82rem" }}>{localError}</p>}
                     <div style={{ display: "flex", gap: "0.6rem" }}>
-                        <button className="action-cta task-action-btn" type="submit" disabled={isSaving}>{isSaving ? "Enregistrement…" : editingItem ? "Mettre à jour" : "Publier"}</button>
+                        <button className="action-cta task-action-btn" type="submit" disabled={isSaving}>{isSaving ? "Enregistrement…" : editingItem ? "Mettre à jour" : "Enregistrer"}</button>
                         <button className="action-cta" type="button" onClick={() => { setFormOpen(false); resetForm(); }} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Annuler</button>
                     </div>
                 </form>
@@ -104,8 +114,13 @@ export default function SalarieContenuView({ contents = [], loading, errorMessag
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <h3 style={{ fontSize: "0.92rem", fontWeight: 600 }}>{item.title}</h3>
                                 <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.25rem", lineHeight: 1.5, maxHeight: "3rem", overflow: "hidden" }}>{item.body}</p>
+                                {item.status === "brouillon" && item.rejectionComment && (
+                                    <p style={{ fontSize: "0.78rem", color: "#B24A4A", background: "#FDE8E8", borderRadius: "8px", padding: "0.4rem 0.65rem", marginTop: "0.4rem" }}>
+                                        Refusé : {item.rejectionComment}
+                                    </p>
+                                )}
                             </div>
-                            <span className="db-badge" style={{ background: STATUS_COLORS[item.status] || "#E6EDEE", textTransform: "capitalize", flexShrink: 0 }}>{item.status}</span>
+                            <span className="db-badge" style={{ background: STATUS_COLORS[item.status] || "#E6EDEE", color: item.status === "en_attente" ? "#A56A2A" : "inherit", textTransform: "capitalize", flexShrink: 0 }}>{STATUS_LABELS[item.status] || item.status}</span>
                         </div>
                         <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.25rem" }}>
                             <button className="action-cta task-action-btn" style={{ fontSize: "0.78rem", padding: "0.4rem 0.8rem" }} type="button" onClick={() => handleEdit(item)}>Modifier</button>

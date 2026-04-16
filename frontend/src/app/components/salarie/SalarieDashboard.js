@@ -26,7 +26,19 @@ const EventRow = ({ event }) => {
                 <div style={{ fontWeight: 600, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.name}</div>
                 <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{timeStr} — {event.lieu || "Lieu non précisé"}</div>
             </div>
-            <span className="db-badge" style={{ background: event.status === "valide" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize", flexShrink: 0 }}>{event.status}</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem", alignItems: "flex-end", flexShrink: 0 }}>
+                <span className="db-badge" style={{
+                    background: event.status === "valide" ? "#E5FFBC" : event.status === "annule" ? "#FDE8E8" : "#EAF4FF",
+                    color: event.status === "annule" ? "#B24A4A" : "inherit",
+                    textTransform: "capitalize",
+                }}>{event.status}</span>
+                {event.validationStatus === "pending" && (
+                    <span className="db-badge" style={{ background: "#FFF3E0", color: "#A56A2A", fontSize: "0.7rem" }}>En attente</span>
+                )}
+                {event.validationStatus === "rejected" && (
+                    <span className="db-badge" style={{ background: "#FDE8E8", color: "#B24A4A", fontSize: "0.7rem" }}>Refusé</span>
+                )}
+            </div>
         </div>
     );
 };
@@ -49,7 +61,7 @@ export default function SalarieDashboard({ subpage, events = [], contents = [] }
         .sort((a, b) => new Date(a.dateDebut) - new Date(b.dateDebut))
         .slice(0, 5);
 
-    const pendingContents = contents.filter(c => c.status === "en_attente" || c.status === "brouillon");
+    const pendingContents = contents.filter(c => c.status === "en_attente");
 
     const showResume = subpage === "resume";
     const showEvents = subpage === "prochains-evenements" || subpage === "resume";

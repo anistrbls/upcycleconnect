@@ -183,6 +183,7 @@ export default function AdminLayout({ children }) {
                                     className={`sidebar-item ${isActive ? "active" : ""}`}
                                     onClick={() => handleModuleChange(module.key)}
                                     type="button"
+                                    data-tooltip={module.label}
                                 >
                                     <span className={`sidebar-icon ${isActive ? "active" : ""}`}>
                                         <Icon path={module.icon} />
