@@ -8,6 +8,8 @@ export const fieldStyle = {
     fontFamily: "inherit",
     fontSize: "0.9rem",
     outline: "none",
+    appearance: "none",
+    WebkitAppearance: "none",
 };
 
 export const pillInputStyle = {

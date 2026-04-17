@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
-import { MapPin } from "lucide-react";
+import { Filter, MapPin, Star } from "lucide-react";
 import AdminModal from "../../../components/admin/AdminModal";
+
+const SELECT_ARROW_BG = "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='292.4' height='292.4'%3E%3Cpath fill='%232b4548' d='M287 69.4a17.6 17.6 0 0 0-13-5.4H18.4c-5 0-9.3 1.8-12.9 5.4A17.6 17.6 0 0 0 0 82.2c0 5 1.8 9.3 5.4 12.9l128 127.9c3.6 3.6 7.8 5.4 12.8 5.4s9.2-1.8 12.8-5.4L287 95c3.5-3.5 5.4-7.8 5.4-12.8 0-5-1.9-9.2-5.5-12.8z'/%3E%3C/svg%3E\")";
 
 const styles = {
     container: {
@@ -26,6 +28,75 @@ const styles = {
         margin: "0.4rem 0 0",
         color: "var(--text-muted)",
         fontSize: "1.05rem",
+    },
+    filtersWrap: {
+        marginBottom: "2rem",
+        display: "flex",
+        gap: "1rem",
+        alignItems: "center",
+    },
+    searchFieldWrap: {
+        position: "relative",
+        flex: "1 1 0%",
+        maxWidth: "300px",
+    },
+    searchInput: {
+        width: "100%",
+        border: "none",
+        borderRadius: "999px",
+        background: "rgb(229, 255, 188)",
+        color: "var(--text-main)",
+        padding: "0.6rem 1.2rem",
+        fontSize: "0.9rem",
+        fontFamily: "inherit",
+        outline: "none",
+    },
+    filterField: {
+        border: "none",
+        borderRadius: "999px",
+        padding: "0.6rem 2.4rem 0.6rem 1.2rem",
+        background: `${SELECT_ARROW_BG} right 0.9rem center / 0.65rem auto no-repeat rgb(229, 255, 188)`,
+        color: "var(--text-main)",
+        fontFamily: "inherit",
+        fontSize: "0.9rem",
+        outline: "none",
+        cursor: "pointer",
+        appearance: "none",
+    },
+    toggleBtn: (active) => ({
+        border: "1px solid var(--border)",
+        borderRadius: "12px",
+        background: active ? "#1f3336" : "#fff",
+        color: active ? "#fff" : "var(--text-main)",
+        padding: "0.62rem 0.8rem",
+        fontSize: "0.86rem",
+        fontWeight: 700,
+        fontFamily: "inherit",
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.42rem",
+        whiteSpace: "nowrap",
+    }),
+    clearBtn: {
+        border: "none",
+        borderRadius: "12px",
+        background: "#e8ecee",
+        color: "var(--text-main)",
+        padding: "0.62rem 0.8rem",
+        fontSize: "0.86rem",
+        fontWeight: 700,
+        fontFamily: "inherit",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+    },
+    filterMeta: {
+        marginBottom: "1rem",
+        color: "var(--text-muted)",
+        fontSize: "0.86rem",
+        display: "flex",
+        alignItems: "center",
+        gap: "0.45rem",
     },
     grid: {
         display: "grid",
@@ -54,9 +125,7 @@ const styles = {
         position: "absolute",
         inset: 0,
         backdropFilter: "blur(18px)",
-        WebkitBackdropFilter: "blur(18px)",
         maskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)",
-        WebkitMaskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)",
         pointerEvents: "none",
     },
     gradientLayer: {
@@ -76,7 +145,6 @@ const styles = {
         background: "rgba(255,255,255,0.18)",
         color: "white",
         backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
         border: "1px solid rgba(255,255,255,0.22)",
         letterSpacing: "0.04em",
         zIndex: 2,
@@ -114,7 +182,6 @@ const styles = {
         fontSize: "0.88rem",
         fontWeight: "700",
         backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
         border: "1px solid rgba(255,255,255,0.25)",
         whiteSpace: "nowrap",
         flexShrink: 0,
@@ -139,7 +206,6 @@ const styles = {
         fontWeight: "500",
         border: "1px solid rgba(255,255,255,0.2)",
         backdropFilter: "blur(4px)",
-        WebkitBackdropFilter: "blur(4px)",
         display: "inline-flex",
         alignItems: "center",
         gap: "0.35rem",
@@ -170,13 +236,27 @@ const styles = {
         background: "rgba(255,255,255,0.12)",
         color: "white",
         backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
         fontFamily: "inherit",
         fontSize: "0.9rem",
         fontWeight: "700",
         cursor: "pointer",
         transition: "all 0.2s ease",
     },
+    watchBtn: (active) => ({
+        width: "38px",
+        height: "38px",
+        borderRadius: "999px",
+        border: "1px solid rgba(255,255,255,0.34)",
+        background: active ? "rgba(250,204,21,0.95)" : "rgba(255,255,255,0.12)",
+        color: active ? "#1f2937" : "#fff",
+        backdropFilter: "blur(8px)",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        transition: "all 0.2s ease",
+        flexShrink: 0,
+    }),
     emptyState: {
         color: "var(--text-muted)",
         fontSize: "0.95rem",
@@ -214,19 +294,56 @@ export default function ProfessionalAvailablePage() {
     const [busyId, setBusyId] = useState(0);
     const [reserveConfirmItem, setReserveConfirmItem] = useState(null);
     const [reserveSuccess, setReserveSuccess] = useState(null);
+    const [searchText, setSearchText] = useState("");
+    const [materialFilter, setMaterialFilter] = useState("");
+    const [conditionFilter, setConditionFilter] = useState("");
+    const [containerFilter, setContainerFilter] = useState("");
+    const [watchlistOnly, setWatchlistOnly] = useState(false);
+    const [watchlistIds, setWatchlistIds] = useState([]);
+    const [watchBusyId, setWatchBusyId] = useState(0);
+
+    const normalize = (value) => String(value || "").toLowerCase().trim();
+
+    const fetchWatchlist = async () => {
+        const res = await fetch(apiUrl("/pro/watchlist"), {
+            headers: buildAuthHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || "Erreur chargement watchlist");
+        }
+        const ids = Array.isArray(data.item_ids) ? data.item_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)) : [];
+        setWatchlistIds(ids);
+    };
 
     const fetchItems = async () => {
         setLoading(true);
         setError("");
         try {
-            const res = await fetch(apiUrl("/pro/items"), {
-                headers: buildAuthHeaders(),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                throw new Error(data.error || "Erreur chargement annonces professionnelles");
+            const [itemsRes, watchlistRes] = await Promise.all([
+                fetch(apiUrl("/pro/items"), {
+                    headers: buildAuthHeaders(),
+                }),
+                fetch(apiUrl("/pro/watchlist"), {
+                    headers: buildAuthHeaders(),
+                }),
+            ]);
+
+            const itemsData = await itemsRes.json();
+            const watchlistData = await watchlistRes.json();
+
+            if (!itemsRes.ok) {
+                throw new Error(itemsData.error || "Erreur chargement annonces professionnelles");
             }
-            setItems(data.items || []);
+            if (!watchlistRes.ok) {
+                throw new Error(watchlistData.error || "Erreur chargement watchlist");
+            }
+
+            setItems(itemsData.items || []);
+            const ids = Array.isArray(watchlistData.item_ids)
+                ? watchlistData.item_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+                : [];
+            setWatchlistIds(ids);
         } catch (err) {
             setError(err.message || "Erreur inattendue");
         } finally {
@@ -237,6 +354,81 @@ export default function ProfessionalAvailablePage() {
     useEffect(() => {
         fetchItems();
     }, []);
+
+    const materialOptions = useMemo(() => {
+        const uniq = Array.from(new Set(items.map((it) => String(it.material || "").trim()).filter(Boolean)));
+        return uniq.sort((a, b) => a.localeCompare(b, "fr"));
+    }, [items]);
+
+    const conditionOptions = useMemo(() => {
+        const uniq = Array.from(new Set(items.map((it) => String(it.condition || "").trim()).filter(Boolean)));
+        return uniq.sort((a, b) => a.localeCompare(b, "fr"));
+    }, [items]);
+
+    const containerOptions = useMemo(() => {
+        const uniq = Array.from(new Set(items.map((it) => String(it.containerName || "").trim()).filter(Boolean)));
+        return uniq.sort((a, b) => a.localeCompare(b, "fr"));
+    }, [items]);
+
+    const filteredItems = useMemo(() => {
+        const search = normalize(searchText);
+        const watchSet = new Set(watchlistIds);
+        return items.filter((item) => {
+            const material = normalize(item.material);
+            const condition = normalize(item.condition);
+            const container = normalize(item.containerName);
+            const haystack = [
+                item.title,
+                item.description,
+                item.category,
+                item.material,
+                item.condition,
+                item.depositPointName,
+                item.containerName,
+            ]
+                .map(normalize)
+                .join(" ");
+
+            if (search && !haystack.includes(search)) return false;
+            if (materialFilter && material !== normalize(materialFilter)) return false;
+            if (conditionFilter && condition !== normalize(conditionFilter)) return false;
+            if (containerFilter && container !== normalize(containerFilter)) return false;
+            if (watchlistOnly && !watchSet.has(item.id)) return false;
+            return true;
+        });
+    }, [items, searchText, materialFilter, conditionFilter, containerFilter, watchlistOnly, watchlistIds]);
+
+    const hasActiveFilters = Boolean(searchText || materialFilter || conditionFilter || containerFilter || watchlistOnly);
+
+    const clearFilters = () => {
+        setSearchText("");
+        setMaterialFilter("");
+        setConditionFilter("");
+        setContainerFilter("");
+        setWatchlistOnly(false);
+    };
+
+    const toggleWatchlist = async (itemId) => {
+        setWatchBusyId(itemId);
+        setError("");
+        try {
+            const isAlreadyInWatchlist = watchlistIds.includes(itemId);
+            const res = await fetch(apiUrl(`/pro/items/${itemId}/watchlist`), {
+                method: isAlreadyInWatchlist ? "DELETE" : "POST",
+                headers: buildAuthHeaders(),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || "Erreur mise a jour watchlist");
+            }
+
+            await fetchWatchlist();
+        } catch (err) {
+            setError(err.message || "Erreur watchlist");
+        } finally {
+            setWatchBusyId(0);
+        }
+    };
 
     const reserve = async () => {
         const item = reserveConfirmItem;
@@ -289,11 +481,17 @@ export default function ProfessionalAvailablePage() {
 
     const content = useMemo(() => {
         if (loading) return <p style={styles.emptyState}>Chargement des annonces disponibles...</p>;
-        if (!items.length) return <p style={styles.emptyState}>Aucune annonce disponible pour le moment.</p>;
+        if (!filteredItems.length) {
+            return (
+                <p style={styles.emptyState}>
+                    {items.length ? "Aucun resultat pour ces filtres." : "Aucune annonce disponible pour le moment."}
+                </p>
+            );
+        }
 
         return (
             <div style={styles.grid}>
-                {items.map((item) => (
+                {filteredItems.map((item) => (
                     <article key={item.id} style={styles.card} className="annonce-card">
                         <img
                             src={item.image || (item.photos && item.photos[0]) || "/img/placeholder-object.jpg"}
@@ -314,6 +512,8 @@ export default function ProfessionalAvailablePage() {
 
                             <div style={styles.tagsRow}>
                                 {item.category && <span style={styles.tag}>{item.category}</span>}
+                                {item.material && <span style={styles.tag}>{item.material}</span>}
+                                {item.condition && <span style={styles.tag}>{item.condition}</span>}
                                 <span style={styles.tag}>
                                     <MapPin size={13} />
                                     {formatDepositLocation(item)}
@@ -338,13 +538,23 @@ export default function ProfessionalAvailablePage() {
                                 >
                                     {busyId === item.id ? "Réservation..." : "Réserver"}
                                 </button>
+                                <button
+                                    type="button"
+                                    disabled={watchBusyId === item.id}
+                                    onClick={() => toggleWatchlist(item.id)}
+                                    style={{ ...styles.watchBtn(watchlistIds.includes(item.id)), opacity: watchBusyId === item.id ? 0.7 : 1 }}
+                                    title={watchlistIds.includes(item.id) ? "Retirer de la watchlist" : "Ajouter a la watchlist"}
+                                    aria-label={watchlistIds.includes(item.id) ? "Retirer des favoris" : "Ajouter aux favoris"}
+                                >
+                                    <Star size={16} fill={watchlistIds.includes(item.id) ? "currentColor" : "none"} />
+                                </button>
                             </div>
                         </div>
                     </article>
                 ))}
             </div>
         );
-    }, [items, loading, busyId]);
+    }, [filteredItems, items.length, loading, busyId, watchlistIds, watchBusyId]);
 
     return (
         <div style={styles.container}>
@@ -353,6 +563,59 @@ export default function ProfessionalAvailablePage() {
                 <h1 style={styles.title}>Annonces disponibles</h1>
                 <p style={styles.subtitle}>Objets déposés et récupérables par les professionnels.</p>
             </header>
+
+            <section style={styles.filtersWrap}>
+                <div style={styles.searchFieldWrap}>
+                    <input
+                        type="text"
+                        placeholder="Rechercher une annonce..."
+                        value={searchText}
+                        onChange={(e) => setSearchText(e.target.value)}
+                        style={styles.searchInput}
+                    />
+                </div>
+
+                <select value={materialFilter} onChange={(e) => setMaterialFilter(e.target.value)} style={styles.filterField}>
+                    <option value="">Materiau</option>
+                    {materialOptions.map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                    ))}
+                </select>
+
+                <select value={conditionFilter} onChange={(e) => setConditionFilter(e.target.value)} style={styles.filterField}>
+                    <option value="">Etat</option>
+                    {conditionOptions.map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                    ))}
+                </select>
+
+                <select value={containerFilter} onChange={(e) => setContainerFilter(e.target.value)} style={styles.filterField}>
+                    <option value="">Conteneur</option>
+                    {containerOptions.map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                    ))}
+                </select>
+
+                <button
+                    type="button"
+                    onClick={() => setWatchlistOnly((v) => !v)}
+                    style={styles.toggleBtn(watchlistOnly)}
+                >
+                    <Star size={15} fill={watchlistOnly ? "currentColor" : "none"} />
+                    Watchlist
+                </button>
+
+                <button type="button" onClick={clearFilters} style={styles.clearBtn} disabled={!hasActiveFilters}>
+                    Reinitialiser
+                </button>
+            </section>
+
+            <div style={styles.filterMeta}>
+                <Filter size={14} />
+                <span>
+                    {filteredItems.length} resultat{filteredItems.length > 1 ? "s" : ""} · {watchlistIds.length} favori{watchlistIds.length > 1 ? "s" : ""}
+                </span>
+            </div>
 
             {error && <p style={styles.error}>{error}</p>}
             {content}

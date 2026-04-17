@@ -142,6 +142,12 @@ func (r *Repository) EnsureLogisticsSchema() error {
 			event_type TEXT NOT NULL,
 			processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS professional_item_watchlist (
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			item_id    BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (user_id, item_id)
+		)`,
 		`UPDATE item_logistics SET workflow_status = 'picked_up' WHERE workflow_status = 'closed'`,
 		`CREATE INDEX IF NOT EXISTS idx_logistics_reserved_by_user ON item_logistics(reserved_by_user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_logistics_transaction_ref ON item_logistics(transaction_ref)`,
@@ -149,6 +155,8 @@ func (r *Repository) EnsureLogisticsSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_logistics_status  ON item_logistics(workflow_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_logistics_stripe_payment_status ON item_logistics(stripe_payment_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_logistics_stripe_payment_intent ON item_logistics(stripe_payment_intent_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_prof_watchlist_user ON professional_item_watchlist(user_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_prof_watchlist_item ON professional_item_watchlist(item_id)`,
 	}
 	for _, stmt := range statements {
 		if _, err := r.db.Exec(stmt); err != nil {
@@ -484,6 +492,62 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 	return results, nil
 }
 
+func (r *Repository) ListProfessionalWatchlistItemIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT item_id
+		 FROM professional_item_watchlist
+		 WHERE user_id = $1
+		 ORDER BY created_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var itemID int64
+		if err := rows.Scan(&itemID); err != nil {
+			return nil, err
+		}
+		ids = append(ids, itemID)
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	return ids, nil
+}
+
+func (r *Repository) AddProfessionalWatchlistItem(ctx context.Context, userID, itemID int64) error {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM item_logistics WHERE item_id = $1)`,
+		itemID,
+	).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return sql.ErrNoRows
+	}
+
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO professional_item_watchlist (user_id, item_id)
+		 VALUES ($1, $2)
+		 ON CONFLICT (user_id, item_id) DO NOTHING`,
+		userID, itemID,
+	)
+	return err
+}
+
+func (r *Repository) RemoveProfessionalWatchlistItem(ctx context.Context, userID, itemID int64) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM professional_item_watchlist WHERE user_id = $1 AND item_id = $2`,
+		userID, itemID,
+	)
+	return err
+}
+
 // ── Repository methods ───────────────────────────────────────────────────────
 
 func (r *Repository) CreateLogistics(ctx context.Context, itemID int64) (*ItemLogistics, error) {
@@ -505,7 +569,7 @@ func (r *Repository) GetLogisticsByItemID(ctx context.Context, itemID int64) (*I
 				l.deposit_point_id, l.container_id, l.assigned_at, l.assigned_by,
 				l.deposit_code, l.deposit_code_expires_at, l.deposit_code_sent_at,
 				l.deposited_at, l.deposited_confirmed_by,
-				l.reserved_by_name, l.reserved_by_user_id, l.reserved_at, l.reservation_expires_at, l.payment_validated_at,
+				l.reserved_by_name, l.reserved_by_user_id, COALESCE(l.transaction_ref, ''), l.reserved_at, l.reservation_expires_at, l.payment_validated_at,
 				l.pickup_code, l.pickup_code_expires_at,
 				l.collected_at, l.collected_confirmed_by,
 				l.picked_up_at,
@@ -527,7 +591,7 @@ func (r *Repository) GetLogisticsByItemID(ctx context.Context, itemID int64) (*I
 		&l.DepositPointID, &l.ContainerID, &l.AssignedAt, &l.AssignedBy,
 		&l.DepositCode, &l.DepositCodeExpiresAt, &l.DepositCodeSentAt,
 		&l.DepositedAt, &l.DepositedConfirmedBy,
-		&l.ReservedByName, &l.ReservedByUserID, &l.ReservedAt, &l.ReservationExpiresAt, &l.PaymentValidatedAt,
+		&l.ReservedByName, &l.ReservedByUserID, &l.TransactionRef, &l.ReservedAt, &l.ReservationExpiresAt, &l.PaymentValidatedAt,
 		&l.PickupCode, &l.PickupCodeExpiresAt,
 		&l.CollectedAt, &l.CollectedConfirmedBy,
 		&l.PickedUpAt,
@@ -576,7 +640,7 @@ func (r *Repository) ListLogistics(ctx context.Context, statusFilter string) ([]
 				l.deposit_point_id, l.container_id, l.assigned_at, l.assigned_by,
 				l.deposit_code, l.deposit_code_expires_at, l.deposit_code_sent_at,
 				l.deposited_at, l.deposited_confirmed_by,
-				l.reserved_by_name, l.reserved_by_user_id, l.reserved_at, l.reservation_expires_at, l.payment_validated_at,
+				l.reserved_by_name, l.reserved_by_user_id, COALESCE(l.transaction_ref, ''), l.reserved_at, l.reservation_expires_at, l.payment_validated_at,
 				l.pickup_code, l.pickup_code_expires_at,
 				l.collected_at, l.collected_confirmed_by,
 				l.picked_up_at,
@@ -608,7 +672,7 @@ func (r *Repository) ListLogistics(ctx context.Context, statusFilter string) ([]
 			&l.DepositPointID, &l.ContainerID, &l.AssignedAt, &l.AssignedBy,
 			&l.DepositCode, &l.DepositCodeExpiresAt, &l.DepositCodeSentAt,
 			&l.DepositedAt, &l.DepositedConfirmedBy,
-			&l.ReservedByName, &l.ReservedByUserID, &l.ReservedAt, &l.ReservationExpiresAt, &l.PaymentValidatedAt,
+			&l.ReservedByName, &l.ReservedByUserID, &l.TransactionRef, &l.ReservedAt, &l.ReservationExpiresAt, &l.PaymentValidatedAt,
 			&l.PickupCode, &l.PickupCodeExpiresAt,
 			&l.CollectedAt, &l.CollectedConfirmedBy,
 			&l.PickedUpAt,

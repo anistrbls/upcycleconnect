@@ -128,6 +128,33 @@ func (h *Handler) updateOne(w http.ResponseWriter, r *http.Request, id int64) {
 		return
 	}
 
+	// Validations conditionnelles par rôle
+	if p.Role == RoleProfessionnel && strings.TrimSpace(p.Siret) == "" {
+		writeError(w, http.StatusBadRequest, "le SIRET est obligatoire pour un professionnel")
+		return
+	}
+	if p.Role == RoleProfessionnel && strings.TrimSpace(p.Siret) != "" {
+		siretClean := strings.ReplaceAll(strings.TrimSpace(p.Siret), " ", "")
+		if len(siretClean) != 14 {
+			writeError(w, http.StatusBadRequest, "le SIRET doit contenir exactement 14 chiffres")
+			return
+		}
+		for _, c := range siretClean {
+			if c < '0' || c > '9' {
+				writeError(w, http.StatusBadRequest, "le SIRET ne doit contenir que des chiffres")
+				return
+			}
+		}
+	}
+	if p.Role == RoleSalarie && strings.TrimSpace(p.EmployeeRole) == "" {
+		writeError(w, http.StatusBadRequest, "le type de rôle est obligatoire pour un salarié")
+		return
+	}
+	if p.Role == RoleAdmin && strings.TrimSpace(p.AdminRole) == "" {
+		writeError(w, http.StatusBadRequest, "le rôle admin est obligatoire pour un administrateur")
+		return
+	}
+
 	u, err := h.repo.Update(id, p)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -191,6 +218,33 @@ func (h *Handler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if exists {
 		writeError(w, http.StatusConflict, "email already used")
+		return
+	}
+
+	// Validations conditionnelles par rôle
+	if p.Role == RoleProfessionnel && strings.TrimSpace(p.Siret) == "" {
+		writeError(w, http.StatusBadRequest, "le SIRET est obligatoire pour un professionnel")
+		return
+	}
+	if p.Role == RoleProfessionnel && strings.TrimSpace(p.Siret) != "" {
+		siretClean := strings.ReplaceAll(strings.TrimSpace(p.Siret), " ", "")
+		if len(siretClean) != 14 {
+			writeError(w, http.StatusBadRequest, "le SIRET doit contenir exactement 14 chiffres")
+			return
+		}
+		for _, c := range siretClean {
+			if c < '0' || c > '9' {
+				writeError(w, http.StatusBadRequest, "le SIRET ne doit contenir que des chiffres")
+				return
+			}
+		}
+	}
+	if p.Role == RoleSalarie && strings.TrimSpace(p.EmployeeRole) == "" {
+		writeError(w, http.StatusBadRequest, "le type de rôle est obligatoire pour un salarié")
+		return
+	}
+	if p.Role == RoleAdmin && strings.TrimSpace(p.AdminRole) == "" {
+		writeError(w, http.StatusBadRequest, "le rôle admin est obligatoire pour un administrateur")
 		return
 	}
 

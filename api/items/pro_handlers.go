@@ -158,6 +158,60 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 	}))
 
+	mux.Handle("GET /api/pro/watchlist", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		userID, _, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		ids, err := repo.ListProfessionalWatchlistItemIDs(r.Context(), userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load watchlist")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item_ids": ids})
+	}))
+
+	mux.Handle("POST /api/pro/items/{item_id}/watchlist", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+		userID, _, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		if err := repo.AddProfessionalWatchlistItem(r.Context(), userID, itemID); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "item not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not add watchlist item")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	}))
+
+	mux.Handle("DELETE /api/pro/items/{item_id}/watchlist", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+		userID, _, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		if err := repo.RemoveProfessionalWatchlistItem(r.Context(), userID, itemID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not remove watchlist item")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	}))
+
 	mux.HandleFunc("POST /api/webhooks/stripe", func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := getStripeConfig()
 		if err != nil {

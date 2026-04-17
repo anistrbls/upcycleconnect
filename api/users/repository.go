@@ -7,18 +7,15 @@ import (
 )
 
 // Repository gère tous les accès à la base de données pour les utilisateurs.
-// Il reçoit *sql.DB à l'initialisation, ce qui évite de dépendre de variables globales.
 type Repository struct {
 	db *sql.DB
 }
 
-// NewRepository crée un Repository avec la connexion DB fournie.
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// EnsureSchema crée la table users si elle n'existe pas encore.
-// Appelé une fois au démarrage de l'application.
+// EnsureSchema crée/migre la table users.
 func (r *Repository) EnsureSchema() error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS users (
@@ -38,6 +35,7 @@ func (r *Repository) EnsureSchema() error {
 			CONSTRAINT users_role_check   CHECK (role   IN ('particulier', 'professionnel', 'salarie', 'admin')),
 			CONSTRAINT users_status_check CHECK (status IN ('active', 'pending', 'suspended'))
 		)`,
+		// Champs existants (idempotents)
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS employment_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_function TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`,
@@ -45,6 +43,31 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`,
 		`UPDATE users SET role = 'professionnel' WHERE role = 'prestataire'`,
 		`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('particulier', 'professionnel', 'salarie', 'admin'))`,
+
+		// Nouveaux champs communs
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT ''`,
+
+		// Nouveaux champs Professionnel
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS company_manager TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS siret TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS zip_code TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS activity_type TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS intervention_zone TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_type TEXT NOT NULL DEFAULT 'gratuit'`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_start TIMESTAMPTZ`,
+
+		// Nouveaux champs Salarié
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_role TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS site_location TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS skills TEXT NOT NULL DEFAULT ''`,
+
+		// Nouveaux champs Admin
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_role TEXT NOT NULL DEFAULT ''`,
+
+		// Index
 		`CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)`,
@@ -58,7 +81,7 @@ func (r *Repository) EnsureSchema() error {
 	return nil
 }
 
-// List retourne tous les utilisateurs filtrés selon les critères fournis.
+// List retourne tous les utilisateurs filtrés.
 func (r *Repository) List(f ListFilters) ([]User, error) {
 	q := strings.TrimSpace(f.Query)
 	role := NormalizeRole(f.Role)
@@ -66,7 +89,11 @@ func (r *Repository) List(f ListFilters) ([]User, error) {
 
 	rows, err := r.db.Query(`
 		SELECT id, firstname, lastname, email, role, status,
-		       employment_status, job_function, admin_note,
+		       phone, city,
+		       company_name, company_manager, siret, address, zip_code,
+		       activity_type, intervention_zone, subscription_type, subscription_start,
+		       employment_status, job_function, employee_role, site_location, skills,
+		       admin_role, admin_note,
 		       created_at, updated_at, last_login_at
 		FROM users
 		WHERE ($1 = '' OR firstname ILIKE '%' || $1 || '%'
@@ -95,11 +122,15 @@ func (r *Repository) List(f ListFilters) ([]User, error) {
 	return result, nil
 }
 
-// GetByID retourne un utilisateur par son ID, ou sql.ErrNoRows si introuvable.
+// GetByID retourne un utilisateur par son ID.
 func (r *Repository) GetByID(id int64) (User, error) {
 	row := r.db.QueryRow(`
 		SELECT id, firstname, lastname, email, role, status,
-		       employment_status, job_function, admin_note,
+		       phone, city,
+		       company_name, company_manager, siret, address, zip_code,
+		       activity_type, intervention_zone, subscription_type, subscription_start,
+		       employment_status, job_function, employee_role, site_location, skills,
+		       admin_role, admin_note,
 		       created_at, updated_at, last_login_at
 		FROM users
 		WHERE id = $1
@@ -107,7 +138,7 @@ func (r *Repository) GetByID(id int64) (User, error) {
 	return scanRow(row)
 }
 
-// GetAuthByEmail retourne les infos minimales et le hash password pour l'authentification.
+// GetAuthByEmail retourne le minimum nécessaire à l'authentification.
 func (r *Repository) GetAuthByEmail(email string) (int64, string, string, string, error) {
 	var id int64
 	var hash, role, status string
@@ -122,7 +153,7 @@ func (r *Repository) GetAuthByEmail(email string) (int64, string, string, string
 	return id, hash, role, status, nil
 }
 
-// Create insère un nouvel utilisateur et retourne l'enregistrement créé.
+// Create insère un nouvel utilisateur.
 func (r *Repository) Create(p CreatePayload, passwordHash string) (User, error) {
 	role := NormalizeRole(p.Role)
 	if role == "" {
@@ -132,12 +163,26 @@ func (r *Repository) Create(p CreatePayload, passwordHash string) (User, error) 
 	if status == "" {
 		status = StatusPending
 	}
+	if p.SubscriptionType == "" {
+		p.SubscriptionType = "gratuit"
+	}
 
 	row := r.db.QueryRow(`
-		INSERT INTO users (firstname, lastname, email, password_hash, role, status, employment_status, job_function)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO users (
+			firstname, lastname, email, password_hash, role, status,
+			phone, city,
+			company_name, company_manager, siret, address, zip_code,
+			activity_type, intervention_zone, subscription_type, subscription_start,
+			employment_status, job_function, employee_role, site_location, skills,
+			admin_role
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 		RETURNING id, firstname, lastname, email, role, status,
-		          employment_status, job_function, admin_note,
+		          phone, city,
+		          company_name, company_manager, siret, address, zip_code,
+		          activity_type, intervention_zone, subscription_type, subscription_start,
+		          employment_status, job_function, employee_role, site_location, skills,
+		          admin_role, admin_note,
 		          created_at, updated_at, last_login_at
 	`,
 		strings.TrimSpace(p.Firstname),
@@ -146,13 +191,28 @@ func (r *Repository) Create(p CreatePayload, passwordHash string) (User, error) 
 		passwordHash,
 		role,
 		status,
+		p.Phone,
+		p.City,
+		p.CompanyName,
+		p.CompanyManager,
+		p.Siret,
+		p.Address,
+		p.ZipCode,
+		p.ActivityType,
+		p.InterventionZone,
+		p.SubscriptionType,
+		p.SubscriptionStart,
 		p.EmploymentStatus,
 		p.JobFunction,
+		p.EmployeeRole,
+		p.SiteLocation,
+		p.Skills,
+		p.AdminRole,
 	)
 	return scanRow(row)
 }
 
-// Update met à jour les champs modifiables d'un utilisateur.
+// Update met à jour les champs modifiables.
 func (r *Repository) Update(id int64, p UpdatePayload) (User, error) {
 	role := NormalizeRole(p.Role)
 	if role == "" {
@@ -162,21 +222,43 @@ func (r *Repository) Update(id int64, p UpdatePayload) (User, error) {
 	if status == "" {
 		status = StatusPending
 	}
+	if p.SubscriptionType == "" {
+		p.SubscriptionType = "gratuit"
+	}
 
 	row := r.db.QueryRow(`
 		UPDATE users
 		SET firstname    = $1,
 		    lastname     = $2,
 		    email        = $3,
-		    role              = $4,
-		    status            = $5,
-		    employment_status = $6,
-		    job_function      = $7,
-		    admin_note        = $8,
+		    role         = $4,
+		    status       = $5,
+		    phone             = $6,
+		    city              = $7,
+		    company_name      = $8,
+		    company_manager   = $9,
+		    siret             = $10,
+		    address           = $11,
+		    zip_code          = $12,
+		    activity_type     = $13,
+		    intervention_zone = $14,
+		    subscription_type  = $15,
+		    subscription_start = $16,
+		    employment_status = $17,
+		    job_function      = $18,
+		    employee_role     = $19,
+		    site_location     = $20,
+		    skills            = $21,
+		    admin_role        = $22,
+		    admin_note        = $23,
 		    updated_at        = NOW()
-		WHERE id = $9
+		WHERE id = $24
 		RETURNING id, firstname, lastname, email, role, status,
-		          employment_status, job_function, admin_note,
+		          phone, city,
+		          company_name, company_manager, siret, address, zip_code,
+		          activity_type, intervention_zone, subscription_type, subscription_start,
+		          employment_status, job_function, employee_role, site_location, skills,
+		          admin_role, admin_note,
 		          created_at, updated_at, last_login_at
 	`,
 		strings.TrimSpace(p.Firstname),
@@ -184,15 +266,30 @@ func (r *Repository) Update(id int64, p UpdatePayload) (User, error) {
 		strings.ToLower(strings.TrimSpace(p.Email)),
 		role,
 		status,
+		p.Phone,
+		p.City,
+		p.CompanyName,
+		p.CompanyManager,
+		p.Siret,
+		p.Address,
+		p.ZipCode,
+		p.ActivityType,
+		p.InterventionZone,
+		p.SubscriptionType,
+		p.SubscriptionStart,
 		p.EmploymentStatus,
 		p.JobFunction,
+		p.EmployeeRole,
+		p.SiteLocation,
+		p.Skills,
+		p.AdminRole,
 		strings.TrimSpace(p.AdminNote),
 		id,
 	)
 	return scanRow(row)
 }
 
-// Delete supprime un utilisateur par son ID.
+// Delete supprime un utilisateur.
 func (r *Repository) Delete(id int64) (bool, error) {
 	result, err := r.db.Exec(`DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -202,22 +299,24 @@ func (r *Repository) Delete(id int64) (bool, error) {
 	return affected > 0, nil
 }
 
-// SetStatus met à jour uniquement le statut d'un utilisateur.
+// SetStatus met à jour uniquement le statut.
 func (r *Repository) SetStatus(id int64, status string) (User, error) {
 	row := r.db.QueryRow(`
 		UPDATE users
 		SET status = $1, updated_at = NOW()
 		WHERE id = $2
 		RETURNING id, firstname, lastname, email, role, status,
-		          employment_status, job_function, admin_note,
+		          phone, city,
+		          company_name, company_manager, siret, address, zip_code,
+		          activity_type, intervention_zone, subscription_type, subscription_start,
+		          employment_status, job_function, employee_role, site_location, skills,
+		          admin_role, admin_note,
 		          created_at, updated_at, last_login_at
 	`, status, id)
 	return scanRow(row)
 }
 
-
-
-// EmailExists retourne true si l'email est déjà utilisé (optionnellement en excluant un ID).
+// EmailExists retourne true si l'email est déjà utilisé.
 func (r *Repository) EmailExists(email string, excludeID int64) (bool, error) {
 	var exists bool
 	err := r.db.QueryRow(
@@ -228,17 +327,21 @@ func (r *Repository) EmailExists(email string, excludeID int64) (bool, error) {
 	return exists, err
 }
 
-// --- helpers internes de scan ---
+// --- helpers scan ---
 
-// scanRows scanne une ligne depuis *sql.Rows (résultat de Query).
 func scanRows(rows *sql.Rows) (User, error) {
 	var u User
 	var lastLogin sql.NullTime
+	var subscriptionStart sql.NullTime
 	err := rows.Scan(
 		&u.ID, &u.Firstname, &u.Lastname, &u.Email,
 		&u.Role, &u.Status,
-		&u.EmploymentStatus, &u.JobFunction,
-		&u.AdminNote, &u.CreatedAt, &u.UpdatedAt, &lastLogin,
+		&u.Phone, &u.City,
+		&u.CompanyName, &u.CompanyManager, &u.Siret, &u.Address, &u.ZipCode,
+		&u.ActivityType, &u.InterventionZone, &u.SubscriptionType, &subscriptionStart,
+		&u.EmploymentStatus, &u.JobFunction, &u.EmployeeRole, &u.SiteLocation, &u.Skills,
+		&u.AdminRole, &u.AdminNote,
+		&u.CreatedAt, &u.UpdatedAt, &lastLogin,
 	)
 	if err != nil {
 		return User{}, err
@@ -246,19 +349,27 @@ func scanRows(rows *sql.Rows) (User, error) {
 	if lastLogin.Valid {
 		t := lastLogin.Time
 		u.LastLoginAt = &t
+	}
+	if subscriptionStart.Valid {
+		t := subscriptionStart.Time
+		u.SubscriptionStart = &t
 	}
 	return u, nil
 }
 
-// scanRow scanne une ligne depuis *sql.Row (résultat de QueryRow).
 func scanRow(row *sql.Row) (User, error) {
 	var u User
 	var lastLogin sql.NullTime
+	var subscriptionStart sql.NullTime
 	err := row.Scan(
 		&u.ID, &u.Firstname, &u.Lastname, &u.Email,
 		&u.Role, &u.Status,
-		&u.EmploymentStatus, &u.JobFunction,
-		&u.AdminNote, &u.CreatedAt, &u.UpdatedAt, &lastLogin,
+		&u.Phone, &u.City,
+		&u.CompanyName, &u.CompanyManager, &u.Siret, &u.Address, &u.ZipCode,
+		&u.ActivityType, &u.InterventionZone, &u.SubscriptionType, &subscriptionStart,
+		&u.EmploymentStatus, &u.JobFunction, &u.EmployeeRole, &u.SiteLocation, &u.Skills,
+		&u.AdminRole, &u.AdminNote,
+		&u.CreatedAt, &u.UpdatedAt, &lastLogin,
 	)
 	if err != nil {
 		return User{}, err
@@ -266,6 +377,10 @@ func scanRow(row *sql.Row) (User, error) {
 	if lastLogin.Valid {
 		t := lastLogin.Time
 		u.LastLoginAt = &t
+	}
+	if subscriptionStart.Valid {
+		t := subscriptionStart.Time
+		u.SubscriptionStart = &t
 	}
 	return u, nil
 }

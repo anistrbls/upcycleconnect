@@ -100,6 +100,11 @@ func main() {
 	}
 	log.Println("✓ Item materials schema initialized")
 
+	if err := ensureCitiesSchema(); err != nil {
+		log.Fatalf("failed to init cities schema: %v", err)
+	}
+	log.Println("✓ Cities schema initialized")
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", healthHandler)
@@ -163,6 +168,9 @@ func main() {
 	mux.HandleFunc("GET /api/moderation-reasons", moderationReasonsPublicHandler)
 	mux.Handle("/api/admin/moderation-reasons", authMiddleware(http.HandlerFunc(moderationReasonsAdminHandler)))
 	mux.Handle("/api/admin/moderation-reasons/", authMiddleware(http.HandlerFunc(moderationReasonByIDAdminHandler)))
+
+	// === Cities Autocomplete (Public) ===
+	mux.HandleFunc("GET /api/cities-search", citiesSearchHandler)
 
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
 	users.RegisterRoutes(mux, db, authMiddleware)

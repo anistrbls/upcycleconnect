@@ -3,10 +3,10 @@ package users
 import "time"
 
 const (
-	RoleParticulier = "particulier"
+	RoleParticulier  = "particulier"
 	RoleProfessionnel = "professionnel"
-	RoleSalarie     = "salarie"
-	RoleAdmin       = "admin"
+	RoleSalarie      = "salarie"
+	RoleAdmin        = "admin"
 )
 
 const (
@@ -26,41 +26,119 @@ const (
 	JobFunctionIntervenant = "intervenant"
 )
 
+// User représente un utilisateur complet retourné par l'API.
 type User struct {
 	ID          int64      `json:"id"`
 	Firstname   string     `json:"firstname"`
 	Lastname    string     `json:"lastname"`
 	Email       string     `json:"email"`
 	Role        string     `json:"role"`
-	Status           string     `json:"status"`
+	Status      string     `json:"status"`
+
+	// Champs communs
+	Phone       string     `json:"phone"`
+	City        string     `json:"city"`
+
+	// Champs Professionnel
+	CompanyName      string     `json:"companyName"`
+	CompanyManager   string     `json:"companyManager"`
+	Siret            string     `json:"siret"`
+	Address          string     `json:"address"`
+	ZipCode          string     `json:"zipCode"`
+	ActivityType     string     `json:"activityType"`
+	InterventionZone string     `json:"interventionZone"`
+	SubscriptionType string     `json:"subscriptionType"`
+	SubscriptionStart *time.Time `json:"subscriptionStart,omitempty"`
+
+	// Champs Salarié
 	EmploymentStatus string     `json:"employmentStatus"`
 	JobFunction      string     `json:"jobFunction"`
+	EmployeeRole     string     `json:"employeeRole"`
+	SiteLocation     string     `json:"siteLocation"`
+	Skills           string     `json:"skills"`
+
+	// Champs Admin
+	AdminRole        string     `json:"adminRole"`
+
+	// Note interne
 	AdminNote        string     `json:"adminNote"`
+
+	// Dates
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 	LastLoginAt *time.Time `json:"lastLoginAt"`
 }
 
+// CreatePayload contient les champs acceptés lors de la création d'un utilisateur par l'admin.
 type CreatePayload struct {
 	Firstname   string `json:"firstname"`
 	Lastname    string `json:"lastname"`
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	Role        string `json:"role"`
-	Status           string `json:"status"`
+	Status      string `json:"status"`
+
+	// Champs communs
+	Phone       string `json:"phone"`
+	City        string `json:"city"`
+
+	// Champs Professionnel
+	CompanyName      string `json:"companyName"`
+	CompanyManager   string `json:"companyManager"`
+	Siret            string `json:"siret"`
+	Address          string `json:"address"`
+	ZipCode          string `json:"zipCode"`
+	ActivityType     string `json:"activityType"`
+	InterventionZone string `json:"interventionZone"`
+	SubscriptionType string `json:"subscriptionType"`
+	SubscriptionStart *time.Time `json:"subscriptionStart,omitempty"`
+
+	// Champs Salarié
 	EmploymentStatus string `json:"employmentStatus"`
 	JobFunction      string `json:"jobFunction"`
+	EmployeeRole     string `json:"employeeRole"`
+	SiteLocation     string `json:"siteLocation"`
+	Skills           string `json:"skills"`
+
+	// Champs Admin
+	AdminRole        string `json:"adminRole"`
 }
 
+// UpdatePayload contient les champs modifiables par l'admin.
 type UpdatePayload struct {
 	Firstname   string `json:"firstname"`
 	Lastname    string `json:"lastname"`
 	Email       string `json:"email"`
 	Role        string `json:"role"`
-	Status           string `json:"status"`
+	Status      string `json:"status"`
+
+	// Champs communs
+	Phone       string `json:"phone"`
+	City        string `json:"city"`
+
+	// Champs Professionnel
+	CompanyName      string `json:"companyName"`
+	CompanyManager   string `json:"companyManager"`
+	Siret            string `json:"siret"`
+	Address          string `json:"address"`
+	ZipCode          string `json:"zipCode"`
+	ActivityType     string `json:"activityType"`
+	InterventionZone string `json:"interventionZone"`
+	SubscriptionType string `json:"subscriptionType"`
+	SubscriptionStart *time.Time `json:"subscriptionStart,omitempty"`
+
+	// Champs Salarié
 	EmploymentStatus string `json:"employmentStatus"`
 	JobFunction      string `json:"jobFunction"`
-	AdminNote        string `json:"adminNote"`
+	EmployeeRole     string `json:"employeeRole"`
+	SiteLocation     string `json:"siteLocation"`
+	Skills           string `json:"skills"`
+
+	// Champs Admin
+	AdminRole        string `json:"adminRole"`
+
+	// Note interne
+	AdminNote string `json:"adminNote"`
 }
 
 type StatusPayload struct {

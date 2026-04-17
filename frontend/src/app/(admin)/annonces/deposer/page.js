@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
+import { CityAutocomplete } from "../../../components/CityAutocomplete";
 import {
     Camera,
     Gift,
@@ -999,28 +1000,37 @@ export default function DeposerAnnoncePage() {
                         </div>
                         
                         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem" }}>
-                            <div style={styles.formGroup}>
-                                <label style={styles.label}>Ville *</label>
-                                <input style={styles.input} placeholder="Avenue, Ville" required value={formData.city} onChange={e => handleChange("city", e.target.value)} disabled={disableRestrictedFields} />
-                            </div>
-                            <div style={styles.formGroup}>
-                                <label style={styles.label}>Code postal *</label>
-                                <input 
-                                    style={{
-                                        ...styles.input, 
-                                        border: (formData.zip.length > 0 && formData.zip.length !== (countries.find(c => c.label === formData.country)?.zip_length || 5)) ? "1px solid var(--danger)" : "none"
-                                    }} 
-                                    placeholder={formData.country === "France" ? "75001" : "1234"} 
-                                    required 
-                                    value={formData.zip} 
-                                    maxLength={countries.find(c => c.label === formData.country)?.zip_length || 5}
-                                    onChange={e => {
-                                        const val = e.target.value.replace(/\D/g, "");
-                                        handleChange("zip", val);
-                                    }}
-                                    disabled={disableRestrictedFields}
-                                />
-                            </div>
+                            <CityAutocomplete
+                                label="Ville *"
+                                placeholder="Avenue, Ville"
+                                value={formData.city}
+                                onChange={(val) => handleChange("city", val)}
+                                country={formData.country}
+                                disabled={disableRestrictedFields}
+                                onSelectSuggestion={(suggestion) => {
+                                    // Auto-remplir le code postal quand une suggestion est sélectionnée
+                                    handleChange("zip", suggestion.zip_code);
+                                }}
+                            />
+                            <CityAutocomplete
+                                label="Code postal *"
+                                placeholder={formData.country === "France" ? "75001" : "1234"}
+                                value={formData.zip}
+                                onChange={(val) => {
+                                    const numVal = val.replace(/\D/g, "");
+                                    handleChange("zip", numVal);
+                                }}
+                                country={formData.country}
+                                disabled={disableRestrictedFields}
+                                isZipCode={true}
+                                style={{
+                                    border: (formData.zip.length > 0 && formData.zip.length !== (countries.find(c => c.label === formData.country)?.zip_length || 5)) ? "1px solid var(--danger)" : "none"
+                                }}
+                                onSelectSuggestion={(suggestion) => {
+                                    // Auto-remplir la ville quand une suggestion est sélectionnée sur le code postal
+                                    handleChange("city", suggestion.city);
+                                }}
+                            />
                         </div>
 
                         {formData.zip && formData.zip.length === (countries.find(c => c.label === formData.country)?.zip_length || 5) && (

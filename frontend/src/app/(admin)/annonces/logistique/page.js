@@ -373,6 +373,7 @@ export default function LogisticsDashboard() {
     const [showCancelModal, setShowCancelModal] = useState(false);
     const [showPickupModal, setShowPickupModal] = useState(false);
     const [pickupSubmitting, setPickupSubmitting] = useState(false);
+    const router = require("next/navigation").useRouter();
     
     // Data for assignment
     const [points, setPoints] = useState([]);
@@ -641,8 +642,9 @@ export default function LogisticsDashboard() {
                     <div style={styles.grid}>
                         {filteredItems.map(item => (
                             <LogisticsCard 
-                                key={item.id} 
+                                key={item.item_id} 
                                 item={item} 
+                                onClickCard={() => router.push(`/annonces/logistique/${item.item_id}`)}
                                 actions={{
                                     assign: () => { setSelectedItem(item); setShowAssignModal(true); },
                                     generate: () => handleGenerateCode(item.item_id),
@@ -815,6 +817,24 @@ export default function LogisticsDashboard() {
                                 </button>
                             </div>
                         </>
+                    ) : selectedItem?.workflow_status === "picked_up" ? (
+                        <>
+                            <div style={{ background: '#f0fdf4', color: '#166534', padding: '1rem', borderRadius: '16px', fontSize: '0.85rem', fontWeight: '500', border: '1px solid #bbf7d0' }}>
+                                Ce flux est <strong>terminé</strong> — l'objet a été récupéré avec succès. Vous pouvez supprimer définitivement cette annonce et son historique logistique, ce qui permettra également de supprimer le compte professionnel associé si souhaité.
+                            </div>
+                            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '16px', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+                                <div>
+                                    <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#991b1b', marginBottom: '2px' }}>⚠ Zone de suppression définitive</div>
+                                    <div style={{ fontSize: '0.78rem', color: '#b91c1c' }}>Cette action est irréversible. L'annonce et son historique seront supprimés.</div>
+                                </div>
+                                <button style={{ ...styles.btnPri, background: '#dc2626', whiteSpace: 'nowrap', flexShrink: 0 }} onClick={handleHardDeleteCancelledItem}>
+                                    Supprimer l'annonce
+                                </button>
+                            </div>
+                            <div style={styles.modalActions}>
+                                <button style={styles.btnSec} onClick={() => setShowCancelModal(false)}>Fermer</button>
+                            </div>
+                        </>
                     ) : (
                         <>
                             <div style={{ background: '#fffbeb', color: '#b45309', padding: '1rem', borderRadius: '16px', fontSize: '0.85rem', fontWeight: '500', border: '1px solid #fef3c7' }}>
@@ -880,12 +900,12 @@ export default function LogisticsDashboard() {
     );
 }
 
-function LogisticsCard({ item, actions }) {
+function LogisticsCard({ item, actions, onClickCard }) {
     const status = STATUS_MAP[item.workflow_status] || { label: item.workflow_status, color: '#000', icon: AlertCircle };
     const Icon = status.icon;
 
     return (
-        <div style={styles.card} className="logistics-card">
+        <div style={{ ...styles.card, cursor: 'pointer' }} className="logistics-card" onClick={onClickCard}>
             <div style={styles.cardHeader}>
                 <div style={styles.statusBadge(status.color)}>
                     <Icon size={12} />
@@ -936,7 +956,7 @@ function LogisticsCard({ item, actions }) {
                 )}
             </div>
 
-            <div style={styles.cardFooter}>
+            <div style={styles.cardFooter} onClick={(e) => e.stopPropagation()}>
                 <WorkflowButtons status={item.workflow_status} actions={actions} />
                 <button 
                     style={{ ...styles.actionSec, border: 'none', background: '#f3f4f6' }} 

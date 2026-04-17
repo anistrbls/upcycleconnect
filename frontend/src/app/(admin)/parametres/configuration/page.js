@@ -7,6 +7,24 @@ import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 
 // Les entités n'utilisent plus de slug. Le label fait foi.
 
+const EMOJI_MAX_LENGTH = 8;
+const emojiFontFamily = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
+
+// Répare les emojis déjà stockés en mojibake (UTF-8 lu comme latin1/cp1252).
+function normalizeEmoji(value, fallback = "") {
+    const raw = String(value ?? "").trim();
+    if (!raw) return fallback;
+    try {
+        if (!/^[\x00-\xFF]+$/.test(raw)) return raw;
+        const bytes = Uint8Array.from(raw, ch => ch.charCodeAt(0));
+        const fixed = new TextDecoder("utf-8", { fatal: false }).decode(bytes).trim();
+        if (!fixed || fixed.includes("\uFFFD")) return raw;
+        return fixed;
+    } catch {
+        return raw;
+    }
+}
+
 // ── Row catégorie (avec emoji) ────────────────────────────────────────────────
 function CategoryRow({ cat, onSave, onDelete }) {
     const [editing, setEditing] = useState(false);
@@ -27,7 +45,7 @@ function CategoryRow({ cat, onSave, onDelete }) {
             <span style={gripStyle}><GripVertical size={16} /></span>
             {editing ? (
                 <>
-                    <input value={draft.emoji} onChange={e => setDraft(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={emojiInput} />
+                    <input value={draft.emoji} onChange={e => setDraft(d => ({ ...d, emoji: e.target.value }))} maxLength={EMOJI_MAX_LENGTH} style={emojiInput} />
                     <input autoFocus value={draft.label} onChange={e => setDraft(d => ({ ...d, label: e.target.value }))}
                         onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
                         style={{ ...textInput, flex: 1 }} />
@@ -38,7 +56,7 @@ function CategoryRow({ cat, onSave, onDelete }) {
                 </>
             ) : (
                 <>
-                    <span style={{ fontSize: "1.3rem", flexShrink: 0 }}>{cat.emoji}</span>
+                    <span style={{ fontSize: "1.3rem", flexShrink: 0, fontFamily: emojiFontFamily }}>{cat.emoji}</span>
                     <span style={{ flex: 1, fontSize: "0.92rem", fontWeight: "500" }}>{cat.label}</span>
                     <button onClick={() => setEditing(true)} style={iconBtn}><Pencil size={14} /></button>
                     <button onClick={() => onDelete(cat.id)} style={{ ...iconBtn, color: "var(--state-critical)" }}><Trash2 size={14} /></button>
@@ -68,7 +86,7 @@ function CountryRow({ item, onSave, onDelete }) {
             <span style={gripStyle}><GripVertical size={16} /></span>
             {editing ? (
                 <>
-                    <input value={draft.emoji} onChange={e => setDraft(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={emojiInput} />
+                    <input value={draft.emoji} onChange={e => setDraft(d => ({ ...d, emoji: e.target.value }))} maxLength={EMOJI_MAX_LENGTH} style={emojiInput} />
                     <input autoFocus value={draft.label} onChange={e => setDraft(d => ({ ...d, label: e.target.value }))}
                         onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
                         style={{ ...textInput, flex: 1 }} />
@@ -81,7 +99,7 @@ function CountryRow({ item, onSave, onDelete }) {
                 </>
             ) : (
                 <>
-                    <span style={{ fontSize: "1.3rem", flexShrink: 0 }}>{item.emoji}</span>
+                    <span style={{ fontSize: "1.3rem", flexShrink: 0, fontFamily: emojiFontFamily }}>{item.emoji}</span>
                     <span style={{ flex: 1, fontSize: "0.92rem", fontWeight: "500" }}>{item.label}</span>
                     <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", background: "rgba(35,59,61,0.06)", padding: "2px 8px", borderRadius: "12px" }}>
                         {item.zip_length} chiffres
@@ -137,7 +155,7 @@ function ConditionRow({ cond, onSave, onDelete }) {
 const rowStyle = { display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", background: "#FFFFFF", borderRadius: "16px", transition: "box-shadow 0.15s ease" };
 const gripStyle = { color: "var(--text-muted)", opacity: 0.35, cursor: "grab", flexShrink: 0 };
 const iconBtn = { border: "none", background: "var(--surface-hover)", borderRadius: "10px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-main)", flexShrink: 0, transition: "background 0.15s ease" };
-const emojiInput = { width: "44px", padding: "0.4rem", borderRadius: "10px", border: "1px solid var(--border)", fontSize: "1.2rem", textAlign: "center", outline: "none", background: "var(--surface-hover)" };
+const emojiInput = { width: "44px", padding: "0.4rem", borderRadius: "10px", border: "1px solid var(--border)", fontSize: "1.2rem", textAlign: "center", outline: "none", background: "var(--surface-hover)", fontFamily: emojiFontFamily };
 const textInput = { padding: "0.4rem 0.75rem", borderRadius: "10px", border: "1px solid var(--border)", fontSize: "0.9rem", outline: "none", fontFamily: "inherit" };
 const spinStyle = { animation: "spin 1s linear infinite" };
 
@@ -334,7 +352,7 @@ export default function ConfigurationPage() {
             const res = await fetch(apiUrl("/admin/item-categories"), { headers: buildAuthHeaders() });
             if (!res.ok) throw new Error();
             const data = await res.json();
-            setCategories(data.items || []);
+            setCategories((data.items || []).map(cat => ({ ...cat, emoji: normalizeEmoji(cat.emoji, "📦") })));
         } catch { showToast("Impossible de charger les catégories.", "error"); }
         finally { setCatLoading(false); }
     }, []);
@@ -370,7 +388,7 @@ export default function ConfigurationPage() {
             const res = await fetch(apiUrl("/admin/item-countries"), { headers: buildAuthHeaders() });
             if (!res.ok) throw new Error();
             const data = await res.json();
-            setCountries(data.items || []);
+            setCountries((data.items || []).map(country => ({ ...country, emoji: normalizeEmoji(country.emoji, "🌍") })));
         } catch { showToast("Impossible de charger les pays.", "error"); }
         finally { setCountryLoading(false); }
     }, []);
@@ -407,7 +425,8 @@ export default function ConfigurationPage() {
             const res = await fetch(apiUrl(`/admin/item-categories/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label, emoji: updated.emoji }) });
             if (!res.ok) throw new Error((await res.json()).error || "");
             const saved = await res.json();
-            setCategories(prev => prev.map(c => c.id === saved.id ? saved : c));
+            const normalized = { ...saved, emoji: normalizeEmoji(saved.emoji, "📦") };
+            setCategories(prev => prev.map(c => c.id === normalized.id ? normalized : c));
             showToast("Catégorie mise à jour.");
         } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
     };
@@ -426,7 +445,7 @@ export default function ConfigurationPage() {
             const res = await fetch(apiUrl("/admin/item-categories"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newCat.label.trim(), emoji: newCat.emoji.trim() || "📦" }) });
             if (!res.ok) throw new Error((await res.json()).error || "");
             const created = await res.json();
-            setCategories(prev => [...prev, created]);
+            setCategories(prev => [...prev, { ...created, emoji: normalizeEmoji(created.emoji, "📦") }]);
             setNewCat({ label: "", emoji: "📦" });
             setAddCatModal(false);
             showToast("Catégorie ajoutée.");
@@ -506,7 +525,8 @@ export default function ConfigurationPage() {
             const res = await fetch(apiUrl(`/admin/item-countries/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label, emoji: updated.emoji, zip_length: updated.zip_length }) });
             if (!res.ok) throw new Error((await res.json()).error || "");
             const saved = await res.json();
-            setCountries(prev => prev.map(c => c.id === saved.id ? saved : c));
+            const normalized = { ...saved, emoji: normalizeEmoji(saved.emoji, "🌍") };
+            setCountries(prev => prev.map(c => c.id === normalized.id ? normalized : c));
             showToast("Pays mis à jour.");
         } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
     };
@@ -525,7 +545,7 @@ export default function ConfigurationPage() {
             const res = await fetch(apiUrl("/admin/item-countries"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newCountry.label.trim(), emoji: newCountry.emoji.trim() || "🌍", zip_length: parseInt(newCountry.zip_length, 10) }) });
             if (!res.ok) throw new Error((await res.json()).error || "");
             const created = await res.json();
-            setCountries(prev => [...prev, created]);
+            setCountries(prev => [...prev, { ...created, emoji: normalizeEmoji(created.emoji, "🌍") }]);
             setNewCountry({ label: "", emoji: "🌍", zip_length: 5 });
             setAddCountryModal(false);
             showToast("Pays ajouté.");
@@ -671,7 +691,7 @@ export default function ConfigurationPage() {
                     <div style={{ display: "flex", gap: "0.75rem" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                             <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Emoji</label>
-                            <input value={newCat.emoji} onChange={e => setNewCat(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={{ width: "56px", padding: "0.6rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "1.4rem", textAlign: "center", outline: "none", background: "var(--surface-hover)", fontFamily: "inherit" }} />
+                            <input value={newCat.emoji} onChange={e => setNewCat(d => ({ ...d, emoji: e.target.value }))} maxLength={EMOJI_MAX_LENGTH} style={{ width: "56px", padding: "0.6rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "1.4rem", textAlign: "center", outline: "none", background: "var(--surface-hover)", fontFamily: emojiFontFamily }} />
                         </div>
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                             <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom *</label>
@@ -731,7 +751,7 @@ export default function ConfigurationPage() {
                     <div style={{ display: "flex", gap: "0.75rem" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                             <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Emoji</label>
-                            <input value={newCountry.emoji} onChange={e => setNewCountry(d => ({ ...d, emoji: e.target.value }))} maxLength={2} style={{ width: "56px", padding: "0.6rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "1.4rem", textAlign: "center", outline: "none", background: "var(--surface-hover)", fontFamily: "inherit" }} />
+                            <input value={newCountry.emoji} onChange={e => setNewCountry(d => ({ ...d, emoji: e.target.value }))} maxLength={EMOJI_MAX_LENGTH} style={{ width: "56px", padding: "0.6rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "1.4rem", textAlign: "center", outline: "none", background: "var(--surface-hover)", fontFamily: emojiFontFamily }} />
                         </div>
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                             <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom *</label>
