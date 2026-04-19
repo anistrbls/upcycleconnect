@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl, fetchWithTimeout } from "../lib/api";
@@ -166,6 +167,13 @@ export default function LoginPage() {
                                     </svg>
                                 </button>
                             </div>
+
+                            <p className="login-subtitle" style={{ textAlign: "center", marginTop: "1rem" }}>
+                                Pas encore de compte ?{" "}
+                                <Link href="/inscription" style={{ color: "inherit", fontWeight: 600 }}>
+                                    S&apos;inscrire
+                                </Link>
+                            </p>
                         </form>
                     </div>
                 </section>

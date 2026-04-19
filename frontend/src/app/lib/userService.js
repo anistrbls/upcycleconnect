@@ -97,15 +97,11 @@ export async function setUserStatus(id, status) {
 }
 
 /**
- * Valide un utilisateur (is_validated = true, status → active si pending).
+ * Valide un compte professionnel en attente (status → active).
  * @param {number} id
  */
 export async function validateUser(id) {
-    const res = await fetch(apiUrl(`/admin/users/${id}/validate`), {
-        method: "PATCH",
-        headers: buildAuthHeaders(),
-    });
-    return parseResponse(res);
+    return setUserStatus(id, "active");
 }
 
 // Helper interne

@@ -5,7 +5,7 @@ import UsersTable from "./UsersTable";
 import UserFilters from "./UserFilters";
 import UserForm from "./UserForm";
 import UserDetails from "./UserDetails";
-import { listUsers, createUser, updateUser, deleteUser, setUserStatus } from "../../../lib/userService";
+import { listUsers, createUser, updateUser, deleteUser, setUserStatus, validateUser } from "../../../lib/userService";
 
 // Correspondance sous-page → filtre automatique
 // Correspond aux clés définies dans constants.js pour le module "utilisateurs"
@@ -102,6 +102,15 @@ export default function UsersAdminView({ subpage }) {
         }
     };
 
+    const handleValidate = async (id) => {
+        try {
+            await validateUser(id);
+            await load();
+        } catch (err) {
+            setErrorMsg(err.message ?? "Erreur lors de la validation.");
+        }
+    };
+
     // ── Ouverture des modales ─────────────────────────────────────────────────
     const openCreate = () => {
         setEditingUser(null);
@@ -192,6 +201,7 @@ export default function UsersAdminView({ subpage }) {
                     onEdit={openEdit}
                     onDelete={handleDelete}
                     onToggleStatus={handleToggleStatus}
+                    onValidate={handleValidate}
                 />
             </div>
 

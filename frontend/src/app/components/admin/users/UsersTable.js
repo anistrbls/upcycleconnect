@@ -36,7 +36,7 @@ function Badge({ value, map }) {
 
 // Tableau principal des utilisateurs
 // Reçoit la liste filtrée + les callbacks d'action depuis UsersAdminView.
-export default function UsersTable({ users, loading, onView, onEdit, onDelete, onToggleStatus }) {
+export default function UsersTable({ users, loading, onView, onEdit, onDelete, onToggleStatus, onValidate }) {
     if (loading) {
         return <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>Chargement…</p>;
     }
@@ -96,6 +96,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
                                     onEdit={onEdit}
                                     onDelete={onDelete}
                                     onToggleStatus={onToggleStatus}
+                                    onValidate={onValidate}
                                 />
                             </td>
                         </tr>
@@ -106,7 +107,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
     );
 }
 
-function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus }) {
+function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus, onValidate }) {
     const btn = (extra) => ({
         border: "none",
         borderRadius: "999px",
@@ -121,8 +122,12 @@ function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus }) {
         ...extra,
     });
 
-    // Bouton contextuel : Réactiver > Suspendre
-    const contextual = user.status === "suspended" ? (
+    // Bouton contextuel : Valider (pro en attente) > Réactiver > Suspendre
+    const contextual = user.status === "pending" && user.role === "professionnel" ? (
+        <button style={btn({ background: "#C8F5BC", color: "#1E5C1A" })} onClick={() => onValidate(user.id)}>
+            ✓ Valider
+        </button>
+    ) : user.status === "suspended" ? (
         <button style={btn({ background: "#E5FFBC", color: "#3E4A1A" })} onClick={() => onToggleStatus(user.id, "active")}>
             ↺ Réactiver
         </button>
