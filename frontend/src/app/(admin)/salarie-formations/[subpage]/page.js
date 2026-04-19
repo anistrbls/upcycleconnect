@@ -72,9 +72,10 @@ export default function SalarieFormationsPage({ params }) {
         await loadData();
     };
 
-    if (subpage === "liste" || subpage === "creer") {
+    if (subpage === "creer" || subpage === "mes-evenements" || subpage === "brouillons") {
         return (
             <SalarieFormationsView
+                subpage={subpage}
                 events={events}
                 categories={categories}
                 loading={loading}

@@ -6,7 +6,8 @@ import EventAdminView from "../../../components/admin/events/EventAdminView";
 import EventCategoryAdminView from "../../../components/admin/events/EventCategoryAdminView";
 import EventPlanningView from "../../../components/admin/events/EventPlanningView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
-import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import ParticulierEvenementsView from "../../../components/particulier/ParticulierEvenementsView";
+import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 
 export default function EventsSubPage({ params }) {
@@ -14,11 +15,25 @@ export default function EventsSubPage({ params }) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [events, setEvents] = useState([]);
+    const [publicEvents, setPublicEvents] = useState([]);
+    const [myRegistrations, setMyRegistrations] = useState([]);
     const [eventCategories, setEventCategories] = useState([]);
     const [salaries, setSalaries] = useState([]);
     const [eventsLoading, setEventsLoading] = useState(false);
     const [eventsError, setEventsError] = useState("");
     const [pendingOpenEventId, setPendingOpenEventId] = useState(null);
+
+    const getUserRole = () => {
+        try {
+            const token = typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
+            if (!token) return null;
+            const payload = JSON.parse(atob(token.split(".")[1]));
+            return payload.role || null;
+        } catch {
+            return null;
+        }
+    };
+    const isParticulier = getUserRole() === "particulier";
 
     const activeModule = getModuleByKey("evenements");
     const activeSub = getSubNavItem(activeModule.key, subpage);
@@ -77,6 +92,24 @@ export default function EventsSubPage({ params }) {
         setSalaries(data.items || []);
     };
 
+    const loadPublicEvents = async () => {
+        const response = await fetch(apiUrl("/events"), {
+            method: "GET",
+            headers: buildAuthHeaders(),
+        });
+        const data = await parseApiResponse(response);
+        setPublicEvents(data.items || []);
+    };
+
+    const loadMyRegistrations = async () => {
+        const response = await fetch(apiUrl("/events/my-registrations"), {
+            method: "GET",
+            headers: buildAuthHeaders(),
+        });
+        const data = await parseApiResponse(response);
+        setMyRegistrations(data.items || []);
+    };
+
     const refreshEventsData = async () => {
         setEventsLoading(true);
         setEventsError("");
@@ -90,8 +123,23 @@ export default function EventsSubPage({ params }) {
     };
 
     useEffect(() => {
+        if (isParticulier) {
+            setEventsLoading(true);
+            setEventsError("");
+            Promise.all([loadPublicEvents(), loadMyRegistrations()])
+                .catch((err) => setEventsError(String(err?.message || "Impossible de charger les activités.")))
+                .finally(() => setEventsLoading(false));
+            return;
+        }
         if (subpage === "tous-evenements" || subpage === "planning" || subpage === "categories-evenements" || subpage === "validation") {
             refreshEventsData();
+        }
+        if (subpage === "activites") {
+            setEventsLoading(true);
+            setEventsError("");
+            loadPublicEvents()
+                .catch((err) => setEventsError(String(err?.message || "Impossible de charger les activités.")))
+                .finally(() => setEventsLoading(false));
         }
     }, [subpage]);
 
@@ -193,6 +241,24 @@ export default function EventsSubPage({ params }) {
         }
     };
 
+    if (isParticulier) {
+        return (
+            <ParticulierEvenementsView
+                events={publicEvents}
+                registrations={myRegistrations}
+                loading={eventsLoading}
+                errorMessage={eventsError}
+                subpage={subpage}
+                onReload={() => {
+                    setEventsLoading(true);
+                    Promise.all([loadPublicEvents(), loadMyRegistrations()])
+                        .catch(() => {})
+                        .finally(() => setEventsLoading(false));
+                }}
+            />
+        );
+    }
+
     if (subpage === "tous-evenements") {
         return (
             <EventAdminView
@@ -228,6 +294,42 @@ export default function EventsSubPage({ params }) {
 
     if (subpage === "planning") {
         return <EventPlanningView events={events} onOpenEvent={openEventFromPlanning} />;
+    }
+
+    if (subpage === "activites") {
+        return (
+            <ParticulierEvenementsView
+                events={publicEvents}
+                registrations={myRegistrations}
+                loading={eventsLoading}
+                errorMessage={eventsError}
+                subpage={subpage}
+                onReload={() => {
+                    setEventsLoading(true);
+                    Promise.all([loadPublicEvents(), loadMyRegistrations()])
+                        .catch(() => {})
+                        .finally(() => setEventsLoading(false));
+                }}
+            />
+        );
+    }
+
+    if (subpage === "mes-inscriptions") {
+        return (
+            <ParticulierEvenementsView
+                events={publicEvents}
+                registrations={myRegistrations}
+                loading={eventsLoading}
+                errorMessage={eventsError}
+                subpage={subpage}
+                onReload={() => {
+                    setEventsLoading(true);
+                    Promise.all([loadPublicEvents(), loadMyRegistrations()])
+                        .catch(() => {})
+                        .finally(() => setEventsLoading(false));
+                }}
+            />
+        );
     }
 
     return <ModulePlaceholder moduleLabel={activeModule.label} subLabel={activeSub.label} />;

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../lib/api";
-import { getDefaultSubRoute, getModuleByKey, NAV_MODULES, SALARIE_MODULES } from "../lib/constants";
+import { getDefaultSubRoute, getModuleByKey, NAV_MODULES, SALARIE_MODULES, PARTICULIER_MODULES } from "../lib/constants";
 import { Icon } from "../components/admin/Icon";
 
 export default function AdminLayout({ children }) {
@@ -67,6 +67,10 @@ export default function AdminLayout({ children }) {
             router.push("/annonces/disponible");
             return;
         }
+        if (isParticulier && moduleKey === "evenements") {
+            router.push("/evenements/activites");
+            return;
+        }
         router.push(getDefaultSubRoute(moduleKey));
     };
 
@@ -85,6 +89,7 @@ export default function AdminLayout({ children }) {
     const isSalarie = user?.role === "salarie";
     const isAdmin = user?.role === "admin";
     const isPro = user?.role === "professionnel";
+    const isParticulier = user?.role === "particulier";
     const userRoleLabel = user?.role === "salarie" ? "Salarié" : user?.role === "particulier" ? "Particulier" : user?.role === "professionnel" ? "Professionnel" : user?.role;
     const adminAnnoncesSubNav = [
         { key: "mes-annonces", label: "Annonces actives", shortLabel: "Actives" },
@@ -96,8 +101,15 @@ export default function AdminLayout({ children }) {
         { key: "disponible", label: "Annonces disponibles", shortLabel: "Disponibles" },
         { key: "mes-recuperations", label: "Mes récupérations", shortLabel: "Récupérations" },
     ];
+    const particulierEvenementsSubNav = [
+        { key: "activites", label: "Activités", shortLabel: "Activités" },
+        { key: "mes-inscriptions", label: "Mes inscriptions", shortLabel: "Inscriptions" },
+        { key: "mon-planning", label: "Mon planning", shortLabel: "Planning" },
+    ];
     const visibleSubNav = activeModule.key === "annonces"
         ? (isAdmin ? adminAnnoncesSubNav : (isPro ? proAnnoncesSubNav : activeModule.subNav))
+        : (activeModule.key === "evenements" && isParticulier)
+        ? particulierEvenementsSubNav
         : activeModule.subNav;
     const userDisplayName = (() => {
         const email = user?.email || "";
@@ -121,7 +133,11 @@ export default function AdminLayout({ children }) {
     })();
 
     // Modules autorisés pour les utilisateurs non-admins
-    const allowedModulesForUsers = isPro ? ["annonces"] : ["vue-globale", "annonces"];
+    const allowedModulesForUsers = isPro
+        ? ["annonces"]
+        : isParticulier
+        ? ["vue-globale", "annonces", "evenements"]
+        : ["vue-globale", "annonces"];
     const isSalarieModule = activeModule.key.startsWith("salarie-");
     const isModuleAllowed = isAdmin || (isSalarie && isSalarieModule) || allowedModulesForUsers.includes(activeModule.key);
 
@@ -130,6 +146,8 @@ export default function AdminLayout({ children }) {
         ? NAV_MODULES
         : isSalarie
         ? SALARIE_MODULES
+        : isParticulier
+        ? PARTICULIER_MODULES
         : NAV_MODULES.filter(m => allowedModulesForUsers.includes(m.key));
 
     return (
@@ -145,7 +163,7 @@ export default function AdminLayout({ children }) {
                 </div>
 
                 <div className="topbar-center">
-                    {(isAdmin || isSalarieModule || activeModule.key === "annonces") && visibleSubNav.map((subItem) => (
+                    {(isAdmin || isSalarieModule || activeModule.key === "annonces" || (isParticulier && activeModule.key === "evenements")) && visibleSubNav.map((subItem) => (
                         <button
                             key={subItem.key}
                             className={`action-btn ${currentSubKey === subItem.key ? "primary" : ""}`}

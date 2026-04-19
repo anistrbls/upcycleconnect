@@ -99,6 +99,26 @@ func createStripeCheckoutSession(cfg *StripeConfig, itemID, userID int64, title 
 	return &session, nil
 }
 
+// GetStripeConfigPublic expose la config Stripe pour d'autres packages (ex: events)
+func GetStripeConfigPublic() (*StripeConfig, error) {
+	return getStripeConfig()
+}
+
+// CreateStripeCheckoutSessionPublic expose la création de session Stripe pour d'autres packages
+func CreateStripeCheckoutSessionPublic(cfg *StripeConfig, itemID, userID int64, title string, amountCents int64, currency string) (*StripeCheckoutSessionPublic, error) {
+	session, err := createStripeCheckoutSession(cfg, itemID, userID, title, amountCents, currency)
+	if err != nil {
+		return nil, err
+	}
+	return &StripeCheckoutSessionPublic{ID: session.ID, URL: session.URL}, nil
+}
+
+// StripeCheckoutSessionPublic est le type exposé publiquement
+type StripeCheckoutSessionPublic struct {
+	ID  string
+	URL string
+}
+
 type stripeWebhookEvent struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
