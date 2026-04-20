@@ -214,3 +214,81 @@ func verifyStripeSignature(payload []byte, signatureHeader, webhookSecret string
 
 	return fmt.Errorf("stripe signature mismatch")
 }
+
+// VerifyStripeSignaturePublic expose la vérification de signature Stripe pour d'autres packages
+func VerifyStripeSignaturePublic(payload []byte, signatureHeader, webhookSecret string) error {
+	return verifyStripeSignature(payload, signatureHeader, webhookSecret)
+}
+
+// RetrieveStripeEventSession interroge l'API Stripe pour obtenir le payment_status d'une session de checkout
+func RetrieveStripeEventSession(secretKey, sessionID string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.stripe.com/v1/checkout/sessions/"+url.PathEscape(sessionID), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("stripe retrieve session failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session struct {
+		PaymentStatus string `json:"payment_status"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		return "", err
+	}
+	return session.PaymentStatus, nil
+}
+
+// CreateStripeEventCheckoutSessionPublic crée une session Stripe pour un paiement d'événement
+func CreateStripeEventCheckoutSessionPublic(cfg *StripeConfig, eventID, userID int64, title string, amountCents int64) (*StripeCheckoutSessionPublic, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("invalid amount")
+	}
+
+	form := url.Values{}
+	form.Set("mode", "payment")
+	form.Set("success_url", cfg.SuccessURL)
+	form.Set("cancel_url", cfg.CancelURL)
+	form.Set("metadata[event_id]", strconv.FormatInt(eventID, 10))
+	form.Set("metadata[user_id]", strconv.FormatInt(userID, 10))
+	form.Set("line_items[0][quantity]", "1")
+	form.Set("line_items[0][price_data][currency]", "eur")
+	form.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(amountCents, 10))
+	form.Set("line_items[0][price_data][product_data][name]", title)
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe checkout creation failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session stripeCheckoutSession
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.URL) == "" {
+		return nil, fmt.Errorf("invalid stripe session response")
+	}
+	return &StripeCheckoutSessionPublic{ID: session.ID, URL: session.URL}, nil
+}

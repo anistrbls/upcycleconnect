@@ -150,6 +150,7 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                         {EVENT_TYPES.map(t => <option key={t} value={t}>{TYPE_LABELS[t] || t}</option>)}
                                     </select>
                                 </label>
+
                             </div>
                         </div>
                         <div style={S.card}>
@@ -318,8 +319,8 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
         const q = query.trim().toLowerCase();
         const matchQ = !q || e.name.toLowerCase().includes(q) || (e.lieu || "").toLowerCase().includes(q);
         const matchS = subpage === "brouillons"
-            ? e.status === "brouillon"
-            : (statusFilter === "all" || e.status === statusFilter);
+            ? e.status === "brouillon" && e.validationStatus !== "approved"
+            : e.status !== "brouillon" && (statusFilter === "all" || e.status === statusFilter);
         return matchQ && matchS;
     });
 
@@ -477,7 +478,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                     <div style={{ display: "grid", gap: "0.5rem" }}>
                         <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 0.25rem 0" }}>{participants.length} participant{participants.length > 1 ? "s" : ""}</p>
                         {participants.map(p => (
-                            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "var(--surface-hover)", borderRadius: "12px", fontSize: "0.82rem", gap: "0.5rem", flexWrap: "wrap" }}>
+                            <div key={p.userId ?? p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "var(--surface-hover)", borderRadius: "12px", fontSize: "0.82rem", gap: "0.5rem", flexWrap: "wrap" }}>
                                 <span style={{ fontWeight: 600 }}>{p.firstname} {p.lastname}</span>
                                 <span style={{ color: "var(--text-muted)" }}>{p.email}</span>
                                 <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>{new Date(p.registeredAt).toLocaleDateString("fr-FR")}</span>
@@ -528,7 +529,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                                         Complet
                                     </div>
                                 )}
-                                {item.validationStatus && item.status !== "brouillon" && (
+                                {item.validationStatus && (
                                     <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: vBadge.bg, color: vBadge.color, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: `1px solid ${vBadge.border}`, letterSpacing: "0.04em", textTransform: "uppercase" }}>
                                         {VALIDATION_LABELS[item.validationStatus] || item.validationStatus}
                                     </div>
@@ -567,7 +568,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                                     <button type="button" onClick={() => handleDelete(item)} title="Supprimer" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(220,60,60,0.35)", background: "rgba(220,60,60,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#ff8080", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                                         <IconTrash />
                                     </button>
-                                    {item.status === "brouillon" ? (
+                                    {item.status === "brouillon" && item.validationStatus !== "approved" ? (
                                         <button type="button" onClick={() => handlePublish(item)} style={{ flex: 1, padding: "0.72rem 1rem", borderRadius: "999px", border: "none", background: "linear-gradient(135deg, #2563EB, #1d4ed8)", color: "white", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem" }}>
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                                             Envoyer en validation

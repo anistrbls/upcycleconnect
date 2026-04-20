@@ -123,6 +123,19 @@ export default function EventsSubPage({ params }) {
     };
 
     useEffect(() => {
+        const successSessionId = searchParams.get("session_id");
+        const isSuccess = searchParams.get("success") === "1";
+
+        if (isParticulier && isSuccess && successSessionId) {
+            fetch(apiUrl(`/events/confirm-payment?session_id=${encodeURIComponent(successSessionId)}`), {
+                method: "GET",
+                headers: buildAuthHeaders(),
+            }).finally(() => {
+                router.replace("/evenements/activites");
+            });
+            return;
+        }
+
         if (isParticulier) {
             setEventsLoading(true);
             setEventsError("");
@@ -292,7 +305,7 @@ export default function EventsSubPage({ params }) {
         );
     }
 
-    if (subpage === "planning") {
+    if (subpage === "planning" && !isParticulier) {
         return <EventPlanningView events={events} onOpenEvent={openEventFromPlanning} />;
     }
 

@@ -30,7 +30,7 @@ const isSameDay = (left, right) => (
     && left.getDate() === right.getDate()
 );
 
-export default function EventPlanningView({ events, onOpenEvent }) {
+export default function EventPlanningView({ events, onOpenEvent, title, subtitle }) {
     const [currentMonth, setCurrentMonth] = useState(() => {
         const today = new Date();
         return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -43,6 +43,9 @@ export default function EventPlanningView({ events, onOpenEvent }) {
     const eventsByDay = useMemo(() => {
         const map = new Map();
         events.forEach((item) => {
+            if (item.validationStatus === "rejected") {
+                return;
+            }
             const key = toDayKey(item.dateDebut);
             if (!key) {
                 return;
@@ -100,8 +103,8 @@ export default function EventPlanningView({ events, onOpenEvent }) {
         <>
             <div className="header-section">
                 <div className="title-area">
-                    <span className="activities-label">Événements</span>
-                    <h1>Planning</h1>
+                    <span className="activities-label">{subtitle ?? "Événements"}</span>
+                    <h1>{title ?? "Planning"}</h1>
                 </div>
             </div>
 

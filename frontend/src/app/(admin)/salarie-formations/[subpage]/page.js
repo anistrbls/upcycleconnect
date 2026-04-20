@@ -26,14 +26,9 @@ export default function SalarieFormationsPage({ params }) {
         setLoading(true);
         setError("");
         try {
-            const [evRes, catRes] = await Promise.all([
-                fetch(apiUrl("/admin/events"), { headers: buildAuthHeaders() }),
-                fetch(apiUrl("/admin/event-categories"), { headers: buildAuthHeaders() }),
-            ]);
+            const evRes = await fetch(apiUrl("/salarie/events"), { headers: buildAuthHeaders() });
             const evData = await parseResponse(evRes);
-            const catData = await parseResponse(catRes);
             setEvents(evData.items || []);
-            setCategories(catData.items || []);
         } catch (err) {
             setError(String(err?.message || "Impossible de charger les données."));
         } finally {
@@ -44,7 +39,7 @@ export default function SalarieFormationsPage({ params }) {
     useEffect(() => { loadData(); }, []);
 
     const handleCreate = async (payload) => {
-        const res = await fetch(apiUrl("/admin/events"), {
+        const res = await fetch(apiUrl("/salarie/events"), {
             method: "POST",
             headers: buildAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload),
@@ -54,7 +49,7 @@ export default function SalarieFormationsPage({ params }) {
     };
 
     const handleUpdate = async (id, payload) => {
-        const res = await fetch(apiUrl(`/admin/events/${id}`), {
+        const res = await fetch(apiUrl(`/salarie/events/${id}`), {
             method: "PUT",
             headers: buildAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload),
@@ -64,7 +59,7 @@ export default function SalarieFormationsPage({ params }) {
     };
 
     const handleDelete = async (id) => {
-        const res = await fetch(apiUrl(`/admin/events/${id}`), {
+        const res = await fetch(apiUrl(`/salarie/events/${id}`), {
             method: "DELETE",
             headers: buildAuthHeaders(),
         });

@@ -3,7 +3,6 @@
 import { useState, useCallback } from "react";
 import { pillInputStyle } from "../../lib/styles";
 import AdminModal from "../admin/AdminModal";
-import EventPlanningView from "../admin/events/EventPlanningView";
 import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../lib/api";
 
 const TYPE_LABELS = { formation: "Formation", atelier: "Atelier", evenement: "Événement", conference: "Conférence" };
@@ -49,7 +48,7 @@ function placesRestantes(item) {
 }
 
 /* ── Card événement style photo plein fond ── */
-function EventCard({ item, onDetail, onRegister, onUnregister, onCheckout, registeredIds, loadingIds }) {
+function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout, registeredIds, loadingIds }) {
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
     const start = new Date(item.dateDebut);
     const isFull = (() => { const r = placesRestantes(item); return r !== null && r <= 0; })();
@@ -59,7 +58,7 @@ function EventCard({ item, onDetail, onRegister, onUnregister, onCheckout, regis
 
     return (
         <article
-            style={{ position: "relative", borderRadius: "28px", overflow: "hidden", height: "380px", background: item.imageUrl ? "#111" : tc.bg, boxShadow: "0 4px 24px rgba(0,0,0,0.10)", cursor: "pointer" }}
+            style={{ position: "relative", borderRadius: "28px", overflow: "hidden", height: "380px", background: item.imageUrl ? "#111" : tc.bg, boxShadow: "0 4px 24px rgba(0,0,0,0.10)", cursor: "pointer", animation: "cardAppear 0.45s ease-out both", animationDelay: `${(index ?? 0) * 0.06}s` }}
             onClick={() => onDetail(item)}
         >
             {item.imageUrl ? (
@@ -188,13 +187,13 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
 }
 
 /* ── Carte inscription (Mes inscriptions) ── */
-function RegistrationCard({ item, onDetail, onUnregister, isLoading }) {
+function RegistrationCard({ item, index, onDetail, onUnregister, isLoading }) {
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
     const start = new Date(item.dateDebut);
     const isPaid = item.paymentStatus === "paid";
     const isPending = item.paymentStatus === "pending";
     return (
-        <article style={{ background: "var(--surface-hover)", borderRadius: "20px", padding: "1.25rem", display: "grid", gap: "0.75rem" }}>
+        <article style={{ background: "var(--surface-hover)", borderRadius: "20px", padding: "1.25rem", display: "grid", gap: "0.75rem", animation: "cardAppear 0.45s ease-out both", animationDelay: `${(index ?? 0) * 0.07}s` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.75rem" }}>
                 <h3 style={{ fontSize: "1rem", fontWeight: 600, margin: 0, flex: 1, lineHeight: 1.35 }}>{item.name}</h3>
                 <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -227,11 +226,11 @@ export default function ParticulierEvenementsView({ events = [], registrations =
     const [detailItem, setDetailItem] = useState(null);
     const [toast, setToast] = useState(null);
     const [loadingIds, setLoadingIds] = useState(new Set());
-    const [registeredIds, setRegisteredIds] = useState(() => new Set((registrations || []).map(r => r.id)));
+    const [registeredIds, setRegisteredIds] = useState(() => new Set((registrations || []).filter(r => r.paymentStatus !== "pending").map(r => r.id ?? r.eventId)));
 
     // Sync registeredIds when registrations prop changes
     const syncRegistrations = useCallback((regs) => {
-        setRegisteredIds(new Set((regs || []).map(r => r.id)));
+        setRegisteredIds(new Set((regs || []).filter(r => r.paymentStatus !== "pending").map(r => r.id ?? r.eventId)));
     }, []);
 
     const showToast = (msg, ok = true) => {
@@ -343,7 +342,13 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                     {errorMessage && <p style={{ marginTop: "0.75rem", color: "#a23b3b", fontSize: "0.85rem" }}>{errorMessage}</p>}
                 </div>
 
-                {loading && <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>}
+                {loading && (
+                    <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+                        {[...Array(6)].map((_, i) => (
+                            <div key={i} style={{ borderRadius: "28px", height: "380px", background: "var(--surface-hover)", animation: `skeletonPulse 1.4s ease-in-out ${i * 0.1}s infinite` }} />
+                        ))}
+                    </div>
+                )}
                 {!loading && visible.length === 0 && (
                     <div className="panel" style={{ textAlign: "center", padding: "3rem 1.5rem" }}>
                         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>
@@ -353,8 +358,8 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                 )}
                 {!loading && visible.length > 0 && (
                     <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
-                        {visible.map(item => (
-                            <EventCard key={item.id} item={item} onDetail={setDetailItem}
+                        {visible.map((item, index) => (
+                            <EventCard key={item.id} index={index} item={item} onDetail={setDetailItem}
                                 onRegister={handleRegister} onUnregister={handleUnregister} onCheckout={handleCheckout}
                                 registeredIds={registeredIds} loadingIds={loadingIds} />
                         ))}
@@ -384,7 +389,13 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                         <h1>Mes inscriptions</h1>
                     </div>
                 </div>
-                {loading && <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>}
+                {loading && (
+                    <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
+                        {[...Array(4)].map((_, i) => (
+                            <div key={i} style={{ borderRadius: "20px", height: "140px", background: "var(--surface-hover)", animation: `skeletonPulse 1.4s ease-in-out ${i * 0.1}s infinite` }} />
+                        ))}
+                    </div>
+                )}
                 {!loading && registrations.length === 0 && (
                     <div className="panel" style={{ textAlign: "center", padding: "3rem 1.5rem" }}>
                         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>Vous n'êtes inscrit à aucun événement pour le moment.</p>
@@ -392,8 +403,8 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                 )}
                 {!loading && registrations.length > 0 && (
                     <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
-                        {registrations.map(item => (
-                            <RegistrationCard key={item.id} item={item} onDetail={setDetailItem}
+                        {registrations.map((item, index) => (
+                            <RegistrationCard key={item.id ?? item.eventId} index={index} item={item} onDetail={setDetailItem}
                                 onUnregister={async (it) => { await handleUnregister(it); if (onReload) onReload(); }}
                                 isLoading={loadingIds.has(item.id)} />
                         ))}
@@ -407,32 +418,16 @@ export default function ParticulierEvenementsView({ events = [], registrations =
         );
     }
 
-    /* —— Vue Mon planning —— */
-    if (subpage === "mon-planning") {
-        return (
-            <>
-                <div className="header-section">
-                    <div className="title-area">
-                        <span className="activities-label">Espace particulier</span>
-                        <h1>Mon planning</h1>
-                    </div>
-                </div>
-                {loading && <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>}
-                {!loading && registrations.length === 0 && (
-                    <div className="panel" style={{ textAlign: "center", padding: "3rem 1.5rem" }}>
-                        <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>Vous n&apos;êtes inscrit à aucun événement pour le moment.</p>
-                    </div>
-                )}
-                {!loading && registrations.length > 0 && (
-                    <EventPlanningView events={registrations} onOpenEvent={setDetailItem} />
-                )}
-                <EventDetailModal item={detailItem} open={!!detailItem} onClose={() => setDetailItem(null)}
-                    onRegister={handleRegister} onUnregister={handleUnregister} onCheckout={handleCheckout}
-                    isRegistered={detailItem ? registeredIds.has(detailItem.id) : false}
-                    isLoading={detailItem ? loadingIds.has(detailItem.id) : false} />
-            </>
-        );
-    }
-
     return null;
+}
+
+// Keyframes injectés globalement une seule fois
+if (typeof window !== "undefined" && !document.getElementById("pev-keyframes")) {
+    const s = document.createElement("style");
+    s.id = "pev-keyframes";
+    s.textContent = `
+        @keyframes cardAppear { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes skeletonPulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
+    `;
+    document.head.appendChild(s);
 }
