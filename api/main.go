@@ -3630,7 +3630,7 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 			result = append(result, map[string]interface{}{
 				"id": id, "label": label,
 				"impactCoefficient": impactCoefficient,
-				"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+				"position":          pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
@@ -3653,7 +3653,7 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		var id int64
 		var createdAt, updatedAt time.Time
-		err := db.QueryRow(`
+		err = db.QueryRow(`
 			INSERT INTO item_materials (label, impact_coefficient, position)
 			VALUES ($1, $2, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_materials))
 			RETURNING id, created_at, updated_at
@@ -3671,7 +3671,7 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": id, "label": label,
 			"impactCoefficient": impactCoefficient,
-			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			"position":          pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	default:
@@ -3729,7 +3729,7 @@ func itemMaterialByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id": id, "label": label,
 			"impactCoefficient": impactCoefficient,
-			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
+			"position":          pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	case http.MethodDelete:

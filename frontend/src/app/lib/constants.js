@@ -170,47 +170,6 @@ export const PRO_MODULES = [
     },
 ];
 
-export const PARTICULIER_MODULES = [
-    {
-        key: "vue-globale",
-        label: "Vue globale",
-        shortLabel: "Vue",
-        icon: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
-        subNav: [
-            { key: "vue-generale", label: "Vue générale", shortLabel: "Générale" },
-        ],
-    },
-    {
-        key: "annonces",
-        label: "Annonces",
-        shortLabel: "Annonces",
-        icon: "M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6 M12 12V2 M12 2l4 4 M12 2L8 6",
-        subNav: [
-            { key: "deposer", label: "Déposer une annonce", shortLabel: "Déposer" },
-            { key: "mes-annonces", label: "Mes annonces", shortLabel: "Mes" },
-            { key: "brouillons", label: "Brouillons", shortLabel: "Brouillons" },
-        ],
-    },
-    {
-        key: "evenements",
-        label: "Événements",
-        shortLabel: "Événements",
-        icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2",
-        subNav: [
-            { key: "activites", label: "Activités", shortLabel: "Activités" },
-        ],
-    },
-    {
-        key: "projets",
-        label: "Projets upcycle",
-        shortLabel: "Projets",
-        icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
-        subNav: [
-            { key: "postes", label: "Projets postés", shortLabel: "Postés" },
-        ],
-    },
-];
-
 export const SALARIE_MODULES = [
     {
         key: "salarie-tableau-de-bord",
