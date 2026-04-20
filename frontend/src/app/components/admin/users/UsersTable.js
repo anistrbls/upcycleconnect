@@ -36,7 +36,7 @@ function Badge({ value, map }) {
 
 // Tableau principal des utilisateurs
 // Reçoit la liste filtrée + les callbacks d'action depuis UsersAdminView.
-export default function UsersTable({ users, loading, onView, onEdit, onDelete, onToggleStatus, onValidate }) {
+export default function UsersTable({ users, loading, onView, onEdit, onDelete, onToggleStatus, onValidate, onResetPassword }) {
     if (loading) {
         return <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>Chargement…</p>;
     }
@@ -97,6 +97,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
                                     onDelete={onDelete}
                                     onToggleStatus={onToggleStatus}
                                     onValidate={onValidate}
+                                    onResetPassword={onResetPassword}
                                 />
                             </td>
                         </tr>
@@ -107,7 +108,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
     );
 }
 
-function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus, onValidate }) {
+function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus, onValidate, onResetPassword }) {
     const btn = (extra) => ({
         border: "none",
         borderRadius: "999px",
@@ -147,9 +148,14 @@ function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus, onValid
                 Modifier
             </button>
 
-            {/* Ligne 2 : action contextuelle + supprimer */}
+            {/* Ligne 2 : action contextuelle + reset mdp */}
             {contextual || <div />}
-            <button style={btn({ background: "#151A1B", color: "#C8D2D4" })} onClick={() => onDelete(user.id)}>
+            <button style={btn({ background: "#EDE9FE", color: "#5B21B6" })} onClick={() => onResetPassword(user)}>
+                MDP
+            </button>
+
+            {/* Ligne 3 : supprimer (pleine largeur) */}
+            <button style={btn({ background: "#151A1B", color: "#C8D2D4", gridColumn: "span 2" })} onClick={() => onDelete(user.id)}>
                 Supprimer
             </button>
         </div>

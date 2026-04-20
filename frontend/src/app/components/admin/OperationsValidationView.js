@@ -8,6 +8,8 @@ import { formatDateFR } from "../../lib/formatters";
 const TABS = [
     { key: "conseils", label: "Conseils" },
     { key: "evenements", label: "Événements" },
+    { key: "annonces", label: "Annonces" },
+    { key: "projets", label: "Projets" },
 ];
 
 // ─── Onglet Conseils ──────────────────────────────────────────────────────────
@@ -212,28 +214,243 @@ function EvenementsValidation({ events, loading, errorMessage, onReload, onValid
     );
 }
 
+// ─── Onglet Annonces ─────────────────────────────────────────────────────────
+
+function AnnoncesValidation({ items, loading, errorMessage, onReload, onValidate, onReject }) {
+    const [query, setQuery] = useState("");
+    const [rejectTarget, setRejectTarget] = useState(null);
+    const [rejectComment, setRejectComment] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [localError, setLocalError] = useState("");
+
+    const pending = items.filter((item) => {
+        const q = query.trim().toLowerCase();
+        return (
+            item.status === "en_attente" &&
+            (!q || item.name.toLowerCase().includes(q) || (item.category || "").toLowerCase().includes(q))
+        );
+    });
+
+    const handleValidate = async (item) => {
+        if (!window.confirm(`Valider l'annonce "${item.name}" ?`)) return;
+        try { await onValidate(item.id); } catch (err) { window.alert(String(err?.message || "Impossible de valider.")); }
+    };
+
+    const openReject = (item) => { setRejectTarget(item); setRejectComment(""); setLocalError(""); };
+
+    const handleRejectSubmit = async (e) => {
+        e.preventDefault();
+        setLocalError("");
+        setIsSubmitting(true);
+        try {
+            await onReject(rejectTarget.id, rejectComment.trim());
+            setRejectTarget(null);
+        } catch (err) {
+            setLocalError(String(err?.message || "Impossible de refuser."));
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <>
+            <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1rem" }}>
+                <input
+                    type="text"
+                    placeholder="Rechercher une annonce…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    style={{ flex: "1 1 240px", minWidth: 0, ...pillInputStyle }}
+                />
+                <button className="action-cta task-action-btn" type="button" onClick={onReload}>Actualiser</button>
+            </div>
+
+            {errorMessage && <p style={{ color: "#a23b3b", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{errorMessage}</p>}
+
+            <div className="panel">
+                <div className="section-header" style={{ marginBottom: "0.75rem" }}>
+                    <span className="section-title">Annonces en attente</span>
+                    <span className="db-badge" style={{ background: "#FFF3E0", color: "#A56A2A" }}>{pending.length}</span>
+                </div>
+
+                {loading && <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>}
+                {!loading && pending.length === 0 && (
+                    <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Aucune annonce en attente de validation.</p>
+                )}
+                {!loading && pending.map((item) => (
+                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "1rem", alignItems: "start", padding: "1rem 0", borderBottom: "1px solid #EAF0F1" }}>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.3rem" }}>
+                                <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>{item.name}</span>
+                                {item.category && <span className="db-badge" style={{ background: "#EAF4FF" }}>{item.category}</span>}
+                            </div>
+                            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                                {item.city} · {item.type}
+                            </div>
+                        </div>
+                        <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0, paddingTop: "0.15rem" }}>
+                            <button className="action-cta task-action-btn" style={{ fontSize: "0.78rem", padding: "0.4rem 0.85rem" }} type="button" onClick={() => handleValidate(item)}>Valider</button>
+                            <button className="action-cta" style={{ fontSize: "0.78rem", padding: "0.4rem 0.85rem", background: "#FDE8E8", color: "#a23b3b" }} type="button" onClick={() => openReject(item)}>Refuser</button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.name || ""}`} onClose={() => setRejectTarget(null)}>
+                <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "0.75rem" }}>
+                    <label style={labelStyle}>
+                        Motif du refus (optionnel)
+                        <textarea rows={3} value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Précisez la raison…" style={{ ...fieldStyle, resize: "vertical" }} />
+                    </label>
+                    {localError && <p style={{ color: "#a23b3b", fontSize: "0.82rem" }}>{localError}</p>}
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                        <button className="action-cta" style={{ background: "#FDE8E8", color: "#a23b3b" }} type="submit" disabled={isSubmitting}>{isSubmitting ? "Refus…" : "Confirmer le refus"}</button>
+                        <button className="action-cta" type="button" onClick={() => setRejectTarget(null)} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Annuler</button>
+                    </div>
+                </form>
+            </AdminModal>
+        </>
+    );
+}
+
+// ─── Onglet Projets ──────────────────────────────────────────────────────────
+
+function ProjetsValidation({ projects, loading, errorMessage, onReload, onValidate, onReject }) {
+    const [query, setQuery] = useState("");
+    const [rejectTarget, setRejectTarget] = useState(null);
+    const [rejectComment, setRejectComment] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [localError, setLocalError] = useState("");
+
+    const pending = projects.filter((p) => {
+        const q = query.trim().toLowerCase();
+        return (
+            p.moderation_status === "pending" &&
+            (!q || p.title.toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q))
+        );
+    });
+
+    const handleValidate = async (project) => {
+        if (!window.confirm(`Valider le projet "${project.title}" ?`)) return;
+        try { await onValidate(project.id); } catch (err) { window.alert(String(err?.message || "Impossible de valider.")); }
+    };
+
+    const openReject = (item) => { setRejectTarget(item); setRejectComment(""); setLocalError(""); };
+
+    const handleRejectSubmit = async (e) => {
+        e.preventDefault();
+        setLocalError("");
+        setIsSubmitting(true);
+        try {
+            await onReject(rejectTarget.id, rejectComment.trim());
+            setRejectTarget(null);
+        } catch (err) {
+            setLocalError(String(err?.message || "Impossible de refuser."));
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <>
+            <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1rem" }}>
+                <input
+                    type="text"
+                    placeholder="Rechercher un projet…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    style={{ flex: "1 1 240px", minWidth: 0, ...pillInputStyle }}
+                />
+                <button className="action-cta task-action-btn" type="button" onClick={onReload}>Actualiser</button>
+            </div>
+
+            {errorMessage && <p style={{ color: "#a23b3b", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{errorMessage}</p>}
+
+            <div className="panel">
+                <div className="section-header" style={{ marginBottom: "0.75rem" }}>
+                    <span className="section-title">Projets en attente</span>
+                    <span className="db-badge" style={{ background: "#FFF3E0", color: "#A56A2A" }}>{pending.length}</span>
+                </div>
+
+                {loading && <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>}
+                {!loading && pending.length === 0 && (
+                    <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Aucun projet en attente de validation.</p>
+                )}
+                {!loading && pending.map((p) => (
+                    <div key={p.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "1rem", alignItems: "start", padding: "1rem 0", borderBottom: "1px solid #EAF0F1" }}>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.3rem" }}>
+                                <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>{p.title}</span>
+                                {p.category && <span className="db-badge" style={{ background: "#EAF4FF" }}>{p.category}</span>}
+                            </div>
+                            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.5, maxHeight: "3rem", overflow: "hidden" }}>{p.description}</p>
+                        </div>
+                        <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0, paddingTop: "0.15rem" }}>
+                            <button className="action-cta task-action-btn" style={{ fontSize: "0.78rem", padding: "0.4rem 0.85rem" }} type="button" onClick={() => handleValidate(p)}>Valider</button>
+                            <button className="action-cta" style={{ fontSize: "0.78rem", padding: "0.4rem 0.85rem", background: "#FDE8E8", color: "#a23b3b" }} type="button" onClick={() => openReject(p)}>Refuser</button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.title || ""}`} onClose={() => setRejectTarget(null)}>
+                <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "0.75rem" }}>
+                    <label style={labelStyle}>
+                        Motif du refus (optionnel)
+                        <textarea rows={3} value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Précisez la raison…" style={{ ...fieldStyle, resize: "vertical" }} />
+                    </label>
+                    {localError && <p style={{ color: "#a23b3b", fontSize: "0.82rem" }}>{localError}</p>}
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                        <button className="action-cta" style={{ background: "#FDE8E8", color: "#a23b3b" }} type="submit" disabled={isSubmitting}>{isSubmitting ? "Refus…" : "Confirmer le refus"}</button>
+                        <button className="action-cta" type="button" onClick={() => setRejectTarget(null)} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Annuler</button>
+                    </div>
+                </form>
+            </AdminModal>
+        </>
+    );
+}
+
 // ─── Vue principale ───────────────────────────────────────────────────────────
 
 export default function OperationsValidationView({
     contents = [],
     events = [],
+    items = [],
+    projects = [],
     loadingContents,
     loadingEvents,
+    loadingItems,
+    loadingProjects,
     errorContents,
     errorEvents,
+    errorItems,
+    errorProjects,
     onReloadContents,
     onReloadEvents,
+    onReloadItems,
+    onReloadProjects,
     onValidateContent,
     onRejectContent,
     onValidateEvent,
     onRejectEvent,
+    onValidateItem,
+    onRejectItem,
+    onValidateProject,
+    onRejectProject,
 }) {
     const [activeTab, setActiveTab] = useState("conseils");
 
     const pendingContentsCount = contents.filter((c) => c.status === "en_attente").length;
     const pendingEventsCount = events.filter((e) => e.validationStatus === "pending").length;
+    const pendingItemsCount = items.filter((i) => i.status === "en_attente").length;
+    const pendingProjectsCount = projects.filter((p) => p.moderation_status === "pending").length;
 
-    const counts = { conseils: pendingContentsCount, evenements: pendingEventsCount };
+    const counts = { 
+        conseils: pendingContentsCount, 
+        evenements: pendingEventsCount,
+        annonces: pendingItemsCount,
+        projets: pendingProjectsCount
+    };
 
     return (
         <>
@@ -297,6 +514,26 @@ export default function OperationsValidationView({
                     onReload={onReloadEvents}
                     onValidate={onValidateEvent}
                     onReject={onRejectEvent}
+                />
+            )}
+            {activeTab === "annonces" && (
+                <AnnoncesValidation
+                    items={items}
+                    loading={loadingItems}
+                    errorMessage={errorItems}
+                    onReload={onReloadItems}
+                    onValidate={onValidateItem}
+                    onReject={onRejectItem}
+                />
+            )}
+            {activeTab === "projets" && (
+                <ProjetsValidation
+                    projects={projects}
+                    loading={loadingProjects}
+                    errorMessage={errorProjects}
+                    onReload={onReloadProjects}
+                    onValidate={onValidateProject}
+                    onReject={onRejectProject}
                 />
             )}
         </>

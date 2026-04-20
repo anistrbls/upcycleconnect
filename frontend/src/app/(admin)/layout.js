@@ -141,6 +141,11 @@ export default function AdminLayout({ children }) {
         ? particulierEvenementsSubNav
         : activeModule.subNav;
     const userDisplayName = (() => {
+        if (user?.firstname && user?.lastname) {
+            return `${user.firstname} ${user.lastname}`;
+        }
+        if (user?.firstname) return user.firstname;
+
         const email = user?.email || "";
         const localPart = email.split("@")[0] || "";
         if (!localPart) return "";
@@ -205,16 +210,11 @@ export default function AdminLayout({ children }) {
                             <span className="action-label-short">{subItem.shortLabel || subItem.label}</span>
                         </button>
                     ))}
-                    {!isAdmin && activeModule.key === "vue-globale" && (
-                        <div style={{ fontSize: "0.9rem", color: "var(--text-muted)", background: "#f8fafb", padding: "0.4rem 1rem", borderRadius: "100px", border: "1px solid #e2eaea" }}>
-                            Mode {userRoleLabel}
-                        </div>
-                    )}
                 </div>
 
                 <div className="topbar-right">
                     <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginRight: "1rem" }}>
-                        {!isAdmin && <span style={{ fontSize: "0.8rem", fontWeight: "600", color: "var(--text-muted)" }}>{userDisplayName || user?.email}</span>}
+                        <span style={{ fontSize: "0.8rem", fontWeight: "600", color: "var(--text-muted)" }}>{userDisplayName || user?.email}</span>
                         <button className="top-icon" onClick={handleLogout} title="Se déconnecter" aria-label="Se déconnecter"><Icon path="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></button>
                     </div>
                 </div>

@@ -143,14 +143,38 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		h.AdminListHandler(w, r)
 	}))
 
-	// --- Routes particulier ---
 	// GET /api/part/projects — liste des projets publiés et validés
-	mux.Handle("/api/part/projects", particulierOnly(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	mux.Handle("GET /api/part/projects", particulierOnly(h.ParticulierListPostedHandler))
+
+	// GET /api/part/projects/favorites — liste des projets favoris
+	mux.Handle("GET /api/part/projects/favorites", particulierOnly(h.FavoritesHandler))
+
+	// GET /api/mes-projets — projets auxquels l'utilisateur a participé
+	mux.Handle("GET /api/mes-projets", particulierOnly(h.ParticulierListParticipatedHandler))
+
+	// Routes avec ID de projet pour Particulier
+	mux.Handle("/api/part/projects/", particulierOnly(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// POST /api/part/projects/{id}/like
+		if strings.HasSuffix(path, "/like") && r.Method == http.MethodPost {
+			h.LikeHandler(w, r)
 			return
 		}
-		h.ParticulierListPostedHandler(w, r)
+
+		// POST /api/part/projects/{id}/bookmark
+		if strings.HasSuffix(path, "/bookmark") && r.Method == http.MethodPost {
+			h.BookmarkHandler(w, r)
+			return
+		}
+
+		// GET /api/part/projects/{id}
+		if r.Method == http.MethodGet {
+			h.ParticulierDetailHandler(w, r)
+			return
+		}
+
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}))
 
 	mux.Handle("/api/admin/projects/", adminOnly(func(w http.ResponseWriter, r *http.Request) {

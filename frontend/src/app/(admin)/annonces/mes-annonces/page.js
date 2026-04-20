@@ -115,11 +115,11 @@ const styles = {
         borderRadius: "20px",
         fontSize: "0.72rem",
         fontWeight: "700",
-        background: status === "vendu" ? "rgba(0,0,0,0.65)" :
+        background: (status === "vendu" || status === "vendue") ? "rgba(0,0,0,0.65)" :
             status === "actif" ? "rgba(255,255,255,0.18)" :
             status === "en attente" ? "rgba(62,104,108,0.2)" :
             "rgba(35,59,61,0.22)",
-        color: status === "vendu" ? "white" :
+        color: (status === "vendu" || status === "vendue") ? "white" :
             status === "actif" ? "white" :
             status === "en attente" ? "#EAF5F4" :
             status === "refusee" ? "#ff8080" :
@@ -337,6 +337,7 @@ const normalizeStatus = (status) => {
     if (!status) return "en attente";
     const value = String(status).toLowerCase();
     if (value === "refuse" || value === "refusée" || value === "refusee") return "refusee";
+    if (value === "vendue") return "vendu";
     return value;
 };
 
@@ -387,7 +388,7 @@ function MesAnnoncesContent() {
         if (!token) return;
 
         try {
-            const url = isAdmin ? apiUrl("/admin/items?status=actif") : apiUrl("/my-items");
+            const url = isAdmin ? apiUrl("/admin/items") : apiUrl("/my-items");
             const response = await fetch(url, {
                 method: "GET",
                 headers: { Authorization: `Bearer ${token}` },
@@ -439,6 +440,9 @@ function MesAnnoncesContent() {
 
     useEffect(() => {
         if (tokenChecked) {
+            if (isAdmin && !filterStatus) {
+                setFilterStatus("actif");
+            }
             fetchAnnonces();
         }
     }, [isAdmin, tokenChecked]);
@@ -524,8 +528,8 @@ function MesAnnoncesContent() {
             <header style={styles.header}>
                 <div>
                     <p className="activities-label">{isAdmin ? "Espace Admin" : "Espace Particulier"}</p>
-                    <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.5rem 0", letterSpacing: "-0.02em" }}>{isAdmin ? "Annonces actives" : "Mes annonces"}</h1>
-                    <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>{isAdmin ? "Vue des annonces actuellement actives sur la plateforme." : "Gérez vos publications et suivez vos échanges."}</p>
+                    <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.5rem 0", letterSpacing: "-0.02em" }}>{isAdmin ? "Annonces" : "Mes annonces"}</h1>
+                    <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>{isAdmin ? "Vue d'ensemble de toutes les annonces de la plateforme." : "Gérez vos publications et suivez vos échanges."}</p>
                 </div>
                 {!isAdmin && (
                     <button
@@ -599,18 +603,17 @@ function MesAnnoncesContent() {
                     <option value="vente">Vente</option>
                 </select>
 
-                {!isAdmin && (
-                    <select
-                        style={styles.filterSelect}
-                        value={filterStatus}
-                        onChange={(e) => setFilterStatus(e.target.value)}
-                    >
-                        <option value="">Tous les statuts</option>
-                        <option value="actif">Actif</option>
-                        <option value="vendu">Vendu</option>
-                        <option value="en attente">En attente</option>
-                    </select>
-                )}
+                <select
+                    style={styles.filterSelect}
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                >
+                    <option value="">Tous les statuts</option>
+                    <option value="actif">Actif</option>
+                    <option value="vendu">Terminée</option>
+                    {isAdmin && <option value="en attente">En attente (Modération)</option>}
+                    {isAdmin && <option value="refusee">Refusée</option>}
+                </select>
             </div>
 
             <div style={styles.grid}>

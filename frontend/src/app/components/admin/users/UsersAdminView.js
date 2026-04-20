@@ -5,7 +5,8 @@ import UsersTable from "./UsersTable";
 import UserFilters from "./UserFilters";
 import UserForm from "./UserForm";
 import UserDetails from "./UserDetails";
-import { listUsers, createUser, updateUser, deleteUser, setUserStatus, validateUser } from "../../../lib/userService";
+import ResetPasswordModal from "./ResetPasswordModal";
+import { listUsers, createUser, updateUser, deleteUser, setUserStatus, validateUser, resetUserPassword } from "../../../lib/userService";
 
 // Correspondance sous-page → filtre automatique
 // Correspond aux clés définies dans constants.js pour le module "utilisateurs"
@@ -38,6 +39,9 @@ export default function UsersAdminView({ subpage }) {
     const [editingUser, setEditingUser] = useState(null);   // null = création
     const [detailOpen, setDetailOpen] = useState(false);
     const [detailUser, setDetailUser] = useState(null);
+
+    const [resetModalOpen, setResetModalOpen] = useState(false);
+    const [resetUser, setResetUser] = useState(null);
 
     // ── Chargement ────────────────────────────────────────────────────────────
     const load = useCallback(async () => {
@@ -109,6 +113,16 @@ export default function UsersAdminView({ subpage }) {
         } catch (err) {
             setErrorMsg(err.message ?? "Erreur lors de la validation.");
         }
+    };
+
+    const handleResetPassword = (user) => {
+        setResetUser(user);
+        setResetModalOpen(true);
+    };
+
+    const handleResetPasswordSubmit = async (id, newPassword, disconnectUser) => {
+        await resetUserPassword(id, newPassword, disconnectUser);
+        // On pourrait ajouter une notification de succès ici si on avait un système de toast
     };
 
     // ── Ouverture des modales ─────────────────────────────────────────────────
@@ -202,6 +216,7 @@ export default function UsersAdminView({ subpage }) {
                     onDelete={handleDelete}
                     onToggleStatus={handleToggleStatus}
                     onValidate={handleValidate}
+                    onResetPassword={handleResetPassword}
                 />
             </div>
 
@@ -220,6 +235,14 @@ export default function UsersAdminView({ subpage }) {
                 user={detailUser}
                 onClose={() => setDetailOpen(false)}
                 onEdit={openEdit}
+            />
+
+            {/* Modale réinitialisation mot de passe */}
+            <ResetPasswordModal
+                open={resetModalOpen}
+                user={resetUser}
+                onClose={() => setResetModalOpen(false)}
+                onSubmit={handleResetPasswordSubmit}
             />
         </>
     );

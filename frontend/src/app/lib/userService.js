@@ -104,6 +104,21 @@ export async function validateUser(id) {
     return setUserStatus(id, "active");
 }
 
+/**
+ * Réinitialise le mot de passe d'un utilisateur.
+ * @param {number} id
+ * @param {string} password
+ * @param {boolean} disconnectUser
+ */
+export async function resetUserPassword(id, password, disconnectUser = false) {
+	const res = await fetch(apiUrl(`/admin/users/${id}/reset-password`), {
+		method: "POST",
+		headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+		body: JSON.stringify({ password, disconnectUser }),
+	});
+	return parseResponse(res);
+}
+
 // Helper interne
 
 async function parseResponse(res) {

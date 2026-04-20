@@ -303,7 +303,140 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
+// ResetPasswordHandler gère POST /api/admin/users/:id/reset-password
+func (h *Handler) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
 
+	id, err := parseID(r.URL.Path, "/api/admin/users/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	var p ResetPasswordPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if len(strings.TrimSpace(p.Password)) < 8 {
+		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(p.Password), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not hash password")
+		return
+	}
+
+	if err := h.repo.SetPassword(id, string(hash), p.DisconnectUser); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// GetProfileHandler gère GET /api/profile.
+func (h *Handler) GetProfileHandler(w http.ResponseWriter, userID int64) {
+	u, err := h.repo.GetByID(userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "user not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not fetch profile")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"user": u})
+}
+
+// UpdateProfileHandler gère PUT /api/profile.
+func (h *Handler) UpdateProfileHandler(w http.ResponseWriter, r *http.Request, userID int64) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var p UpdateProfilePayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if strings.TrimSpace(p.Firstname) == "" || strings.TrimSpace(p.Lastname) == "" || strings.TrimSpace(p.Email) == "" {
+		writeError(w, http.StatusBadRequest, "firstname, lastname and email are required")
+		return
+	}
+
+	// Check email uniqueness
+	exists, err := h.repo.EmailExists(p.Email, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not check email")
+		return
+	}
+	if exists {
+		writeError(w, http.StatusConflict, "email already used")
+		return
+	}
+
+	u, err := h.repo.UpdateProfile(userID, p)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update profile")
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+// UpdatePasswordHandler gère POST /api/profile/password.
+func (h *Handler) UpdatePasswordHandler(w http.ResponseWriter, r *http.Request, userID int64) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var p UpdatePasswordPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if len(strings.TrimSpace(p.NewPassword)) < 8 {
+		writeError(w, http.StatusBadRequest, "new password must be at least 8 characters")
+		return
+	}
+
+	// Verify old password
+	currentHash, err := h.repo.GetPasswordHash(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not fetch current password")
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(p.OldPassword)); err != nil {
+		writeError(w, http.StatusUnauthorized, "ancien mot de passe incorrect")
+		return
+	}
+
+	// Hash new password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(p.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not hash new password")
+		return
+	}
+
+	// Update password and invalidate all sessions
+	if err := h.repo.SetPassword(userID, string(newHash), true); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not set new password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
 
 // --- helpers locaux ---
 

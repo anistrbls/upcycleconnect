@@ -226,12 +226,12 @@ body {
 }
 
 .action-btn.primary {
-  background-color: #fff;
-  color: var(--black);
+  background-color: var(--black);
+  color: #fff;
 }
 
 .action-btn.primary:hover {
-  background-color: #f0f0f0;
+  background-color: #1D2426;
 }
 
 .action-btn svg {
@@ -1138,7 +1138,7 @@ body {
 }
 
 .alert-panel .alert-action-btn {
-  background: #749193;
+  background: var(--black);
   color: #F7FBFB;
   padding: 6px 14px;
   border-radius: 999px;
@@ -1146,11 +1146,11 @@ body {
 }
 
 .alert-panel .alert-action-btn:hover {
-  background: #678385;
+  background: #1D2426;
 }
 
 .task-action-btn {
-  background: #749193;
+  background: var(--black);
   color: #F7FBFB;
   padding: 6px 14px;
   border-radius: 999px;
@@ -1158,7 +1158,7 @@ body {
 }
 
 .task-action-btn:hover {
-  background: #678385;
+  background: #1D2426;
 }
 
 

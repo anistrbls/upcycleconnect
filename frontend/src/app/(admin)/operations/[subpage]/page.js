@@ -21,6 +21,16 @@ export default function OperationsSubPage({ params }) {
     const [loadingEvents, setLoadingEvents] = useState(false);
     const [errorEvents, setErrorEvents] = useState("");
 
+    // Annonces
+    const [items, setItems] = useState([]);
+    const [loadingItems, setLoadingItems] = useState(false);
+    const [errorItems, setErrorItems] = useState("");
+
+    // Projets
+    const [projects, setProjects] = useState([]);
+    const [loadingProjects, setLoadingProjects] = useState(false);
+    const [errorProjects, setErrorProjects] = useState("");
+
     const parseResponse = async (res) => {
         const data = await res.json().catch(() => null);
         if (!res.ok) throw new Error(data?.error || "Erreur API");
@@ -55,10 +65,40 @@ export default function OperationsSubPage({ params }) {
         }
     };
 
+    const loadItems = async () => {
+        setLoadingItems(true);
+        setErrorItems("");
+        try {
+            const res = await fetch(apiUrl("/admin/items?status=en_attente"), { headers: buildAuthHeaders() });
+            const data = await parseResponse(res);
+            setItems(data.items || []);
+        } catch (err) {
+            setErrorItems(String(err?.message || "Impossible de charger les annonces."));
+        } finally {
+            setLoadingItems(false);
+        }
+    };
+
+    const loadProjects = async () => {
+        setLoadingProjects(true);
+        setErrorProjects("");
+        try {
+            const res = await fetch(apiUrl("/admin/projects?status=pending"), { headers: buildAuthHeaders() });
+            const data = await parseResponse(res);
+            setProjects(data.projects || []); // Note: le backend renvoie "projects" pour la liste admin
+        } catch (err) {
+            setErrorProjects(String(err?.message || "Impossible de charger les projets."));
+        } finally {
+            setLoadingProjects(false);
+        }
+    };
+
     useEffect(() => {
         if (subpage === "validations") {
             loadContents();
             loadEvents();
+            loadItems();
+            loadProjects();
         }
     }, [subpage]);
 
@@ -94,21 +134,73 @@ export default function OperationsSubPage({ params }) {
         await loadEvents();
     };
 
+    const handleValidateItem = async (id) => {
+        const res = await fetch(apiUrl(`/admin/items/${id}/status`), {
+            method: "PATCH",
+            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ status: "actif" }),
+        });
+        await parseResponse(res);
+        await loadItems();
+    };
+
+    const handleRejectItem = async (id, comment) => {
+        const res = await fetch(apiUrl(`/admin/items/${id}/status`), {
+            method: "PATCH",
+            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ status: "refusee", moderation_note: comment }),
+        });
+        await parseResponse(res);
+        await loadItems();
+    };
+
+    const handleValidateProject = async (id) => {
+        const res = await fetch(apiUrl(`/admin/projects/${id}/moderate`), {
+            method: "POST",
+            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ moderationStatus: "approved" }),
+        });
+        await parseResponse(res);
+        await loadProjects();
+    };
+
+    const handleRejectProject = async (id, comment) => {
+        const res = await fetch(apiUrl(`/admin/projects/${id}/moderate`), {
+            method: "POST",
+            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ moderationStatus: "rejected", moderationNote: comment }),
+        });
+        await parseResponse(res);
+        await loadProjects();
+    };
+
     if (subpage === "validations") {
         return (
             <OperationsValidationView
                 contents={contents}
                 events={events}
+                items={items}
+                projects={projects}
                 loadingContents={loadingContents}
                 loadingEvents={loadingEvents}
+                loadingItems={loadingItems}
+                loadingProjects={loadingProjects}
                 errorContents={errorContents}
                 errorEvents={errorEvents}
+                errorItems={errorItems}
+                errorProjects={errorProjects}
                 onReloadContents={loadContents}
                 onReloadEvents={loadEvents}
+                onReloadItems={loadItems}
+                onReloadProjects={loadProjects}
                 onValidateContent={handleValidateContent}
                 onRejectContent={handleRejectContent}
                 onValidateEvent={handleValidateEvent}
                 onRejectEvent={handleRejectEvent}
+                onValidateItem={handleValidateItem}
+                onRejectItem={handleRejectItem}
+                onValidateProject={handleValidateProject}
+                onRejectProject={handleRejectProject}
             />
         );
     }

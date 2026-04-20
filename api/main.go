@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
@@ -149,44 +148,20 @@ func main() {
 	})))
 	mux.Handle("/api/admin/event-categories", authMiddleware(http.HandlerFunc(eventCategoriesHandler)))
 	mux.Handle("/api/admin/event-categories/", authMiddleware(http.HandlerFunc(eventCategoryByIDHandler)))
-
-	// Salarié events (création propre avec validation_status forcé à pending)
-	mux.Handle("/api/salarie/events", authMiddleware(http.HandlerFunc(salarieEventsHandler)))
-	mux.Handle("/api/salarie/events/", authMiddleware(http.HandlerFunc(salarieEventByIDHandler)))
-
-	// Public events (inscription particuliers)
-	mux.Handle("/api/events", authMiddleware(http.HandlerFunc(publicEventsHandler)))
+	mux.HandleFunc("GET /api/events", publicEventsHandler)
+	mux.Handle("/api/events/my-registrations", authMiddleware(http.HandlerFunc(myRegistrationsHandler)))
 	mux.Handle("/api/events/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if strings.HasSuffix(path, "/register") {
-			if r.Method == http.MethodPost {
-				eventRegisterHandler(w, r)
-				return
-			}
-			if r.Method == http.MethodDelete {
-				eventUnregisterHandler(w, r)
-				return
-			}
+			eventRegisterHandler(w, r)
+			return
 		}
-		if strings.HasSuffix(path, "/checkout") && r.Method == http.MethodPost {
+		if strings.HasSuffix(path, "/checkout") {
 			eventCheckoutHandler(w, r)
 			return
 		}
-		if strings.Contains(path, "/my-registrations") && r.Method == http.MethodGet {
-			eventMyRegistrationsHandler(w, r)
-			return
-		}
-		if strings.Contains(path, "/confirm-payment") && r.Method == http.MethodGet {
-			eventConfirmPaymentHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/participants") && r.Method == http.MethodGet {
-			eventParticipantsHandler(w, r)
-			return
-		}
-		writeError(w, http.StatusNotFound, "not found")
+		http.NotFound(w, r)
 	})))
-	mux.HandleFunc("POST /api/webhooks/stripe-events", eventStripeWebhookHandler)
 
 	// Item categories (catégories d'objets pour les annonces)
 	mux.HandleFunc("GET /api/item-categories", itemCategoriesPublicHandler)
@@ -419,6 +394,18 @@ func authMiddleware(next http.Handler) http.Handler {
 		}
 
 		r = r.WithContext(context.WithValue(r.Context(), "authClaims", claims))
+
+		// Vérification de l'invalidation de session (ex: après changement de mot de passe)
+		if iat, ok := claims["iat"].(float64); ok {
+			userID, _ := claims["userId"].(float64)
+			var invalidBefore sql.NullTime
+			err := db.QueryRow("SELECT sessions_invalid_before FROM users WHERE id = $1", int64(userID)).Scan(&invalidBefore)
+			if err == nil && invalidBefore.Valid && float64(invalidBefore.Time.Unix()) > iat {
+				writeError(w, http.StatusUnauthorized, "session invalidated")
+				return
+			}
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -490,20 +477,20 @@ type servicePayload struct {
 }
 
 type eventPayload struct {
-	Name             string  `json:"name"`
-	Description      string  `json:"description"`
-	CategoryID       int64   `json:"categoryId"`
-	Type             string  `json:"type"`
-	DateDebut        string  `json:"dateDebut"`
-	DateFin          string  `json:"dateFin"`
-	Lieu             string  `json:"lieu"`
-	Capacite         *int64  `json:"capacite"`
-	Status           string  `json:"status"`
-	Intervenant      string  `json:"intervenant"`
-	IntervenantID    *int64  `json:"intervenantId"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	CategoryID       int64  `json:"categoryId"`
+	Type             string `json:"type"`
+	DateDebut        string `json:"dateDebut"`
+	DateFin          string `json:"dateFin"`
+	Lieu             string `json:"lieu"`
+	Capacite         *int64 `json:"capacite"`
+	Status           string `json:"status"`
+	Intervenant      string `json:"intervenant"`
+	IntervenantID    *int64 `json:"intervenantId"`
 	ValidationStatus string  `json:"validationStatus"`
 	RejectionComment string  `json:"rejectionComment"`
-	ImageURL         string  `json:"imageUrl"`
+	ImageUrl         string  `json:"imageUrl"`
 	PricingType      string  `json:"pricingType"`
 	Price            float64 `json:"price"`
 }
@@ -1188,10 +1175,30 @@ func ensureEventsSchema() error {
 			CONSTRAINT events_status_check CHECK (status IN ('brouillon', 'planifie', 'valide', 'annule', 'termine')),
 			CONSTRAINT events_dates_check CHECK (date_fin >= date_debut)
 		)`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS category_id BIGINT`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS intervenant_id BIGINT REFERENCES users(id) ON DELETE SET NULL`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS validation_status TEXT NOT NULL DEFAULT 'approved'`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS rejection_comment TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS pricing_type TEXT NOT NULL DEFAULT 'gratuit'`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS price NUMERIC(10,2) NOT NULL DEFAULT 0.00`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS participant_count BIGINT NOT NULL DEFAULT 0`,
+		`DO $$ BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint WHERE conname = 'events_pricing_type_check'
+			) THEN
+				ALTER TABLE events ADD CONSTRAINT events_pricing_type_check CHECK (pricing_type IN ('gratuit', 'payant'));
+			END IF;
+		END $$`,
+		`CREATE TABLE IF NOT EXISTS event_registrations (
+			id BIGSERIAL PRIMARY KEY,
+			event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			payment_status TEXT NOT NULL DEFAULT 'gratuit',
+			stripe_session_id TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(event_id, user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_registrations_user_id ON event_registrations(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_registrations_event_id ON event_registrations(event_id)`,
 		`DO $$ BEGIN
 			IF NOT EXISTS (
 				SELECT 1 FROM pg_constraint WHERE conname = 'events_validation_status_check'
@@ -1208,22 +1215,6 @@ func ensureEventsSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_event_categories_status ON event_categories(status)`,
 		`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_category_id_fkey`,
 		`ALTER TABLE events ADD CONSTRAINT events_category_id_fkey FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE RESTRICT`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS pricing_type TEXT NOT NULL DEFAULT 'gratuit'`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS price NUMERIC(10,2) NOT NULL DEFAULT 0`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS participant_count BIGINT NOT NULL DEFAULT 0`,
-		`CREATE TABLE IF NOT EXISTS event_registrations (
-			id BIGSERIAL PRIMARY KEY,
-			event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			payment_status TEXT NOT NULL DEFAULT 'gratuit',
-			stripe_session_id TEXT NOT NULL DEFAULT '',
-			registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			CONSTRAINT event_registrations_unique UNIQUE(event_id, user_id),
-			CONSTRAINT event_registrations_payment_status_check CHECK (payment_status IN ('gratuit', 'pending', 'paid'))
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_event_registrations_event_id ON event_registrations(event_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_event_registrations_user_id ON event_registrations(user_id)`,
 	}
 
 	for _, statement := range statements {
@@ -1426,23 +1417,13 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var categoryName string
-		if payload.CategoryID <= 0 {
-			catID, catN, catErr := categoryIDFromType(payload.Type)
-			if catErr != nil {
-				writeError(w, http.StatusInternalServerError, "could not find category for this type")
+		if err := db.QueryRow(`SELECT name FROM event_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusBadRequest, "category does not exist")
 				return
 			}
-			payload.CategoryID = catID
-			categoryName = catN
-		} else {
-			if err := db.QueryRow(`SELECT name FROM event_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName); err != nil {
-				if err == sql.ErrNoRows {
-					writeError(w, http.StatusBadRequest, "category does not exist")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "could not validate category")
-				return
-			}
+			writeError(w, http.StatusInternalServerError, "could not validate category")
+			return
 		}
 
 		var intervenantName string
@@ -1482,8 +1463,8 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err = db.QueryRow(`
-			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status, image_url, pricing_type, price)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING id, created_at, updated_at
 		`,
 			strings.TrimSpace(payload.Name),
@@ -1498,14 +1479,6 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			intervenantName,
 			intervenantID,
 			postValidationStatus,
-			strings.TrimSpace(payload.ImageURL),
-			func() string {
-				if payload.PricingType == "payant" {
-					return "payant"
-				}
-				return "gratuit"
-			}(),
-			payload.Price,
 		).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create event")
@@ -1557,23 +1530,13 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var categoryName string
-		if payload.CategoryID <= 0 {
-			catID, catN, catErr := categoryIDFromType(payload.Type)
-			if catErr != nil {
-				writeError(w, http.StatusInternalServerError, "could not find category for this type")
+		if err := db.QueryRow(`SELECT name FROM event_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusBadRequest, "category does not exist")
 				return
 			}
-			payload.CategoryID = catID
-			categoryName = catN
-		} else {
-			if err := db.QueryRow(`SELECT name FROM event_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName); err != nil {
-				if err == sql.ErrNoRows {
-					writeError(w, http.StatusBadRequest, "category does not exist")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "could not validate category")
-				return
-			}
+			writeError(w, http.StatusInternalServerError, "could not validate category")
+			return
 		}
 
 		var intervenantName string
@@ -1620,9 +1583,6 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 				status = $9,
 				intervenant = $10,
 				intervenant_id = $11,
-				image_url = $14,
-				pricing_type = $15,
-				price = $16,
 				validation_status = CASE WHEN $13 = 'salarie' THEN 'pending' ELSE validation_status END,
 				rejection_comment = CASE WHEN $13 = 'salarie' THEN '' ELSE rejection_comment END,
 				updated_at = NOW()
@@ -1642,14 +1602,6 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			intervenantID,
 			id,
 			putCallerRole,
-			strings.TrimSpace(payload.ImageURL),
-			func() string {
-				if payload.PricingType == "payant" {
-					return "payant"
-				}
-				return "gratuit"
-			}(),
-			payload.Price,
 		)
 
 		var retValidationStatus, retRejectionComment string
@@ -1695,6 +1647,9 @@ func parseAndValidateEventPayload(r *http.Request) (eventPayload, time.Time, tim
 
 	if strings.TrimSpace(payload.Name) == "" {
 		return payload, time.Time{}, time.Time{}, fmt.Errorf("name is required")
+	}
+	if payload.CategoryID <= 0 {
+		return payload, time.Time{}, time.Time{}, fmt.Errorf("categoryId is required")
 	}
 	if normalizeEventType(payload.Type) == "" {
 		return payload, time.Time{}, time.Time{}, fmt.Errorf("invalid type")
@@ -1746,35 +1701,7 @@ func normalizeValidationStatus(raw string) string {
 	return "approved"
 }
 
-func categoryIDFromType(typeName string) (int64, string, error) {
-	catNameMap := map[string]string{
-		"atelier":    "Ateliers",
-		"formation":  "Formations",
-		"conference": "Conférences",
-		"evenement":  "Événements communautaires",
-	}
-	cName, ok := catNameMap[normalizeEventType(typeName)]
-	if !ok {
-		cName = "Événements communautaires"
-	}
-	var catID int64
-	if err := db.QueryRow(`SELECT id FROM event_categories WHERE name = $1`, cName).Scan(&catID); err != nil {
-		if err == sql.ErrNoRows {
-			if err2 := db.QueryRow(`SELECT id FROM event_categories ORDER BY id ASC LIMIT 1`).Scan(&catID); err2 != nil {
-				return 0, "", err2
-			}
-			return catID, cName, nil
-		}
-		return 0, "", err
-	}
-	return catID, cName, nil
-}
-
 func mapEventPayload(id int64, payload eventPayload, categoryName string, startAt time.Time, endAt time.Time, createdAt time.Time, updatedAt time.Time) map[string]interface{} {
-	pricingTypeNorm := payload.PricingType
-	if pricingTypeNorm != "payant" {
-		pricingTypeNorm = "gratuit"
-	}
 	data := map[string]interface{}{
 		"id":               id,
 		"name":             strings.TrimSpace(payload.Name),
@@ -1789,10 +1716,10 @@ func mapEventPayload(id int64, payload eventPayload, categoryName string, startA
 		"intervenant":      strings.TrimSpace(payload.Intervenant),
 		"validationStatus": payload.ValidationStatus,
 		"rejectionComment": payload.RejectionComment,
-		"imageUrl":         strings.TrimSpace(payload.ImageURL),
-		"pricingType":      pricingTypeNorm,
+		"imageUrl":         payload.ImageUrl,
+		"pricingType":      payload.PricingType,
 		"price":            payload.Price,
-		"participantCount": int64(0),
+		"participantCount": 0,
 		"createdAt":        createdAt.UTC().Format(time.RFC3339),
 		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 	}
@@ -1813,14 +1740,15 @@ func mapEventPayload(id int64, payload eventPayload, categoryName string, startA
 }
 
 func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
-	var id, categoryID, participantCount int64
-	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageURL, pricingType string
+	var id, categoryID int64
+	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
 	var intervenantID sql.NullInt64
 	var price float64
+	var participantCount int64
 
-	err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageURL, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
+	err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1835,42 +1763,38 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 		"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
 		"dateFin":          dateFin.UTC().Format(time.RFC3339),
 		"lieu":             lieu,
+		"capacite":         nil,
 		"status":           status,
 		"intervenant":      intervenant,
+		"intervenantId":    nil,
 		"validationStatus": validationStatus,
 		"rejectionComment": rejectionComment,
-		"imageUrl":         imageURL,
+		"imageUrl":         imageUrl,
 		"pricingType":      pricingType,
 		"price":            price,
 		"participantCount": participantCount,
 		"createdAt":        createdAt.UTC().Format(time.RFC3339),
 		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 	}
-
-	if intervenantID.Valid {
-		item["intervenantId"] = intervenantID.Int64
-	} else {
-		item["intervenantId"] = nil
-	}
-
 	if capacite.Valid {
 		item["capacite"] = capacite.Int64
-	} else {
-		item["capacite"] = nil
 	}
-
+	if intervenantID.Valid {
+		item["intervenantId"] = intervenantID.Int64
+	}
 	return item, nil
 }
 
 func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
-	var id, categoryID, participantCount int64
-	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageURL, pricingType string
+	var id, categoryID int64
+	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
 	var intervenantID sql.NullInt64
 	var price float64
+	var participantCount int64
 
-	err := row.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageURL, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
+	err := row.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1885,31 +1809,233 @@ func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 		"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
 		"dateFin":          dateFin.UTC().Format(time.RFC3339),
 		"lieu":             lieu,
+		"capacite":         nil,
 		"status":           status,
 		"intervenant":      intervenant,
+		"intervenantId":    nil,
 		"validationStatus": validationStatus,
 		"rejectionComment": rejectionComment,
-		"imageUrl":         imageURL,
+		"imageUrl":         imageUrl,
 		"pricingType":      pricingType,
 		"price":            price,
 		"participantCount": participantCount,
 		"createdAt":        createdAt.UTC().Format(time.RFC3339),
 		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 	}
-
-	if intervenantID.Valid {
-		item["intervenantId"] = intervenantID.Int64
-	} else {
-		item["intervenantId"] = nil
-	}
-
 	if capacite.Valid {
 		item["capacite"] = capacite.Int64
-	} else {
-		item["capacite"] = nil
+	}
+	if intervenantID.Valid {
+		item["intervenantId"] = intervenantID.Int64
+	}
+	return item, nil
+}
+
+func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
 	}
 
-	return item, nil
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	userIDVal, _ := claims["userId"].(float64)
+	userID := int64(userIDVal)
+
+	rows, err := db.Query(`
+		SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at, er.payment_status
+		FROM event_registrations er
+		JOIN events e ON e.id = er.event_id
+		LEFT JOIN event_categories c ON c.id = e.category_id
+		WHERE er.user_id = $1
+		ORDER BY e.date_debut ASC
+	`, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list registrations")
+		return
+	}
+	defer rows.Close()
+
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id, categoryID int64
+		var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
+		var dateDebut, dateFin, createdAt, updatedAt time.Time
+		var capacite sql.NullInt64
+		var intervenantID sql.NullInt64
+		var price float64
+		var participantCount int64
+		var paymentStatus string
+
+		err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt, &paymentStatus)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse registration")
+			return
+		}
+
+		item := map[string]interface{}{
+			"id":               id,
+			"name":             name,
+			"description":      description,
+			"categoryId":       categoryID,
+			"categoryName":     categoryName,
+			"type":             typeName,
+			"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
+			"dateFin":          dateFin.UTC().Format(time.RFC3339),
+			"lieu":             lieu,
+			"capacite":         nil,
+			"status":           status,
+			"intervenant":      intervenant,
+			"intervenantId":    nil,
+			"validationStatus": validationStatus,
+			"rejectionComment": rejectionComment,
+			"imageUrl":         imageUrl,
+			"pricingType":      pricingType,
+			"price":            price,
+			"participantCount": participantCount,
+			"paymentStatus":    paymentStatus,
+			"createdAt":        createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
+		}
+		if capacite.Valid {
+			item["capacite"] = capacite.Int64
+		}
+		if intervenantID.Valid {
+			item["intervenantId"] = intervenantID.Int64
+		}
+		items = append(items, item)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/api/events/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	userIDVal, _ := claims["userId"].(float64)
+	userID := int64(userIDVal)
+
+	switch r.Method {
+	case http.MethodPost:
+		// 1. Check if event is valid and has capacity
+		var pricingType string
+		var capacite sql.NullInt64
+		var participantCount int64
+		err = db.QueryRow(`SELECT pricing_type, capacite, participant_count FROM events WHERE id = $1 AND validation_status = 'approved'`, id).Scan(&pricingType, &capacite, &participantCount)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "event not found or not approved")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+
+		if pricingType == "payant" {
+			writeError(w, http.StatusBadRequest, "cet événement est payant, veuillez passer par le paiement")
+			return
+		}
+
+		if capacite.Valid && participantCount >= capacite.Int64 {
+			writeError(w, http.StatusBadRequest, "cet événement est complet")
+			return
+		}
+
+		// 2. Register
+		_, err = db.Exec(`
+			INSERT INTO event_registrations (event_id, user_id, payment_status)
+			VALUES ($1, $2, 'gratuit')
+			ON CONFLICT (event_id, user_id) DO NOTHING
+		`, id, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not register")
+			return
+		}
+
+		// 3. Update participant count
+		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1) WHERE id = $1`, id)
+
+		writeJSON(w, http.StatusOK, map[string]bool{"registered": true})
+
+	case http.MethodDelete:
+		_, err = db.Exec(`DELETE FROM event_registrations WHERE event_id = $1 AND user_id = $2`, id, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not unregister")
+			return
+		}
+
+		// Update participant count
+		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1) WHERE id = $1`, id)
+
+		writeJSON(w, http.StatusOK, map[string]bool{"unregistered": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func eventCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	id, err := parseIDFromPath(r.URL.Path, "/api/events/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	userIDVal, _ := claims["userId"].(float64)
+	userID := int64(userIDVal)
+
+	var name, pricingType string
+	var price float64
+	var capacite sql.NullInt64
+	var participantCount int64
+
+	err = db.QueryRow(`SELECT name, pricing_type, price, capacite, participant_count FROM events WHERE id = $1 AND validation_status = 'approved'`, id).Scan(&name, &pricingType, &price, &capacite, &participantCount)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "event not found")
+		return
+	}
+
+	if pricingType != "payant" || price <= 0 {
+		writeError(w, http.StatusBadRequest, "this event is not paid")
+		return
+	}
+
+	if capacite.Valid && participantCount >= capacite.Int64 {
+		writeError(w, http.StatusBadRequest, "this event is full")
+		return
+	}
+
+	cfg, err := items.GetStripeConfigPublic()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "stripe not configured")
+		return
+	}
+
+	amountCents := int64(price * 100)
+	session, err := items.CreateStripeCheckoutSessionPublic(cfg, id, userID, "Inscription : "+name, amountCents, "eur")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create stripe session")
+		return
+	}
+
+	// Pré-enregistrer avec statut pending
+	_, _ = db.Exec(`
+		INSERT INTO event_registrations (event_id, user_id, payment_status, stripe_session_id)
+		VALUES ($1, $2, 'pending', $3)
+		ON CONFLICT (event_id, user_id) DO UPDATE SET stripe_session_id = $3, payment_status = 'pending'
+	`, id, userID, session.ID)
+
+	writeJSON(w, http.StatusOK, map[string]string{"url": session.URL})
 }
 
 func eventValidateHandler(w http.ResponseWriter, r *http.Request) {
@@ -2191,22 +2317,22 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	var userID int64
-	var userEmail, userRole, passwordHash, status string
+	var userEmail, userRole, passwordHash, status, firstname, lastname string
 	// 1. Vérifier si c'est le super-admin (env)
 	if email == adminEmail {
 		userEmail = adminEmail
 		userRole = "admin"
 		passwordHash = string(adminPasswordHash)
 		status = "active"
-		// Récupérer l'ID de l'admin en base
-		_ = db.QueryRow("SELECT id FROM users WHERE email = $1", adminEmail).Scan(&userID)
+		// Récupérer l'ID et noms de l'admin en base
+		_ = db.QueryRow("SELECT id, firstname, lastname FROM users WHERE email = $1", adminEmail).Scan(&userID, &firstname, &lastname)
 	} else {
 		// 2. Sinon, chercher en base de données
 		err := db.QueryRow(`
-			SELECT id, email, role, password_hash, status
+			SELECT id, email, role, password_hash, status, firstname, lastname
 			FROM users
 			WHERE email = $1
-		`, email).Scan(&userID, &userEmail, &userRole, &passwordHash, &status)
+		`, email).Scan(&userID, &userEmail, &userRole, &passwordHash, &status, &firstname, &lastname)
 
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -2260,8 +2386,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		"token_type": "Bearer",
 		"expires_at": expiresAt.Format(time.RFC3339),
 		"user": map[string]string{
-			"email": userEmail,
-			"role":  userRole,
+			"email":     userEmail,
+			"role":      userRole,
+			"firstname": firstname,
+			"lastname":  lastname,
 		},
 	})
 }
@@ -2291,12 +2419,28 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	var id int64
+	if v, ok := idVal.(float64); ok {
+		id = int64(v)
+	} else if v, ok := idVal.(int64); ok {
+		id = v
+	}
+
+	var firstname, lastname string
+	err := db.QueryRow("SELECT firstname, lastname FROM users WHERE id = $1", id).Scan(&firstname, &lastname)
+	if err != nil {
+		firstname = ""
+		lastname = ""
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"user": map[string]any{
-			"id":    idVal,
-			"email": claims["email"],
-			"role":  claims["role"],
+			"id":        id,
+			"email":     claims["email"],
+			"role":      claims["role"],
+			"firstname": firstname,
+			"lastname":  lastname,
 		},
 	})
 }
@@ -3653,7 +3797,7 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		var id int64
 		var createdAt, updatedAt time.Time
-		err := db.QueryRow(`
+		err = db.QueryRow(`
 			INSERT INTO item_materials (label, impact_coefficient, position)
 			VALUES ($1, $2, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_materials))
 			RETURNING id, created_at, updated_at
@@ -3960,697 +4104,6 @@ func itemCountryByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
 		rowsAff, _ := result.RowsAffected()
 		if rowsAff == 0 {
 			writeError(w, http.StatusNotFound, "country not found")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
-
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-// ── Event registration handlers ──────────────────────────────────────────────
-
-func callerUserID(r *http.Request) (int64, bool) {
-	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
-	if !ok {
-		return 0, false
-	}
-	raw, ok := claims["userId"]
-	if !ok {
-		return 0, false
-	}
-	switch v := raw.(type) {
-	case float64:
-		return int64(v), true
-	case int64:
-		return v, true
-	case json.Number:
-		id, err := v.Int64()
-		if err != nil {
-			return 0, false
-		}
-		return id, true
-	}
-	return 0, false
-}
-
-func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := callerUserID(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	eventID, err := parseIDFromPath(strings.TrimSuffix(r.URL.Path, "/register"), "/api/events/")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid event id")
-		return
-	}
-
-	var pricingType string
-	var capacite sql.NullInt64
-	var participantCount int64
-	err = db.QueryRow(`
-		SELECT pricing_type, capacite, participant_count
-		FROM events
-		WHERE id = $1 AND validation_status = 'approved' AND status = 'planifie' AND date_fin > NOW()
-	`, eventID).Scan(&pricingType, &capacite, &participantCount)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "event not found or not available")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not fetch event")
-		return
-	}
-
-	if pricingType != "gratuit" {
-		writeError(w, http.StatusBadRequest, "paid events require checkout")
-		return
-	}
-	if capacite.Valid && participantCount >= capacite.Int64 {
-		writeError(w, http.StatusConflict, "event is full")
-		return
-	}
-
-	result, err := db.Exec(`
-		INSERT INTO event_registrations (event_id, user_id, payment_status)
-		VALUES ($1, $2, 'gratuit')
-		ON CONFLICT (event_id, user_id) DO NOTHING
-	`, eventID, userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not register")
-		return
-	}
-	if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
-		_, _ = db.Exec(`UPDATE events SET participant_count = participant_count + 1 WHERE id = $1`, eventID)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"registered": true})
-}
-
-func eventUnregisterHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := callerUserID(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	eventID, err := parseIDFromPath(strings.TrimSuffix(r.URL.Path, "/register"), "/api/events/")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid event id")
-		return
-	}
-
-	result, err := db.Exec(`
-		DELETE FROM event_registrations WHERE event_id = $1 AND user_id = $2
-	`, eventID, userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not unregister")
-		return
-	}
-	if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
-		_, _ = db.Exec(`UPDATE events SET participant_count = GREATEST(0, participant_count - 1) WHERE id = $1`, eventID)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true})
-}
-
-func eventMyRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := callerUserID(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	rows, err := db.Query(`
-		SELECT r.event_id, r.payment_status, r.stripe_session_id, r.registered_at,
-		       e.name, e.date_debut, e.date_fin, e.lieu, e.type, e.pricing_type, e.price
-		FROM event_registrations r
-		JOIN events e ON e.id = r.event_id
-		WHERE r.user_id = $1
-		ORDER BY e.date_debut ASC
-	`, userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not fetch registrations")
-		return
-	}
-	defer rows.Close()
-
-	regItems := make([]map[string]interface{}, 0)
-	for rows.Next() {
-		var eventID int64
-		var paymentStatus, stripeSessionID, name, lieu, typeName, pricingType string
-		var dateDebut, dateFin, registeredAt time.Time
-		var price float64
-
-		if err := rows.Scan(&eventID, &paymentStatus, &stripeSessionID, &registeredAt, &name, &dateDebut, &dateFin, &lieu, &typeName, &pricingType, &price); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not parse registrations")
-			return
-		}
-		regItems = append(regItems, map[string]interface{}{
-			"id":              eventID,
-			"eventId":         eventID,
-			"paymentStatus":   paymentStatus,
-			"stripeSessionId": stripeSessionID,
-			"registeredAt":    registeredAt.UTC().Format(time.RFC3339),
-			"name":            name,
-			"dateDebut":       dateDebut.UTC().Format(time.RFC3339),
-			"dateFin":         dateFin.UTC().Format(time.RFC3339),
-			"lieu":            lieu,
-			"type":            typeName,
-			"pricingType":     pricingType,
-			"price":           price,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": regItems})
-}
-
-func eventCheckoutHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := callerUserID(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	eventID, err := parseIDFromPath(strings.TrimSuffix(r.URL.Path, "/checkout"), "/api/events/")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid event id")
-		return
-	}
-
-	var name, pricingType string
-	var price float64
-	var capacite sql.NullInt64
-	var participantCount int64
-	err = db.QueryRow(`
-		SELECT name, pricing_type, price, capacite, participant_count
-		FROM events
-		WHERE id = $1 AND validation_status = 'approved' AND status = 'planifie' AND date_fin > NOW()
-	`, eventID).Scan(&name, &pricingType, &price, &capacite, &participantCount)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "event not found or not available")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not fetch event")
-		return
-	}
-
-	if pricingType == "gratuit" {
-		writeError(w, http.StatusBadRequest, "free events do not require checkout")
-		return
-	}
-	if capacite.Valid && participantCount >= capacite.Int64 {
-		writeError(w, http.StatusConflict, "event is full")
-		return
-	}
-
-	var alreadyPaid bool
-	if err := db.QueryRow(`
-		SELECT EXISTS(SELECT 1 FROM event_registrations WHERE event_id = $1 AND user_id = $2 AND payment_status = 'paid')
-	`, eventID, userID).Scan(&alreadyPaid); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not check registration")
-		return
-	}
-	if alreadyPaid {
-		writeError(w, http.StatusConflict, "already registered")
-		return
-	}
-
-	cfg, err := items.GetStripeConfigPublic()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "stripe is not configured")
-		return
-	}
-
-	frontendURL := strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
-	if frontendURL == "" {
-		frontendURL = "http://localhost:3000"
-	}
-	cfg.SuccessURL = frontendURL + "/evenements/activites?success=1&session_id={CHECKOUT_SESSION_ID}"
-	cfg.CancelURL = frontendURL + "/evenements/activites?cancel=1"
-
-	amountCents := int64(price * 100)
-	sess, err := items.CreateStripeEventCheckoutSessionPublic(cfg, eventID, userID, name, amountCents)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create checkout session")
-		return
-	}
-
-	_, err = db.Exec(`
-		INSERT INTO event_registrations (event_id, user_id, payment_status, stripe_session_id)
-		VALUES ($1, $2, 'pending', $3)
-		ON CONFLICT (event_id, user_id) DO UPDATE SET payment_status = 'pending', stripe_session_id = $3
-	`, eventID, userID, sess.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create registration")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"url": sess.URL})
-}
-
-func eventParticipantsHandler(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimSuffix(r.URL.Path, "/participants")
-	eventID, err := parseIDFromPath(path, "/api/events/")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid event id")
-		return
-	}
-
-	callerID, ok := callerUserID(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
-	role, _ := claims["role"].(string)
-
-	var intervenantID sql.NullInt64
-	if err := db.QueryRow(`SELECT intervenant_id FROM events WHERE id = $1`, eventID).Scan(&intervenantID); err != nil {
-		writeError(w, http.StatusNotFound, "event not found")
-		return
-	}
-
-	isAdmin := role == "admin"
-	isIntervenant := role == "salarie" && intervenantID.Valid && intervenantID.Int64 == callerID
-	if !isAdmin && !isIntervenant {
-		writeError(w, http.StatusForbidden, "forbidden")
-		return
-	}
-
-	rows, err := db.Query(`
-		SELECT u.id, u.firstname, u.lastname, u.email, r.payment_status, r.registered_at
-		FROM event_registrations r
-		JOIN users u ON u.id = r.user_id
-		WHERE r.event_id = $1
-		ORDER BY r.registered_at ASC
-	`, eventID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not fetch participants")
-		return
-	}
-	defer rows.Close()
-
-	participants := make([]map[string]interface{}, 0)
-	for rows.Next() {
-		var userIDp int64
-		var firstname, lastname, email, paymentStatus string
-		var registeredAt time.Time
-		if err := rows.Scan(&userIDp, &firstname, &lastname, &email, &paymentStatus, &registeredAt); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not parse participants")
-			return
-		}
-		participants = append(participants, map[string]interface{}{
-			"userId":        userIDp,
-			"firstname":     firstname,
-			"lastname":      lastname,
-			"email":         email,
-			"paymentStatus": paymentStatus,
-			"registeredAt":  registeredAt.UTC().Format(time.RFC3339),
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": participants})
-}
-
-func eventConfirmPaymentHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := callerUserID(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
-	if sessionID == "" {
-		writeError(w, http.StatusBadRequest, "session_id is required")
-		return
-	}
-
-	var eventID int64
-	var currentStatus string
-	err := db.QueryRow(`
-		SELECT event_id, payment_status FROM event_registrations
-		WHERE stripe_session_id = $1 AND user_id = $2
-	`, sessionID, userID).Scan(&eventID, &currentStatus)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "registration not found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not fetch registration")
-		return
-	}
-
-	if currentStatus == "paid" {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"payment_status": "paid"})
-		return
-	}
-
-	cfg, err := items.GetStripeConfigPublic()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "stripe is not configured")
-		return
-	}
-
-	paymentStatus, err := items.RetrieveStripeEventSession(cfg.SecretKey, sessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not verify payment with stripe")
-		return
-	}
-
-	if paymentStatus == "paid" {
-		result, err := db.Exec(`
-			UPDATE event_registrations SET payment_status = 'paid'
-			WHERE event_id = $1 AND user_id = $2 AND stripe_session_id = $3 AND payment_status = 'pending'
-		`, eventID, userID, sessionID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not update registration")
-			return
-		}
-		if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
-			_, _ = db.Exec(`UPDATE events SET participant_count = participant_count + 1 WHERE id = $1`, eventID)
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"payment_status": paymentStatus})
-}
-
-func eventStripeWebhookHandler(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read body")
-		return
-	}
-
-	webhookSecret := strings.TrimSpace(os.Getenv("STRIPE_EVENTS_WEBHOOK_SECRET"))
-	if webhookSecret == "" {
-		webhookSecret = strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET"))
-	}
-
-	if err := items.VerifyStripeSignaturePublic(body, r.Header.Get("Stripe-Signature"), webhookSecret); err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid stripe signature")
-		return
-	}
-
-	var event struct {
-		ID   string `json:"id"`
-		Type string `json:"type"`
-		Data struct {
-			Object struct {
-				ID       string            `json:"id"`
-				Metadata map[string]string `json:"metadata"`
-			} `json:"object"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &event); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-
-	if event.Type != "checkout.session.completed" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	var alreadyProcessed bool
-	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM stripe_webhook_events WHERE event_id = $1)`, event.ID).Scan(&alreadyProcessed); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not check idempotence")
-		return
-	}
-	if alreadyProcessed {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	eventIDStr := event.Data.Object.Metadata["event_id"]
-	userIDStr := event.Data.Object.Metadata["user_id"]
-	sessionID := event.Data.Object.ID
-
-	if eventIDStr == "" || userIDStr == "" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	eventID, err := strconv.ParseInt(eventIDStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid event_id in metadata")
-		return
-	}
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid user_id in metadata")
-		return
-	}
-
-	result, err := db.Exec(`
-		UPDATE event_registrations
-		SET payment_status = 'paid'
-		WHERE event_id = $1 AND user_id = $2 AND stripe_session_id = $3 AND payment_status = 'pending'
-	`, eventID, userID, sessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not update registration")
-		return
-	}
-	if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
-		_, _ = db.Exec(`UPDATE events SET participant_count = participant_count + 1 WHERE id = $1`, eventID)
-	}
-
-	_, _ = db.Exec(
-		`INSERT INTO stripe_webhook_events (event_id, event_type) VALUES ($1, $2) ON CONFLICT (event_id) DO NOTHING`,
-		event.ID, event.Type,
-	)
-
-	w.WriteHeader(http.StatusOK)
-}
-
-// ── Salarié events handlers ──────────────────────────────────────────────────
-
-func salarieEventsHandler(w http.ResponseWriter, r *http.Request) {
-	callerClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
-	callerRole, _ := callerClaims["role"].(string)
-	if callerRole != "salarie" && callerRole != "admin" {
-		writeError(w, http.StatusForbidden, "forbidden")
-		return
-	}
-
-	callerUserIDRaw, _ := callerClaims["userId"].(float64)
-	callerUserIDVal := int64(callerUserIDRaw)
-
-	switch r.Method {
-	case http.MethodGet:
-		rows, err := db.Query(`
-			SELECT e.id, e.name, e.description, e.category_id, COALESCE(c.name, ''), e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
-			FROM events e
-			LEFT JOIN event_categories c ON c.id = e.category_id
-			WHERE e.intervenant_id = $1
-			ORDER BY e.date_debut ASC, e.created_at DESC
-		`, callerUserIDVal)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not list events")
-			return
-		}
-		defer rows.Close()
-
-		items := make([]map[string]interface{}, 0)
-		for rows.Next() {
-			item, err := scanEventRow(rows)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "could not parse events")
-				return
-			}
-			items = append(items, item)
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
-
-	case http.MethodPost:
-		var firstname, lastname string
-		if err := db.QueryRow(`SELECT firstname, lastname FROM users WHERE id = $1`, callerUserIDVal).Scan(&firstname, &lastname); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not fetch user info")
-			return
-		}
-		callerName := strings.TrimSpace(firstname + " " + lastname)
-
-		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !startAt.After(time.Now().UTC()) {
-			writeError(w, http.StatusBadRequest, "la date de début doit être dans le futur")
-			return
-		}
-
-		catID, catName, catErr := categoryIDFromType(payload.Type)
-		if catErr != nil {
-			writeError(w, http.StatusInternalServerError, "could not find category")
-			return
-		}
-
-		pricingType := "gratuit"
-		if payload.PricingType == "payant" {
-			pricingType = "payant"
-		}
-
-		var capacity sql.NullInt64
-		if payload.Capacite != nil {
-			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
-		}
-
-		var id int64
-		var createdAt, updatedAt time.Time
-		err = db.QueryRow(`
-			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status, image_url, pricing_type, price)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'brouillon', $9, $10, 'pending', $11, $12, $13)
-			RETURNING id, created_at, updated_at
-		`,
-			strings.TrimSpace(payload.Name),
-			strings.TrimSpace(payload.Description),
-			catID,
-			normalizeEventType(payload.Type),
-			startAt, endAt,
-			strings.TrimSpace(payload.Lieu),
-			capacity,
-			callerName,
-			callerUserIDVal,
-			strings.TrimSpace(payload.ImageURL),
-			pricingType,
-			payload.Price,
-		).Scan(&id, &createdAt, &updatedAt)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not create event")
-			return
-		}
-
-		payload.CategoryID = catID
-		payload.Intervenant = callerName
-		payload.ValidationStatus = "pending"
-		payload.Status = "brouillon"
-		payload.PricingType = pricingType
-		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, catName, startAt, endAt, createdAt, updatedAt))
-
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func salarieEventByIDHandler(w http.ResponseWriter, r *http.Request) {
-	callerClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
-	callerRole, _ := callerClaims["role"].(string)
-	if callerRole != "salarie" && callerRole != "admin" {
-		writeError(w, http.StatusForbidden, "forbidden")
-		return
-	}
-
-	callerUserIDRaw, _ := callerClaims["userId"].(float64)
-	callerUserIDVal := int64(callerUserIDRaw)
-
-	id, err := parseIDFromPath(r.URL.Path, "/api/salarie/events/")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid event id")
-		return
-	}
-
-	var ownerID sql.NullInt64
-	if err := db.QueryRow(`SELECT intervenant_id FROM events WHERE id = $1`, id).Scan(&ownerID); err != nil {
-		if err == sql.ErrNoRows {
-			writeError(w, http.StatusNotFound, "event not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "could not fetch event")
-		return
-	}
-	if !ownerID.Valid || ownerID.Int64 != callerUserIDVal {
-		writeError(w, http.StatusForbidden, "vous ne pouvez modifier que vos propres événements")
-		return
-	}
-
-	switch r.Method {
-	case http.MethodPut:
-		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		catID, catName, catErr := categoryIDFromType(payload.Type)
-		if catErr != nil {
-			writeError(w, http.StatusInternalServerError, "could not find category")
-			return
-		}
-
-		pricingType := "gratuit"
-		if payload.PricingType == "payant" {
-			pricingType = "payant"
-		}
-
-		allowedStatus := normalizeEventStatus(payload.Status)
-		if allowedStatus != "brouillon" && allowedStatus != "planifie" {
-			allowedStatus = "brouillon"
-		}
-
-		var capacity sql.NullInt64
-		if payload.Capacite != nil {
-			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
-		}
-
-		var intervenantName string
-		_ = db.QueryRow(`SELECT intervenant FROM events WHERE id = $1`, id).Scan(&intervenantName)
-
-		var createdAt, updatedAt time.Time
-		err = db.QueryRow(`
-			UPDATE events
-			SET name = $1, description = $2, category_id = $3, type = $4,
-				date_debut = $5, date_fin = $6, lieu = $7, capacite = $8,
-				status = $9, validation_status = 'pending', rejection_comment = '',
-				image_url = $10, pricing_type = $11, price = $12,
-				updated_at = NOW()
-			WHERE id = $13
-			RETURNING created_at, updated_at
-		`,
-			strings.TrimSpace(payload.Name),
-			strings.TrimSpace(payload.Description),
-			catID,
-			normalizeEventType(payload.Type),
-			startAt, endAt,
-			strings.TrimSpace(payload.Lieu),
-			capacity,
-			allowedStatus,
-			strings.TrimSpace(payload.ImageURL),
-			pricingType,
-			payload.Price,
-			id,
-		).Scan(&createdAt, &updatedAt)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				writeError(w, http.StatusNotFound, "event not found")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "could not update event")
-			return
-		}
-
-		payload.CategoryID = catID
-		payload.Intervenant = intervenantName
-		payload.ValidationStatus = "pending"
-		payload.Status = allowedStatus
-		payload.PricingType = pricingType
-		payload.RejectionComment = ""
-		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, catName, startAt, endAt, createdAt, updatedAt))
-
-	case http.MethodDelete:
-		result, err := db.Exec(`DELETE FROM events WHERE id = $1`, id)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not delete event")
-			return
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			writeError(w, http.StatusNotFound, "event not found")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
