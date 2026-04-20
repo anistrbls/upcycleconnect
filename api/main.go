@@ -1259,6 +1259,43 @@ func ensureEventsSchema() error {
 	return nil
 }
 
+func publicEventsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	typeFilter := normalizeEventType(strings.TrimSpace(r.URL.Query().Get("type")))
+
+	rows, err := db.Query(`
+		SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+		FROM events e
+		LEFT JOIN event_categories c ON c.id = e.category_id
+		WHERE e.validation_status = 'approved'
+		AND e.status = 'planifie'
+		AND e.date_fin > NOW()
+		AND ($1 = '' OR e.type = $1)
+		ORDER BY e.date_debut ASC
+	`, typeFilter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list events")
+		return
+	}
+	defer rows.Close()
+
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		item, err := scanEventRow(rows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse events")
+			return
+		}
+		items = append(items, item)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
 func eventsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
