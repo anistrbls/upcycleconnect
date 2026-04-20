@@ -266,6 +266,8 @@ func main() {
 	log.Println("✓ Salarie contents schema initialized")
 	mux.Handle("/api/salarie/contents", authMiddleware(http.HandlerFunc(salarieContentsHandler)))
 	mux.Handle("/api/salarie/contents/feed", authMiddleware(http.HandlerFunc(salarieContentsFeedHandler)))
+	mux.Handle("/api/salarie/contents/like/", authMiddleware(http.HandlerFunc(salarieContentLikeHandler)))
+	mux.Handle("/api/salarie/contents/favorite/", authMiddleware(http.HandlerFunc(salarieContentFavoriteHandler)))
 	mux.Handle("/api/salarie/contents/", authMiddleware(http.HandlerFunc(salarieContentByIDHandler)))
 	mux.Handle("/api/admin/salarie-contents", authMiddleware(http.HandlerFunc(adminSalarieContentsHandler)))
 	mux.Handle("/api/admin/salarie-contents/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +280,12 @@ func main() {
 			adminSalarieContentRejectHandler(w, r)
 			return
 		}
-		http.NotFound(w, r)
+		switch r.Method {
+		case http.MethodGet, http.MethodPut, http.MethodDelete:
+			adminSalarieContentByIDHandler(w, r)
+		default:
+			http.NotFound(w, r)
+		}
 	})))
 
 	port := getEnv("API_PORT", "8080")
@@ -2331,8 +2338,30 @@ func ensureSalarieContentsSchema() error {
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`ALTER TABLE salarie_contents ADD COLUMN IF NOT EXISTS rejection_comment TEXT NOT NULL DEFAULT ''`)
-	return err
+	if _, err = db.Exec(`ALTER TABLE salarie_contents ADD COLUMN IF NOT EXISTS rejection_comment TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if _, err = db.Exec(`ALTER TABLE salarie_contents ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if _, err = db.Exec(`ALTER TABLE salarie_contents ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
+		return err
+	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS conseil_likes (
+		user_id    BIGINT NOT NULL,
+		content_id BIGINT NOT NULL,
+		PRIMARY KEY (user_id, content_id)
+	)`); err != nil {
+		return err
+	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS conseil_favorites (
+		user_id    BIGINT NOT NULL,
+		content_id BIGINT NOT NULL,
+		PRIMARY KEY (user_id, content_id)
+	)`); err != nil {
+		return err
+	}
+	return nil
 }
 
 func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
@@ -2453,19 +2482,47 @@ func salarieContentsFeedHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	// Identifier l'utilisateur courant pour marquer ses propres conseils
+	// Identifier l'utilisateur courant
 	var callerUserID int64
 	if claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims); ok {
 		email, _ := claims["sub"].(string)
 		db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&callerUserID)
 	}
-	rows, err := db.Query(`
-		SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.title, sc.body, sc.created_at
-		FROM salarie_contents sc
-		JOIN users u ON u.id = sc.user_id
-		WHERE sc.type = 'conseil' AND sc.status = 'publie'
-		ORDER BY sc.created_at DESC
-	`)
+
+	favoritesOnly := r.URL.Query().Get("favorites") == "true"
+
+	var query string
+	var args []interface{}
+	if favoritesOnly && callerUserID != 0 {
+		query = `
+			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.title, sc.body, sc.image_url, sc.is_pinned, sc.created_at,
+			       (SELECT COUNT(*) FROM conseil_likes cl WHERE cl.content_id = sc.id) AS like_count,
+			       (SELECT COUNT(*) FROM conseil_favorites cf WHERE cf.content_id = sc.id) AS favorite_count,
+			       EXISTS(SELECT 1 FROM conseil_likes cl2 WHERE cl2.content_id = sc.id AND cl2.user_id = $1) AS liked_by_me,
+			       TRUE AS favorited_by_me
+			FROM salarie_contents sc
+			JOIN users u ON u.id = sc.user_id
+			JOIN conseil_favorites fav ON fav.content_id = sc.id AND fav.user_id = $1
+			WHERE sc.type = 'conseil' AND sc.status = 'publie'
+			ORDER BY sc.is_pinned DESC, sc.created_at DESC
+		`
+		args = []interface{}{callerUserID}
+	} else {
+		query = `
+			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.title, sc.body, sc.image_url, sc.is_pinned, sc.created_at,
+			       (SELECT COUNT(*) FROM conseil_likes cl WHERE cl.content_id = sc.id) AS like_count,
+			       (SELECT COUNT(*) FROM conseil_favorites cf WHERE cf.content_id = sc.id) AS favorite_count,
+			       COALESCE((SELECT TRUE FROM conseil_likes cl2 WHERE cl2.content_id = sc.id AND cl2.user_id = $1), FALSE) AS liked_by_me,
+			       COALESCE((SELECT TRUE FROM conseil_favorites cf2 WHERE cf2.content_id = sc.id AND cf2.user_id = $1), FALSE) AS favorited_by_me
+			FROM salarie_contents sc
+			JOIN users u ON u.id = sc.user_id
+			WHERE sc.type = 'conseil' AND sc.status = 'publie'
+			ORDER BY sc.is_pinned DESC, sc.created_at DESC
+		`
+		args = []interface{}{callerUserID}
+	}
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load feed")
 		return
@@ -2474,23 +2531,98 @@ func salarieContentsFeedHandler(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]interface{}, 0)
 	for rows.Next() {
 		var id, userID int64
-		var firstname, lastname, title, body string
+		var firstname, lastname, title, body, imageURL string
+		var isPinned, likedByMe, favoritedByMe bool
+		var likeCount, favoriteCount int64
 		var createdAt time.Time
-		if err := rows.Scan(&id, &userID, &firstname, &lastname, &title, &body, &createdAt); err != nil {
+		if err := rows.Scan(&id, &userID, &firstname, &lastname, &title, &body, &imageURL, &isPinned, &createdAt,
+			&likeCount, &favoriteCount, &likedByMe, &favoritedByMe); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not parse feed item")
 			return
 		}
 		items = append(items, map[string]interface{}{
-			"id":         id,
-			"userId":     userID,
-			"authorName": strings.TrimSpace(firstname + " " + lastname),
-			"title":      title,
-			"body":       body,
-			"isOwn":      userID == callerUserID,
-			"createdAt":  createdAt.UTC().Format(time.RFC3339),
+			"id":            id,
+			"userId":        userID,
+			"authorName":    strings.TrimSpace(firstname + " " + lastname),
+			"title":         title,
+			"body":          body,
+			"imageUrl":      imageURL,
+			"isPinned":      isPinned,
+			"isOwn":         userID == callerUserID,
+			"likeCount":     likeCount,
+			"favoriteCount": favoriteCount,
+			"likedByMe":     likedByMe,
+			"favoritedByMe": favoritedByMe,
+			"createdAt":     createdAt.UTC().Format(time.RFC3339),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func salarieContentLikeHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/api/salarie/contents/like/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	email, _ := claims["sub"].(string)
+	var callerID int64
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&callerID); err != nil {
+		writeError(w, http.StatusInternalServerError, "user not found")
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		_, err = db.Exec(`INSERT INTO conseil_likes (user_id, content_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, callerID, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not like")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"liked": true})
+	case http.MethodDelete:
+		_, err = db.Exec(`DELETE FROM conseil_likes WHERE user_id = $1 AND content_id = $2`, callerID, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not unlike")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"liked": false})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func salarieContentFavoriteHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/api/salarie/contents/favorite/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	email, _ := claims["sub"].(string)
+	var callerID int64
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&callerID); err != nil {
+		writeError(w, http.StatusInternalServerError, "user not found")
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		_, err = db.Exec(`INSERT INTO conseil_favorites (user_id, content_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, callerID, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not favorite")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"favorited": true})
+	case http.MethodDelete:
+		_, err = db.Exec(`DELETE FROM conseil_favorites WHERE user_id = $1 AND content_id = $2`, callerID, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not unfavorite")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"favorited": false})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
@@ -2561,50 +2693,218 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
+	switch r.Method {
+	case http.MethodGet:
+		statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+		typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
 
-	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
-	typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
-
-	rows, err := db.Query(`
-		SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.created_at, sc.updated_at
-		FROM salarie_contents sc
-		JOIN users u ON u.id = sc.user_id
-		WHERE ($1 = '' OR sc.status = $1)
-		AND ($2 = '' OR sc.type = $2)
-		ORDER BY sc.created_at DESC
-	`, statusFilter, typeFilter)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list contents")
-		return
-	}
-	defer rows.Close()
-
-	items := make([]map[string]interface{}, 0)
-	for rows.Next() {
-		var id, userID int64
-		var firstname, lastname, contentType, title, body, status, rejectionComment string
-		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&id, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &createdAt, &updatedAt); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not parse content")
+		rows, err := db.Query(`
+			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.is_pinned, sc.created_at, sc.updated_at
+			FROM salarie_contents sc
+			JOIN users u ON u.id = sc.user_id
+			WHERE ($1 = '' OR sc.status = $1)
+			AND ($2 = '' OR sc.type = $2)
+			ORDER BY sc.is_pinned DESC, sc.created_at DESC
+		`, statusFilter, typeFilter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list contents")
 			return
 		}
-		items = append(items, map[string]interface{}{
-			"id": id, "userId": userID,
+		defer rows.Close()
+
+		items := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, userID int64
+			var firstname, lastname, contentType, title, body, status, rejectionComment, imageURL string
+			var isPinned bool
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &isPinned, &createdAt, &updatedAt); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse content")
+				return
+			}
+			items = append(items, map[string]interface{}{
+				"id": id, "userId": userID,
+				"authorName":       strings.TrimSpace(firstname + " " + lastname),
+				"type":             contentType,
+				"title":            title,
+				"body":             body,
+				"status":           status,
+				"rejectionComment": rejectionComment,
+				"imageUrl":         imageURL,
+				"isPinned":         isPinned,
+				"createdAt":        createdAt.UTC().Format(time.RFC3339),
+				"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+
+	case http.MethodPost:
+		// L'admin peut créer un conseil directement et le publier
+		claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+		email, _ := claims["sub"].(string)
+		var adminUserID int64
+		if err := db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&adminUserID); err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		var payload struct {
+			Type     string `json:"type"`
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			Status   string `json:"status"`
+			ImageURL string `json:"imageUrl"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if payload.Type == "" {
+			payload.Type = "conseil"
+		}
+		if payload.Type != "conseil" && payload.Type != "actualite" {
+			writeError(w, http.StatusBadRequest, "type must be 'conseil' or 'actualite'")
+			return
+		}
+		if strings.TrimSpace(payload.Title) == "" {
+			writeError(w, http.StatusBadRequest, "title is required")
+			return
+		}
+		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
+		if payload.Status == "" {
+			payload.Status = "brouillon"
+		}
+		if !validStatuses[payload.Status] {
+			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+		var id int64
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			INSERT INTO salarie_contents (user_id, type, title, body, status, image_url)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id, created_at, updated_at
+		`, adminUserID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, strings.TrimSpace(payload.ImageURL)).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create content")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "userId": adminUserID, "type": payload.Type,
+			"title": strings.TrimSpace(payload.Title), "body": strings.TrimSpace(payload.Body),
+			"status": payload.Status, "imageUrl": strings.TrimSpace(payload.ImageURL),
+			"isPinned":  false,
+			"createdAt": createdAt.UTC().Format(time.RFC3339),
+			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/api/admin/salarie-contents/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		var itemID, userID int64
+		var firstname, lastname, contentType, title, body, status, rejectionComment, imageURL string
+		var isPinned bool
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.is_pinned, sc.created_at, sc.updated_at
+			FROM salarie_contents sc
+			JOIN users u ON u.id = sc.user_id
+			WHERE sc.id = $1
+		`, id).Scan(&itemID, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &isPinned, &createdAt, &updatedAt)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not fetch content")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": itemID, "userId": userID,
 			"authorName":       strings.TrimSpace(firstname + " " + lastname),
 			"type":             contentType,
 			"title":            title,
 			"body":             body,
 			"status":           status,
 			"rejectionComment": rejectionComment,
+			"imageUrl":         imageURL,
+			"isPinned":         isPinned,
 			"createdAt":        createdAt.UTC().Format(time.RFC3339),
 			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 		})
+
+	case http.MethodPut:
+		var payload struct {
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			Status   string `json:"status"`
+			ImageURL string `json:"imageUrl"`
+			IsPinned *bool  `json:"isPinned"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if strings.TrimSpace(payload.Title) == "" {
+			writeError(w, http.StatusBadRequest, "title is required")
+			return
+		}
+		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
+		if !validStatuses[payload.Status] {
+			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+		pinned := false
+		if payload.IsPinned != nil {
+			pinned = *payload.IsPinned
+		}
+		var updatedAt time.Time
+		queryErr := db.QueryRow(`
+			UPDATE salarie_contents
+			SET title = $1, body = $2, status = $3, image_url = $4, is_pinned = $5,
+			    rejection_comment = CASE WHEN $3 IN ('publie', 'en_attente') THEN '' ELSE rejection_comment END,
+			    updated_at = NOW()
+			WHERE id = $6
+			RETURNING updated_at
+		`, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, strings.TrimSpace(payload.ImageURL), pinned, id).Scan(&updatedAt)
+		if queryErr != nil {
+			if queryErr == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not update content")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": id, "status": payload.Status, "isPinned": pinned,
+			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodDelete:
+		result, err := db.Exec(`DELETE FROM salarie_contents WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete content")
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			writeError(w, http.StatusNotFound, "content not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 }
 
 func adminSalarieContentValidateHandler(w http.ResponseWriter, r *http.Request) {

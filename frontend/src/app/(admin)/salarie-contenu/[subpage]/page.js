@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from "react";
 import SalarieContenuView from "../../../components/salarie/SalarieContenuView";
 import SalarieConseilFeedView from "../../../components/salarie/SalarieConseilFeedView";
+import ParticulierConseilFeedView from "../../../components/particulier/ParticulierConseilFeedView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
@@ -29,8 +30,8 @@ export default function SalarieContenuPage({ params }) {
         try {
             const [ownRes, feedRes] = await Promise.all([
                 fetch(apiUrl("/salarie/contents"), { headers: buildAuthHeaders() }),
-                subpage === "conseils"
-                    ? fetch(apiUrl("/salarie/contents/feed"), { headers: buildAuthHeaders() })
+                (subpage === "conseils" || subpage === "favoris")
+                    ? fetch(apiUrl(`/salarie/contents/feed${subpage === "favoris" ? "?favorites=true" : ""}`), { headers: buildAuthHeaders() })
                     : Promise.resolve(null),
             ]);
             if (ownRes.ok) { const d = await ownRes.json(); setContents(d.items || []); }
@@ -87,16 +88,29 @@ export default function SalarieContenuPage({ params }) {
         );
     }
 
-    if (subpage === "actualites") {
+    if (subpage === "brouillons") {
+        const drafts = contents.filter((i) => i.type === "conseil" && i.status === "brouillon");
         return (
-            <SalarieContenuView
-                contents={contents}
+            <SalarieConseilFeedView
+                feedItems={[]}
+                ownItems={drafts}
                 loading={loading}
                 errorMessage={error}
-                type="actualite"
                 onCreate={handleCreate}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
+                draftOnly
+            />
+        );
+    }
+
+    if (subpage === "favoris") {
+        return (
+            <ParticulierConseilFeedView
+                feedItems={feedItems}
+                loading={loading}
+                errorMessage={error}
+                favoritesOnly
             />
         );
     }

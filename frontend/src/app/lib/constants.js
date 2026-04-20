@@ -98,6 +98,16 @@ export const NAV_MODULES = [
         ],
     },
     {
+        key: "conseils",
+        label: "Conseils",
+        shortLabel: "Conseils",
+        icon: "M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z",
+        subNav: [
+            { key: "tous-conseils", label: "Tous les conseils", shortLabel: "Tous" },
+            { key: "en-attente", label: "En attente", shortLabel: "En attente" },
+        ],
+    },
+    {
         key: "finances",
         label: "Finances",
         shortLabel: "Finances",
@@ -209,7 +219,8 @@ export const SALARIE_MODULES = [
         icon: "M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z",
         subNav: [
             { key: "conseils", label: "Conseils", shortLabel: "Conseils" },
-            { key: "actualites", label: "Actualités", shortLabel: "Actualités" },
+            { key: "brouillons", label: "Brouillons", shortLabel: "Brouillons" },
+            { key: "favoris", label: "Favoris", shortLabel: "Favoris" },
         ],
     },
     {
@@ -261,6 +272,16 @@ export const PARTICULIER_MODULES = [
         icon: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z",
         subNav: [
             { key: "agenda", label: "Agenda", shortLabel: "Agenda" },
+        ],
+    },
+    {
+        key: "conseils",
+        label: "Conseils",
+        shortLabel: "Conseils",
+        icon: "M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z",
+        subNav: [
+            { key: "tous-conseils", label: "Tous les conseils", shortLabel: "Conseils" },
+            { key: "favoris", label: "Mes favoris", shortLabel: "Favoris" },
         ],
     },
 ];
