@@ -134,6 +134,28 @@ func RegisterLogisticsRoutes(mux *http.ServeMux, repo *Repository, authMiddlewar
 			writeError(w, http.StatusBadRequest, "reserved_by_name is required")
 			return
 		}
+		if p.ReservedByUserID == nil {
+			lookup := strings.TrimSpace(p.ReservedByName)
+			if lookup != "" {
+				var proID int64
+				err := repo.db.QueryRow(
+					`SELECT id
+					 FROM users
+					 WHERE role = 'professionnel'
+					   AND (
+					       LOWER(TRIM(COALESCE(firstname, '') || ' ' || COALESCE(lastname, ''))) = LOWER(TRIM($1))
+					       OR LOWER(TRIM(COALESCE(company_name, ''))) = LOWER(TRIM($1))
+					       OR LOWER(TRIM(email)) = LOWER(TRIM($1))
+					   )
+					 ORDER BY id ASC
+					 LIMIT 1`,
+					lookup,
+				).Scan(&proID)
+				if err == nil {
+					p.ReservedByUserID = &proID
+				}
+			}
+		}
 		pickupCode, err := repo.ReserveItem(r.Context(), itemID, p)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -171,6 +193,17 @@ func RegisterLogisticsRoutes(mux *http.ServeMux, repo *Repository, authMiddlewar
 		var p CancelPayload
 		json.NewDecoder(r.Body).Decode(&p)
 		if err := repo.CancelLogistics(r.Context(), itemID, p.Reason, p.RevertToStatus); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		l, _ := repo.GetLogisticsByItemID(r.Context(), itemID)
+		writeJSON(w, http.StatusOK, l)
+	}))
+
+	// POST /api/admin/logistics/{item_id}/undo-cancel — Restore previous status after total cancellation
+	mux.Handle("POST /api/admin/logistics/{item_id}/undo-cancel", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		itemID, _ := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err := repo.UndoCancelledLogistics(r.Context(), itemID); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

@@ -23,16 +23,17 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 		}))
 	}
 
-	getProfessionalUser := func(r *http.Request) (int64, string, error) {
+	getProfessionalUser := func(r *http.Request) (int64, string, string, error) {
 		claims := r.Context().Value("authClaims").(jwt.MapClaims)
 		email := claims["sub"].(string)
 		var userID int64
 		var displayName string
+		var companyName string
 		err := repo.db.QueryRow(
-			"SELECT id, TRIM(COALESCE(firstname, '') || ' ' || COALESCE(lastname, '')) FROM users WHERE email = $1",
+			"SELECT id, TRIM(COALESCE(firstname, '') || ' ' || COALESCE(lastname, '')), TRIM(COALESCE(company_name, '')) FROM users WHERE email = $1",
 			email,
-		).Scan(&userID, &displayName)
-		return userID, displayName, err
+		).Scan(&userID, &displayName, &companyName)
+		return userID, displayName, companyName, err
 	}
 
 	mux.Handle("GET /api/pro/items", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +52,7 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			return
 		}
 
-		userID, _, err := getProfessionalUser(r)
+		userID, _, _, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
 			return
@@ -72,7 +73,7 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			return
 		}
 
-		userID, displayName, err := getProfessionalUser(r)
+		userID, displayName, _, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
 			return
@@ -97,7 +98,7 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			writeError(w, http.StatusBadRequest, "invalid item id")
 			return
 		}
-		userID, _, err := getProfessionalUser(r)
+		userID, _, _, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
 			return
@@ -140,17 +141,86 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 		})
 	}))
 
+	mux.Handle("POST /api/pro/stripe/confirm-session", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		userID, _, _, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+
+		var payload struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		if strings.TrimSpace(payload.SessionID) == "" {
+			writeError(w, http.StatusBadRequest, "session_id is required")
+			return
+		}
+
+		cfg, err := getStripeConfig()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+			return
+		}
+
+		session, err := fetchStripeCheckoutSession(cfg, payload.SessionID)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "could not fetch checkout session")
+			return
+		}
+
+		itemID, err := strconv.ParseInt(strings.TrimSpace(session.Metadata["item_id"]), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid stripe metadata")
+			return
+		}
+		sessionUserID, err := strconv.ParseInt(strings.TrimSpace(session.Metadata["user_id"]), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid stripe metadata")
+			return
+		}
+		if sessionUserID != userID {
+			writeError(w, http.StatusForbidden, "reservation does not belong to this user")
+			return
+		}
+
+		isPaid := strings.EqualFold(strings.TrimSpace(session.PaymentStatus), "paid") || strings.EqualFold(strings.TrimSpace(session.Status), "complete")
+		if !isPaid {
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"confirmed":      false,
+				"session_status": session.Status,
+				"payment_status": session.PaymentStatus,
+			})
+			return
+		}
+
+		_, err = repo.ValidateStripePaymentByProfessional(r.Context(), itemID, userID, strings.TrimSpace(session.PaymentIntent), strings.TrimSpace(session.ID))
+		if err != nil {
+			if err == sql.ErrNoRows || strings.Contains(err.Error(), `cannot validate payment from status "reserved"`) || strings.Contains(err.Error(), `cannot validate payment from status "picked_up"`) {
+				writeJSON(w, http.StatusOK, map[string]any{"confirmed": true, "already_confirmed": true})
+				return
+			}
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"confirmed": true})
+	}))
+
 	mux.Handle("POST /api/pro/items/{item_id}/pay", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "endpoint removed: use checkout-session")
 	}))
 
 	mux.Handle("GET /api/pro/my-reservations", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
-		userID, _, err := getProfessionalUser(r)
+		userID, displayName, companyName, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
 			return
 		}
-		items, err := repo.GetProfessionalReservations(r.Context(), userID)
+		items, err := repo.GetProfessionalReservations(r.Context(), userID, displayName, companyName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list reservations")
 			return
@@ -159,7 +229,7 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 	}))
 
 	mux.Handle("GET /api/pro/watchlist", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
-		userID, _, err := getProfessionalUser(r)
+		userID, _, _, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
 			return
@@ -178,7 +248,7 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			writeError(w, http.StatusBadRequest, "invalid item id")
 			return
 		}
-		userID, _, err := getProfessionalUser(r)
+		userID, _, _, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
 			return
@@ -200,7 +270,7 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			writeError(w, http.StatusBadRequest, "invalid item id")
 			return
 		}
-		userID, _, err := getProfessionalUser(r)
+		userID, _, _, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
 			return

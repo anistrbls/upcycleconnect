@@ -23,6 +23,9 @@ type Item struct {
 	Condition    string    `json:"condition"`
 	Material     string    `json:"material"`
 	Quantity     string    `json:"quantity"`
+	WeightValue  *float64  `json:"weightValue,omitempty"`
+	WeightUnit   string    `json:"weightUnit,omitempty"`
+	WeightGrams  *float64  `json:"weightGrams,omitempty"`
 	City         string    `json:"city"`
 	Country      string    `json:"country"`
 	Zip          string    `json:"zip"`
@@ -63,6 +66,9 @@ type CreatePayload struct {
 	Condition    string   `json:"condition"`
 	Material     string   `json:"material"`
 	Quantity     string   `json:"quantity"`
+	WeightValue  *float64 `json:"weightValue"`
+	WeightUnit   string   `json:"weightUnit"`
+	WeightGrams  *float64 `json:"-"`
 	City         string   `json:"city"`
 	Country      string   `json:"country"`
 	Zip          string   `json:"zip"`

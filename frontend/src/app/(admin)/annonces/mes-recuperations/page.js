@@ -302,6 +302,45 @@ export default function MyRecoveriesPage() {
         fetchReservations();
     }, []);
 
+    const stripeState = (searchParams?.get("stripe") || "").toLowerCase();
+    const stripeSessionId = (searchParams?.get("session_id") || "").trim();
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const confirmStripeSession = async () => {
+            if (stripeState !== "success" || !stripeSessionId) return;
+
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+                try {
+                    const res = await fetch(apiUrl("/pro/stripe/confirm-session"), {
+                        method: "POST",
+                        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                        body: JSON.stringify({ session_id: stripeSessionId }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok && data.confirmed) break;
+                } catch {
+                    // Ignore transient network/API errors while polling.
+                }
+
+                if (attempt < 4) {
+                    await new Promise((resolve) => setTimeout(resolve, 1500));
+                }
+            }
+
+            if (!cancelled) {
+                fetchReservations();
+            }
+        };
+
+        confirmStripeSession();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [stripeState, stripeSessionId]);
+
     const grouped = useMemo(() => {
         const groups = { pending_payment: [], reserved: [], picked_up: [] };
         for (const item of items) {
@@ -312,7 +351,6 @@ export default function MyRecoveriesPage() {
         return groups;
     }, [items]);
 
-    const stripeState = (searchParams?.get("stripe") || "").toLowerCase();
     const paymentNotice =
         stripeState === "success"
             ? { text: "Paiement confirmé. Vérification en cours du statut de réservation.", tone: "success" }

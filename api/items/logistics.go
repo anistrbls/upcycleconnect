@@ -123,6 +123,8 @@ func (r *Repository) EnsureLogisticsSchema() error {
 			picked_up_at             TIMESTAMPTZ,
 			cancelled_at             TIMESTAMPTZ,
 			cancel_reason            TEXT NOT NULL DEFAULT '',
+			previous_workflow_status TEXT NOT NULL DEFAULT '',
+			cancelled_by_user        BOOLEAN NOT NULL DEFAULT false,
 			created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
@@ -137,6 +139,8 @@ func (r *Repository) EnsureLogisticsSchema() error {
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_currency TEXT NOT NULL DEFAULT 'eur'`,
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_last_error TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_paid_at TIMESTAMPTZ`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS previous_workflow_status TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS cancelled_by_user BOOLEAN NOT NULL DEFAULT false`,
 		`CREATE TABLE IF NOT EXISTS stripe_webhook_events (
 			event_id TEXT PRIMARY KEY,
 			event_type TEXT NOT NULL,
@@ -333,6 +337,9 @@ type ProfessionalItem struct {
 	Condition          string  `json:"condition"`
 	Material           string  `json:"material"`
 	Quantity           string  `json:"quantity"`
+	WeightValue        *float64 `json:"weightValue,omitempty"`
+	WeightUnit         string  `json:"weightUnit,omitempty"`
+	WeightGrams        *float64 `json:"weightGrams,omitempty"`
 	City               string  `json:"city"`
 	Country            string  `json:"country"`
 	Image              string  `json:"image"`
@@ -359,7 +366,7 @@ func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]Prof
 
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material,
-		        i.quantity, i.city, i.country, i.image, i.photos,
+		        i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.image, i.photos,
 		        l.workflow_status,
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
 		        COALESCE(dp.address, ''), COALESCE(dp.zip_code, ''), COALESCE(dp.city, ''), COALESCE(dp.country, ''),
@@ -378,15 +385,25 @@ func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]Prof
 	var results []ProfessionalItem
 	for rows.Next() {
 		var it ProfessionalItem
+		var weightValue sql.NullFloat64
+		var weightGrams sql.NullFloat64
 		if err := rows.Scan(
 			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material,
-			&it.Quantity, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
+			&it.Quantity, &weightValue, &it.WeightUnit, &weightGrams, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
 			&it.WorkflowStatus,
 			&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
 			&it.DepositPointAddress, &it.DepositPointZipCode, &it.DepositPointCity, &it.DepositPointCountry,
 			&it.ContainerName, &it.AvailableAt, &it.StripePaymentStatus,
 		); err != nil {
 			return nil, err
+		}
+		if weightValue.Valid {
+			v := weightValue.Float64
+			it.WeightValue = &v
+		}
+		if weightGrams.Valid {
+			g := weightGrams.Float64
+			it.WeightGrams = &g
 		}
 		results = append(results, it)
 	}
@@ -401,9 +418,11 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 
 	var it ProfessionalItem
 	var reservedByUserID *int64
+	var weightValue sql.NullFloat64
+	var weightGrams sql.NullFloat64
 	err := r.db.QueryRowContext(ctx,
 		`SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material,
-		        i.quantity, i.city, i.country, i.image, i.photos,
+		        i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.image, i.photos,
 		        l.workflow_status,
 		        COALESCE(l.transaction_ref, ''),
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
@@ -418,7 +437,7 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 		itemID,
 	).Scan(
 		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material,
-		&it.Quantity, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
+		&it.Quantity, &weightValue, &it.WeightUnit, &weightGrams, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
 		&it.WorkflowStatus,
 		&it.TransactionRef,
 		&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
@@ -428,6 +447,14 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 	)
 	if err != nil {
 		return nil, err
+	}
+	if weightValue.Valid {
+		v := weightValue.Float64
+		it.WeightValue = &v
+	}
+	if weightGrams.Valid {
+		g := weightGrams.Float64
+		it.WeightGrams = &g
 	}
 
 	if it.WorkflowStatus != WFAvailable {
@@ -443,12 +470,15 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 	return &it, nil
 }
 
-func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int64) ([]ProfessionalItem, error) {
+func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int64, displayName, companyName string) ([]ProfessionalItem, error) {
 	r.releaseExpiredReservations(ctx)
+
+	normalizedName := strings.TrimSpace(displayName)
+	normalizedCompany := strings.TrimSpace(companyName)
 
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material,
-		        i.quantity, i.city, i.country, i.image, i.photos,
+		        i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.image, i.photos,
 		        l.workflow_status,
 		        COALESCE(l.transaction_ref, ''),
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
@@ -459,10 +489,20 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 		 JOIN items i ON i.id = l.item_id
 		 LEFT JOIN deposit_points dp ON dp.id = l.deposit_point_id
 		 LEFT JOIN containers ct ON ct.id = l.container_id
-		 WHERE l.reserved_by_user_id = $1
-		   AND l.workflow_status IN ('pending_payment', 'reserved', 'picked_up')
+		 WHERE l.workflow_status IN ('pending_payment', 'reserved', 'picked_up')
+		   AND (
+		        l.reserved_by_user_id = $1
+		        OR (
+		            l.workflow_status = 'picked_up'
+		            AND l.reserved_by_user_id IS NULL
+		            AND (
+		                ($2 <> '' AND LOWER(TRIM(l.reserved_by_name)) = LOWER(TRIM($2)))
+		                OR ($3 <> '' AND LOWER(TRIM(l.reserved_by_name)) = LOWER(TRIM($3)))
+		            )
+		        )
+		   )
 		 ORDER BY l.updated_at DESC`,
-		userID,
+		userID, normalizedName, normalizedCompany,
 	)
 	if err != nil {
 		return nil, err
@@ -472,9 +512,11 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 	var results []ProfessionalItem
 	for rows.Next() {
 		var it ProfessionalItem
+		var weightValue sql.NullFloat64
+		var weightGrams sql.NullFloat64
 		if err := rows.Scan(
 			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material,
-			&it.Quantity, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
+			&it.Quantity, &weightValue, &it.WeightUnit, &weightGrams, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
 			&it.WorkflowStatus,
 			&it.TransactionRef,
 			&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
@@ -483,6 +525,14 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 			&it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &it.PaymentValidatedAt,
 		); err != nil {
 			return nil, err
+		}
+		if weightValue.Valid {
+			v := weightValue.Float64
+			it.WeightValue = &v
+		}
+		if weightGrams.Valid {
+			g := weightGrams.Float64
+			it.WeightGrams = &g
 		}
 		results = append(results, it)
 	}
@@ -1221,7 +1271,34 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
 
-	if status == WFPickedUp || status == WFCancelled {
+	if status == WFPickedUp {
+		return fmt.Errorf("cannot cancel/revert from status %q", status)
+	}
+
+	if revertTo == "moderation_pending" {
+		if status == WFCancelled {
+			if _, err := r.db.ExecContext(ctx, `DELETE FROM item_logistics WHERE item_id = $1`, itemID); err != nil {
+				return err
+			}
+		} else {
+			if err := r.ResetLogisticsForModeration(ctx, itemID); err != nil {
+				return err
+			}
+		}
+
+		_, err = r.db.ExecContext(ctx, `
+			UPDATE items
+			SET status = 'en attente',
+			    moderation_note = '',
+			    moderation_details = '',
+			    moderated_at = NULL,
+			    updated_at = NOW()
+			WHERE id = $1
+		`, itemID)
+		return err
+	}
+
+	if status == WFCancelled {
 		return fmt.Errorf("cannot cancel/revert from status %q", status)
 	}
 
@@ -1229,7 +1306,16 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 		isPostDeposit := (status == WFDeposited || status == WFAvailable || status == WFPendingPayment || status == WFReserved)
 		targetIsPreDeposit := (revertTo == WFValidated || revertTo == WFAssigned || revertTo == WFDepositCodeSent || revertTo == WFDepositExpired)
 
-		_, err = r.db.ExecContext(ctx, `UPDATE item_logistics SET workflow_status = $1, updated_at = NOW() WHERE item_id = $2`, revertTo, itemID)
+		_, err = r.db.ExecContext(ctx, `
+			UPDATE item_logistics
+			SET workflow_status = $1,
+				previous_workflow_status = '',
+				cancelled_at = NULL,
+				cancel_reason = '',
+				cancelled_by_user = false,
+				updated_at = NOW()
+			WHERE item_id = $2
+		`, revertTo, itemID)
 		
 		if isPostDeposit && targetIsPreDeposit && wasDeposited && containerID != nil {
 			r.db.ExecContext(ctx, `UPDATE containers SET current_count = GREATEST(current_count - 1, 0) WHERE id = $1`, *containerID)
@@ -1242,8 +1328,9 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 	now := time.Now()
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE item_logistics SET
+			previous_workflow_status = workflow_status,
 			workflow_status = 'cancelled',
-			cancelled_at = $1, cancel_reason = $2, updated_at = $1
+			cancelled_at = $1, cancel_reason = $2, cancelled_by_user = false, updated_at = $1
 		 WHERE item_id = $3`,
 		now, reason, itemID,
 	)
@@ -1254,6 +1341,73 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 	// If the item was physically deposited, decrement container count
 	if wasDeposited && containerID != nil {
 		r.db.ExecContext(ctx, `UPDATE containers SET current_count = GREATEST(current_count - 1, 0) WHERE id = $1`, *containerID)
+		r.UpdateContainerCounts(ctx, *containerID)
+	}
+
+	return nil
+}
+
+func isPostDepositWorkflowStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case WFDeposited, WFAvailable, WFPendingPayment, WFReserved:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *Repository) UndoCancelledLogistics(ctx context.Context, itemID int64) error {
+	var status string
+	var previousStatus string
+	var containerID *int64
+	var wasDeposited bool
+
+	err := r.db.QueryRowContext(ctx,
+		`SELECT workflow_status, COALESCE(previous_workflow_status, ''), container_id, (deposited_at IS NOT NULL)
+		 FROM item_logistics
+		 WHERE item_id = $1`,
+		itemID,
+	).Scan(&status, &previousStatus, &containerID, &wasDeposited)
+	if err != nil {
+		return fmt.Errorf("item not in logistics: %w", err)
+	}
+
+	if status != WFCancelled {
+		return fmt.Errorf("item is not cancelled")
+	}
+	if strings.TrimSpace(previousStatus) == "" {
+		if _, err := r.db.ExecContext(ctx, `DELETE FROM item_logistics WHERE item_id = $1`, itemID); err != nil {
+			return err
+		}
+		_, err = r.db.ExecContext(ctx, `
+			UPDATE items
+			SET status = 'en attente',
+			    moderation_note = '',
+			    moderation_details = '',
+			    moderated_at = NULL,
+			    updated_at = NOW()
+			WHERE id = $1
+		`, itemID)
+		return err
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE item_logistics
+		 SET workflow_status = $1,
+		     previous_workflow_status = '',
+		     cancelled_at = NULL,
+		     cancel_reason = '',
+		     cancelled_by_user = false,
+		     updated_at = NOW()
+		 WHERE item_id = $2`,
+		previousStatus, itemID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if wasDeposited && containerID != nil && isPostDepositWorkflowStatus(previousStatus) {
+		r.db.ExecContext(ctx, `UPDATE containers SET current_count = current_count + 1 WHERE id = $1`, *containerID)
 		r.UpdateContainerCounts(ctx, *containerID)
 	}
 

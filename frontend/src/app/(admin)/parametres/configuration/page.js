@@ -151,6 +151,73 @@ function ConditionRow({ cond, onSave, onDelete }) {
     );
 }
 
+function MaterialRow({ material, onSave, onDelete }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState({
+        label: material.label,
+        impactCoefficient: String(material.impactCoefficient ?? 1),
+    });
+    const [saving, setSaving] = useState(false);
+
+    const commit = async () => {
+        const label = draft.label.trim();
+        if (!label) return;
+        const parsed = Number.parseFloat(String(draft.impactCoefficient).replace(",", "."));
+        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1000) return;
+        setSaving(true);
+        await onSave({ ...material, label, impactCoefficient: parsed });
+        setSaving(false);
+        setEditing(false);
+    };
+
+    const cancel = () => {
+        setDraft({
+            label: material.label,
+            impactCoefficient: String(material.impactCoefficient ?? 1),
+        });
+        setEditing(false);
+    };
+
+    return (
+        <div style={rowStyle}>
+            <span style={gripStyle}><GripVertical size={16} /></span>
+            {editing ? (
+                <>
+                    <input
+                        autoFocus
+                        value={draft.label}
+                        onChange={e => setDraft(d => ({ ...d, label: e.target.value }))}
+                        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
+                        style={{ ...textInput, flex: 1 }}
+                    />
+                    <input
+                        type="number"
+                        min="0.001"
+                        max="1000"
+                        step="0.001"
+                        value={draft.impactCoefficient}
+                        onChange={e => setDraft(d => ({ ...d, impactCoefficient: e.target.value }))}
+                        style={{ ...textInput, width: "90px", textAlign: "right" }}
+                    />
+                    <button onClick={commit} disabled={saving} style={{ ...iconBtn, background: "var(--forest-deep)", color: "white" }}>
+                        {saving ? <Loader2 size={14} style={spinStyle} /> : <Check size={14} />}
+                    </button>
+                    <button onClick={cancel} style={iconBtn}><X size={14} /></button>
+                </>
+            ) : (
+                <>
+                    <span style={{ flex: 1, fontSize: "0.92rem", fontWeight: "500" }}>{material.label}</span>
+                    <span style={{ fontSize: "0.82rem", color: "var(--text-main)", background: "rgba(35,59,61,0.08)", padding: "3px 9px", borderRadius: "12px", fontWeight: "600" }}>
+                        coeff. {Number(material.impactCoefficient ?? 1).toFixed(2)}
+                    </span>
+                    <button onClick={() => setEditing(true)} style={iconBtn}><Pencil size={14} /></button>
+                    <button onClick={() => onDelete(material.id)} style={{ ...iconBtn, color: "var(--state-critical)" }}><Trash2 size={14} /></button>
+                </>
+            )}
+        </div>
+    );
+}
+
 // ── Styles partagés ───────────────────────────────────────────────────────────
 const rowStyle = { display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", background: "#FFFFFF", borderRadius: "16px", transition: "box-shadow 0.15s ease" };
 const gripStyle = { color: "var(--text-muted)", opacity: 0.35, cursor: "grab", flexShrink: 0 };
@@ -317,7 +384,7 @@ export default function ConfigurationPage() {
     const [materials, setMaterials] = useState([]);
     const [matLoading, setMatLoading] = useState(true);
     const [addMatModal, setAddMatModal] = useState(false);
-    const [newMat, setNewMat] = useState({ label: "" });
+    const [newMat, setNewMat] = useState({ label: "", impactCoefficient: "1" });
     const [addingMat, setAddingMat] = useState(false);
 
     // Pays
@@ -489,7 +556,7 @@ export default function ConfigurationPage() {
     // ── CRUD matériaux
     const handleSaveMat = async (updated) => {
         try {
-            const res = await fetch(apiUrl(`/admin/item-materials/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label }) });
+            const res = await fetch(apiUrl(`/admin/item-materials/${updated.id}`), { method: "PUT", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: updated.label, impactCoefficient: updated.impactCoefficient }) });
             if (!res.ok) throw new Error((await res.json()).error || "");
             const saved = await res.json();
             setMaterials(prev => prev.map(m => m.id === saved.id ? saved : m));
@@ -506,13 +573,18 @@ export default function ConfigurationPage() {
     };
     const handleAddMat = async () => {
         if (!newMat.label.trim()) return;
+        const parsed = Number.parseFloat(String(newMat.impactCoefficient).replace(",", "."));
+        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1000) {
+            showToast("Coefficient invalide (0 < coeff <= 1000).", "error");
+            return;
+        }
         setAddingMat(true);
         try {
-            const res = await fetch(apiUrl("/admin/item-materials"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newMat.label.trim() }) });
+            const res = await fetch(apiUrl("/admin/item-materials"), { method: "POST", headers: buildAuthHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ label: newMat.label.trim(), impactCoefficient: parsed }) });
             if (!res.ok) throw new Error((await res.json()).error || "");
             const created = await res.json();
             setMaterials(prev => [...prev, created]);
-            setNewMat({ label: "" });
+            setNewMat({ label: "", impactCoefficient: "1" });
             setAddMatModal(false);
             showToast("Matériau ajouté.");
         } catch (e) { showToast(e.message === "material label already exists" ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
@@ -655,7 +727,7 @@ export default function ConfigurationPage() {
                     icon={Layers} title="Matériaux des objets" addLabel="Nouveau matériau"
                     count={materials.length} loading={matLoading} onAdd={() => setAddMatModal(true)}
                 >
-                    {materials.map(mat => <ConditionRow key={mat.id} cond={mat} onSave={handleSaveMat} onDelete={handleDeleteMat} />)}
+                    {materials.map(mat => <MaterialRow key={mat.id} material={mat} onSave={handleSaveMat} onDelete={handleDeleteMat} />)}
                 </ConfigSection>
 
                 {/* ── Pays supportés ── */}
@@ -728,15 +800,21 @@ export default function ConfigurationPage() {
             </AdminModal>
 
             {/* ── Modal ajout matériau ── */}
-            <AdminModal open={addMatModal} title="Nouveau matériau" onClose={() => { setAddMatModal(false); setNewMat({ label: "" }); }}>
+            <AdminModal open={addMatModal} title="Nouveau matériau" onClose={() => { setAddMatModal(false); setNewMat({ label: "", impactCoefficient: "1" }); }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                         <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Libellé *</label>
-                        <input autoFocus placeholder="Ex : Bambou, Aluminium..." value={newMat.label} onChange={e => setNewMat({ label: e.target.value })} onKeyDown={e => { if (e.key === "Enter") handleAddMat(); }}
+                        <input autoFocus placeholder="Ex : Bambou, Aluminium..." value={newMat.label} onChange={e => setNewMat(d => ({ ...d, label: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") handleAddMat(); }}
                             style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
                     </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Coefficient d'impact *</label>
+                        <input type="number" min="0.001" max="1000" step="0.001" value={newMat.impactCoefficient} onChange={e => setNewMat(d => ({ ...d, impactCoefficient: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") handleAddMat(); }}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                        <span style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>Utilisé ensuite pour calculer le score: poids (kg) × coefficient.</span>
+                    </div>
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
-                        <button onClick={() => { setAddMatModal(false); setNewMat({ label: "" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={() => { setAddMatModal(false); setNewMat({ label: "", impactCoefficient: "1" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
                         <button onClick={handleAddMat} disabled={!newMat.label.trim() || addingMat}
                             style={{ border: "none", background: newMat.label.trim() ? "var(--black)" : "var(--border)", color: newMat.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newMat.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
                             {addingMat ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter

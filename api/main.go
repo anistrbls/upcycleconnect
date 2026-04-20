@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 
 	"upcycleconnect/api/items"
 	"upcycleconnect/api/pricing"
+	"upcycleconnect/api/projects"
 	"upcycleconnect/api/reservations"
 	"upcycleconnect/api/sirene"
 	"upcycleconnect/api/users"
@@ -211,6 +213,9 @@ func main() {
 
 	// Module reservations (dépend de users + services, doit venir après)
 	reservations.RegisterRoutes(mux, db, authMiddleware)
+
+	// Module projects (projets d'upcycling professionnels)
+	projects.RegisterRoutes(mux, db, authMiddleware)
 
 	// Module pricing
 	pricing.RegisterRoutes(mux, db, authMiddleware)
@@ -3365,7 +3370,29 @@ func itemConditionByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type itemMaterialPayload struct {
-	Label string `json:"label"`
+	Label             string   `json:"label"`
+	ImpactCoefficient *float64 `json:"impactCoefficient"`
+}
+
+const (
+	defaultMaterialImpactCoefficient = 1.0
+	maxMaterialImpactCoefficient     = 1000.0
+)
+
+func normalizeMaterialImpactCoefficient(v *float64) (float64, error) {
+	if v == nil {
+		return defaultMaterialImpactCoefficient, nil
+	}
+	if math.IsNaN(*v) || math.IsInf(*v, 0) {
+		return 0, fmt.Errorf("impactCoefficient must be numeric")
+	}
+	if *v <= 0 {
+		return 0, fmt.Errorf("impactCoefficient must be greater than 0")
+	}
+	if *v > maxMaterialImpactCoefficient {
+		return 0, fmt.Errorf("impactCoefficient exceeds maximum allowed")
+	}
+	return *v, nil
 }
 
 func ensureItemMaterialsSchema() error {
@@ -3373,10 +3400,13 @@ func ensureItemMaterialsSchema() error {
 		`CREATE TABLE IF NOT EXISTS item_materials (
 			id         BIGSERIAL PRIMARY KEY,
 			label      TEXT NOT NULL UNIQUE,
+			impact_coefficient NUMERIC(10,3) NOT NULL DEFAULT 1,
 			position   INT NOT NULL DEFAULT 0,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`ALTER TABLE item_materials ADD COLUMN IF NOT EXISTS impact_coefficient NUMERIC(10,3) NOT NULL DEFAULT 1`,
+		`UPDATE item_materials SET impact_coefficient = 1 WHERE impact_coefficient IS NULL OR impact_coefficient <= 0`,
 		`CREATE INDEX IF NOT EXISTS idx_item_materials_position ON item_materials(position)`,
 	}
 	for _, stmt := range statements {
@@ -3389,21 +3419,24 @@ func ensureItemMaterialsSchema() error {
 		return err
 	}
 	if count == 0 {
-		type seed struct{ label string }
+		type seed struct {
+			label       string
+			coefficient float64
+		}
 		defaults := []seed{
-			{"Bois"},
-			{"Métal"},
-			{"Verre"},
-			{"Plastique"},
-			{"Tissu"},
-			{"Céramique"},
-			{"Pierre"},
-			{"Cuir"},
+			{"Bois", 10},
+			{"Métal", 15},
+			{"Verre", 8},
+			{"Plastique", 6},
+			{"Tissu", 5},
+			{"Céramique", 7},
+			{"Pierre", 9},
+			{"Cuir", 6},
 		}
 		for i, d := range defaults {
 			if _, err := db.Exec(
-				`INSERT INTO item_materials (label, position) VALUES ($1, $2)`,
-				d.label, i,
+				`INSERT INTO item_materials (label, impact_coefficient, position) VALUES ($1, $2, $3)`,
+				d.label, d.coefficient, i,
 			); err != nil {
 				return err
 			}
@@ -3413,7 +3446,7 @@ func ensureItemMaterialsSchema() error {
 }
 
 func itemMaterialsPublicHandler(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`SELECT id, label FROM item_materials ORDER BY position ASC, id ASC`)
+	rows, err := db.Query(`SELECT id, label, impact_coefficient FROM item_materials ORDER BY position ASC, id ASC`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list item materials")
 		return
@@ -3423,11 +3456,12 @@ func itemMaterialsPublicHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id int64
 		var label string
-		if err := rows.Scan(&id, &label); err != nil {
+		var impactCoefficient float64
+		if err := rows.Scan(&id, &label, &impactCoefficient); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not parse item material")
 			return
 		}
-		result = append(result, map[string]interface{}{"id": id, "label": label})
+		result = append(result, map[string]interface{}{"id": id, "label": label, "impactCoefficient": impactCoefficient})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
 }
@@ -3440,7 +3474,7 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		rows, err := db.Query(`SELECT id, label, position, created_at, updated_at FROM item_materials ORDER BY position ASC, id ASC`)
+		rows, err := db.Query(`SELECT id, label, impact_coefficient, position, created_at, updated_at FROM item_materials ORDER BY position ASC, id ASC`)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list item materials")
 			return
@@ -3451,13 +3485,15 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 			var id int64
 			var pos int
 			var label string
+			var impactCoefficient float64
 			var createdAt, updatedAt time.Time
-			if err := rows.Scan(&id, &label, &pos, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &label, &impactCoefficient, &pos, &createdAt, &updatedAt); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse item material")
 				return
 			}
 			result = append(result, map[string]interface{}{
 				"id": id, "label": label,
+				"impactCoefficient": impactCoefficient,
 				"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
 			})
 		}
@@ -3474,13 +3510,18 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "label is required")
 			return
 		}
+		impactCoefficient, err := normalizeMaterialImpactCoefficient(payload.ImpactCoefficient)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		var id int64
 		var createdAt, updatedAt time.Time
 		err := db.QueryRow(`
-			INSERT INTO item_materials (label, position)
-			VALUES ($1, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_materials))
+			INSERT INTO item_materials (label, impact_coefficient, position)
+			VALUES ($1, $2, (SELECT COALESCE(MAX(position), -1) + 1 FROM item_materials))
 			RETURNING id, created_at, updated_at
-		`, label).Scan(&id, &createdAt, &updatedAt)
+		`, label, impactCoefficient).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "unique") {
 				writeError(w, http.StatusConflict, "material label already exists")
@@ -3493,6 +3534,7 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT position FROM item_materials WHERE id = $1`, id).Scan(&pos)
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": id, "label": label,
+			"impactCoefficient": impactCoefficient,
 			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
 
@@ -3524,11 +3566,16 @@ func itemMaterialByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "label is required")
 			return
 		}
+		impactCoefficient, err := normalizeMaterialImpactCoefficient(payload.ImpactCoefficient)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		var createdAt, updatedAt time.Time
 		res := db.QueryRow(`
-			UPDATE item_materials SET label = $1, updated_at = NOW()
-			WHERE id = $2 RETURNING created_at, updated_at
-		`, label, id)
+			UPDATE item_materials SET label = $1, impact_coefficient = $2, updated_at = NOW()
+			WHERE id = $3 RETURNING created_at, updated_at
+		`, label, impactCoefficient, id)
 		if err := res.Scan(&createdAt, &updatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "material not found")
@@ -3545,6 +3592,7 @@ func itemMaterialByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT position FROM item_materials WHERE id = $1`, id).Scan(&pos)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id": id, "label": label,
+			"impactCoefficient": impactCoefficient,
 			"position": pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
 

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../lib/api";
-import { getDefaultSubRoute, getModuleByKey, NAV_MODULES, SALARIE_MODULES, PARTICULIER_MODULES } from "../lib/constants";
+import { NAV_MODULES, PRO_MODULES, PARTICULIER_MODULES, SALARIE_MODULES } from "../lib/constants";
 import { Icon } from "../components/admin/Icon";
 
 export default function AdminLayout({ children }) {
@@ -12,14 +12,33 @@ export default function AdminLayout({ children }) {
     const [user, setUser] = useState(null);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
     const currentSubKey = pathname.split("/").filter(Boolean)[1] || "";
+    const isSalarie = user?.role === "salarie";
+    const isAdmin = user?.role === "admin";
+    const isPro = user?.role === "professionnel";
+    const isParticulier = user?.role === "particulier";
+
+    const getModulesForRole = (admin, salarie, pro, particulier) => {
+        if (admin) return NAV_MODULES;
+        if (salarie) return SALARIE_MODULES;
+        if (pro) return PRO_MODULES;
+        if (particulier) return PARTICULIER_MODULES;
+        return NAV_MODULES;
+    };
+
+    const getDefaultSubRouteForRole = (moduleKey, admin, salarie, pro, particulier) => {
+        const modules = getModulesForRole(admin, salarie, pro, particulier);
+        const module = modules.find((m) => m.key === moduleKey) || modules[0] || NAV_MODULES[0];
+        return `/${module.key}/${module.subNav[0].key}`;
+    };
 
     const { activeModule } = useMemo(() => {
         const parts = pathname.split("/").filter(Boolean);
         const moduleKey = parts[0] || "vue-globale";
 
-        const module = getModuleByKey(moduleKey);
+        const modules = getModulesForRole(isAdmin, isSalarie, isPro, isParticulier);
+        const module = modules.find((m) => m.key === moduleKey) || modules[0] || NAV_MODULES[0];
         return { activeModule: module };
-    }, [pathname]);
+    }, [pathname, isAdmin, isSalarie, isPro, isParticulier]);
 
     useEffect(() => {
         const verifyToken = async () => {
@@ -53,6 +72,22 @@ export default function AdminLayout({ children }) {
         verifyToken();
     }, [router]);
 
+    useEffect(() => {
+        const currentModuleKey = pathname.split("/").filter(Boolean)[0] || "";
+        if (isPro && currentModuleKey === "annonces") {
+            const forbiddenForPro = new Set(["deposer", "mes-annonces", "brouillons", "moderation", "points-depot", "logistique"]);
+            if (forbiddenForPro.has(currentSubKey)) {
+                router.replace("/annonces/disponible");
+            }
+        }
+        if (isPro && currentModuleKey === "projets") {
+            const forbiddenForProProjects = new Set(["moderation", "actifs"]);
+            if (forbiddenForProProjects.has(currentSubKey)) {
+                router.replace("/projets/mes-projets");
+            }
+        }
+    }, [isPro, pathname, currentSubKey, router]);
+
     const handleLogout = () => {
         window.localStorage.removeItem(TOKEN_KEY);
         router.replace("/login");
@@ -71,7 +106,7 @@ export default function AdminLayout({ children }) {
             router.push("/evenements/activites");
             return;
         }
-        router.push(getDefaultSubRoute(moduleKey));
+        router.push(getDefaultSubRouteForRole(moduleKey, isAdmin, isSalarie, isPro, isParticulier));
     };
 
     const handleSubNavChange = (subKey) => {
@@ -85,11 +120,6 @@ export default function AdminLayout({ children }) {
             </div>
         );
     }
-
-    const isSalarie = user?.role === "salarie";
-    const isAdmin = user?.role === "admin";
-    const isPro = user?.role === "professionnel";
-    const isParticulier = user?.role === "particulier";
     const userRoleLabel = user?.role === "salarie" ? "Salarié" : user?.role === "particulier" ? "Particulier" : user?.role === "professionnel" ? "Professionnel" : user?.role;
     const adminAnnoncesSubNav = [
         { key: "mes-annonces", label: "Annonces actives", shortLabel: "Actives" },
@@ -134,9 +164,9 @@ export default function AdminLayout({ children }) {
 
     // Modules autorisés pour les utilisateurs non-admins
     const allowedModulesForUsers = isPro
-        ? ["annonces"]
+        ? PRO_MODULES.map(m => m.key)
         : isParticulier
-        ? ["vue-globale", "annonces", "evenements"]
+        ? PARTICULIER_MODULES.map(m => m.key)
         : ["vue-globale", "annonces"];
     const isSalarieModule = activeModule.key.startsWith("salarie-");
     const isModuleAllowed = isAdmin || (isSalarie && isSalarieModule) || allowedModulesForUsers.includes(activeModule.key);
@@ -146,6 +176,8 @@ export default function AdminLayout({ children }) {
         ? NAV_MODULES
         : isSalarie
         ? SALARIE_MODULES
+        : isPro
+        ? PRO_MODULES
         : isParticulier
         ? PARTICULIER_MODULES
         : NAV_MODULES.filter(m => allowedModulesForUsers.includes(m.key));
@@ -163,7 +195,7 @@ export default function AdminLayout({ children }) {
                 </div>
 
                 <div className="topbar-center">
-                    {(isAdmin || isSalarieModule || activeModule.key === "annonces" || (isParticulier && activeModule.key === "evenements")) && visibleSubNav.map((subItem) => (
+                    {(isAdmin || isSalarieModule || isPro || isParticulier || activeModule.key === "annonces") && visibleSubNav.map((subItem) => (
                         <button
                             key={subItem.key}
                             className={`action-btn ${currentSubKey === subItem.key ? "primary" : ""}`}

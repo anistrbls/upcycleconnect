@@ -66,6 +66,20 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			writeError(w, http.StatusBadRequest, "invalid payload")
 			return
 		}
+		normWeight, err := normalizeWeightInput(payload.WeightValue, payload.WeightUnit)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if normWeight.HasWeight {
+			payload.WeightValue = &normWeight.InputValue
+			payload.WeightUnit = normWeight.InputUnit
+			payload.WeightGrams = &normWeight.Grams
+		} else {
+			payload.WeightValue = nil
+			payload.WeightUnit = ""
+			payload.WeightGrams = nil
+		}
 
 		item, err := repo.Create(userID, payload)
 		if err != nil {
@@ -100,6 +114,20 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid payload")
 			return
+		}
+		normWeight, err := normalizeWeightInput(payload.WeightValue, payload.WeightUnit)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if normWeight.HasWeight {
+			payload.WeightValue = &normWeight.InputValue
+			payload.WeightUnit = normWeight.InputUnit
+			payload.WeightGrams = &normWeight.Grams
+		} else {
+			payload.WeightValue = nil
+			payload.WeightUnit = ""
+			payload.WeightGrams = nil
 		}
 
 		item, err := repo.Update(userID, itemID, payload)
@@ -190,6 +218,20 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			writeError(w, http.StatusBadRequest, "invalid payload")
 			return
 		}
+		normWeight, err := normalizeWeightInput(payload.WeightValue, payload.WeightUnit)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if normWeight.HasWeight {
+			payload.WeightValue = &normWeight.InputValue
+			payload.WeightUnit = normWeight.InputUnit
+			payload.WeightGrams = &normWeight.Grams
+		} else {
+			payload.WeightValue = nil
+			payload.WeightUnit = ""
+			payload.WeightGrams = nil
+		}
 
 		state, err := repo.GetUserItemState(itemID, userID)
 		if err != nil {
@@ -224,6 +266,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			payload.Condition = state.Condition
 			payload.Material = state.Material
 			payload.Quantity = state.Quantity
+			payload.WeightValue = state.WeightValue
+			payload.WeightUnit = state.WeightUnit
+			payload.WeightGrams = state.WeightGrams
 			payload.City = state.City
 			payload.Country = state.Country
 			payload.Zip = state.Zip
@@ -290,11 +335,6 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 
 		if state.AfterDeposit {
 			writeError(w, http.StatusBadRequest, "cannot cancel after deposit")
-			return
-		}
-
-		if err := repo.ResetLogisticsForModeration(r.Context(), itemID); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not reset logistics")
 			return
 		}
 

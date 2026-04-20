@@ -2,7 +2,9 @@ package items
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
+	"math"
 	"strings"
 
 	"github.com/lib/pq"
@@ -27,6 +29,9 @@ type UserItemState struct {
 	Condition    string
 	Material     string
 	Quantity     string
+	WeightValue  *float64
+	WeightUnit   string
+	WeightGrams  *float64
 	City         string
 	Country      string
 	Zip          string
@@ -73,6 +78,11 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS condition TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS material TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS quantity TEXT NOT NULL DEFAULT '1'`,
+		`ALTER TABLE items ADD COLUMN IF NOT EXISTS weight_value NUMERIC(14,3)`,
+		`ALTER TABLE items ADD COLUMN IF NOT EXISTS weight_unit TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE items ADD COLUMN IF NOT EXISTS weight_grams NUMERIC(14,3)`,
+		`ALTER TABLE items DROP CONSTRAINT IF EXISTS items_weight_unit_check`,
+		`ALTER TABLE items ADD CONSTRAINT items_weight_unit_check CHECK (weight_unit IN ('', 'mg', 'g', 'kg'))`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'France'`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS delivery_mode TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS dimensions TEXT NOT NULL DEFAULT ''`,
@@ -83,6 +93,7 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS moderation_note TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS moderation_details TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMPTZ`,
+		`ALTER TABLE items ADD COLUMN IF NOT EXISTS user_cancel_previous_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS deleted_by_user BOOLEAN NOT NULL DEFAULT false`,
 		`CREATE INDEX IF NOT EXISTS idx_items_status ON items(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id)`,
@@ -129,7 +140,7 @@ func (r *Repository) EnsureSchema() error {
 }
 
 func (r *Repository) List(status, query string) ([]Item, error) {
-	q := `SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
+	q := `SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
 		(u.firstname || ' ' || u.lastname) as user_name,
 		u.created_at as user_created_at,
 		COALESCE(l.workflow_status, ''),
@@ -140,7 +151,6 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		FROM items i
 		JOIN users u ON u.id = i.user_id
 		LEFT JOIN item_logistics l ON l.item_id = i.id
-		WHERE i.deleted_by_user = false AND i.status != 'brouillon'
 		AND ($1 = '' OR i.status = $1)
 		AND ($2 = '' OR i.title ILIKE '%' || $2 || '%' OR i.description ILIKE '%' || $2 || '%' OR i.city ILIKE '%' || $2 || '%')
 		ORDER BY i.created_at DESC`
@@ -155,8 +165,10 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 	for rows.Next() {
 		var it Item
 		var userRegistrationTS sql.NullTime
+		var weightValue sql.NullFloat64
+		var weightGrams sql.NullFloat64
 		err := rows.Scan(
-			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity,
+			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity, &weightValue, &it.WeightUnit, &weightGrams,
 			&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.Views, &it.Saves, &it.Interested,
 			&it.UserID, &it.CreatedAt, &it.UpdatedAt, &it.UserName, &userRegistrationTS,
 			&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
@@ -164,6 +176,14 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		)
 		if err != nil {
 			return nil, err
+		}
+		if weightValue.Valid {
+			v := weightValue.Float64
+			it.WeightValue = &v
+		}
+		if weightGrams.Valid {
+			g := weightGrams.Float64
+			it.WeightGrams = &g
 		}
 		it.Date = it.CreatedAt.Format("02/01/2006")
 		if userRegistrationTS.Valid {
@@ -175,7 +195,7 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 }
 
 func (r *Repository) ListByUser(userID int64) ([]Item, error) {
-	q := `SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
+	q := `SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
 		COALESCE(l.workflow_status, ''),
 		COALESCE(l.deposit_code, ''),
 		COALESCE(l.pickup_code, '')
@@ -192,14 +212,24 @@ func (r *Repository) ListByUser(userID int64) ([]Item, error) {
 	var result []Item
 	for rows.Next() {
 		var it Item
+		var weightValue sql.NullFloat64
+		var weightGrams sql.NullFloat64
 		err := rows.Scan(
-			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity,
+			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity, &weightValue, &it.WeightUnit, &weightGrams,
 			&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.Views, &it.Saves, &it.Interested,
 			&it.UserID, &it.CreatedAt, &it.UpdatedAt,
 			&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if weightValue.Valid {
+			v := weightValue.Float64
+			it.WeightValue = &v
+		}
+		if weightGrams.Valid {
+			g := weightGrams.Float64
+			it.WeightGrams = &g
 		}
 		it.Date = it.CreatedAt.Format("02/01/2006")
 		result = append(result, it)
@@ -213,14 +243,17 @@ func (r *Repository) Create(userID int64, p CreatePayload) (Item, error) {
 		p.Status = "en attente"
 	}
 	err := r.db.QueryRow(`
-		INSERT INTO items (user_id, title, description, type, price, category, condition, material, quantity, city, country, zip, delivery_mode, dimensions, image, photos, reference, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		INSERT INTO items (user_id, title, description, type, price, category, condition, material, quantity, weight_value, weight_unit, weight_grams, city, country, zip, delivery_mode, dimensions, image, photos, reference, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		RETURNING id, title, description, type, price, category, condition, material, quantity, city, country, zip, delivery_mode, dimensions, image, photos, reference, status, user_id, created_at, updated_at
-	`, userID, p.Title, p.Description, p.Type, p.Price, p.Category, p.Condition, p.Material, p.Quantity, p.City, p.Country, p.Zip, p.DeliveryMode, p.Dimensions, p.Image, pq.Array(p.Photos), p.Reference, p.Status).Scan(
+	`, userID, p.Title, p.Description, p.Type, p.Price, p.Category, p.Condition, p.Material, p.Quantity, p.WeightValue, p.WeightUnit, p.WeightGrams, p.City, p.Country, p.Zip, p.DeliveryMode, p.Dimensions, p.Image, pq.Array(p.Photos), p.Reference, p.Status).Scan(
 		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity,
 		&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.UserID, &it.CreatedAt, &it.UpdatedAt,
 	)
 	if err == nil {
+		it.WeightValue = p.WeightValue
+		it.WeightUnit = p.WeightUnit
+		it.WeightGrams = p.WeightGrams
 		it.Date = it.CreatedAt.Format("02/01/2006")
 	}
 	return it, err
@@ -255,7 +288,7 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 	var userRegistrationTS sql.NullTime
 	
 	query := `
-		SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
+		SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
 		(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')) as user_name,
 		u.created_at as user_created_at,
 		COALESCE(l.workflow_status, ''),
@@ -277,9 +310,11 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 	`
 	
 	var depExp, pickExp, modAt sql.NullTime
+	var weightValue sql.NullFloat64
+	var weightGrams sql.NullFloat64
 	
 	err := r.db.QueryRow(query, id).Scan(
-		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity,
+		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity, &weightValue, &it.WeightUnit, &weightGrams,
 		&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.Views, &it.Saves, &it.Interested,
 		&it.UserID, &it.CreatedAt, &it.UpdatedAt, &it.UserName, &userRegistrationTS,
 		&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
@@ -291,6 +326,14 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 	if err != nil {
 		log.Printf("Repository details error for id=%d: %v", id, err)
 		return it, err
+	}
+	if weightValue.Valid {
+		v := weightValue.Float64
+		it.WeightValue = &v
+	}
+	if weightGrams.Valid {
+		g := weightGrams.Float64
+		it.WeightGrams = &g
 	}
 	
 	it.Date = it.CreatedAt.Format("02/01/2006")
@@ -316,18 +359,61 @@ func (r *Repository) Update(userID, itemID int64, p CreatePayload) (Item, error)
 	if p.Status == "" {
 		p.Status = "en attente"
 	}
+	var currentWorkflowStatus string
+	var currentWeightValue sql.NullFloat64
+	var currentWeightUnit sql.NullString
 	err := r.db.QueryRow(`
+		SELECT COALESCE(l.workflow_status, ''), i.weight_value, i.weight_unit
+		FROM items i
+		LEFT JOIN item_logistics l ON l.item_id = i.id
+		WHERE i.id = $1 AND i.user_id = $2
+	`, itemID, userID).Scan(&currentWorkflowStatus, &currentWeightValue, &currentWeightUnit)
+	if err != nil {
+		return it, err
+	}
+
+	weightChanged := false
+	currentUnit := strings.TrimSpace(currentWeightUnit.String)
+	if p.WeightValue == nil {
+		if currentWeightValue.Valid || currentUnit != "" {
+			weightChanged = true
+		}
+	} else {
+		if !currentWeightValue.Valid || currentUnit != strings.TrimSpace(p.WeightUnit) {
+			weightChanged = true
+		} else if math.Abs(currentWeightValue.Float64-*p.WeightValue) > 1e-9 {
+			weightChanged = true
+		}
+	}
+
+	if weightChanged && strings.TrimSpace(currentWorkflowStatus) == WFPickedUp {
+		return it, fmt.Errorf("weight cannot be updated after pickup")
+	}
+	if weightChanged {
+		used, checkErr := r.IsItemUsedInUpcyclingProject(itemID)
+		if checkErr != nil {
+			return it, checkErr
+		}
+		if used {
+			return it, fmt.Errorf("weight cannot be updated because item is already linked to an upcycling project")
+		}
+	}
+	err = r.db.QueryRow(`
 		UPDATE items 
 		SET title = $1, description = $2, type = $3, price = $4, category = $5, condition = $6, material = $7,
-		    quantity = $8, city = $9, country = $10, zip = $11, delivery_mode = $12, dimensions = $13, image = $14, 
-		    photos = $15, reference = $16, status = $17, updated_at = NOW()
-		WHERE id = $18 AND user_id = $19
+		    quantity = $8, weight_value = $9, weight_unit = $10, weight_grams = $11,
+		    city = $12, country = $13, zip = $14, delivery_mode = $15, dimensions = $16, image = $17,
+		    photos = $18, reference = $19, status = $20, updated_at = NOW()
+		WHERE id = $21 AND user_id = $22
 		RETURNING id, title, description, type, price, category, condition, material, quantity, city, country, zip, delivery_mode, dimensions, image, photos, reference, status, user_id, created_at, updated_at
-	`, p.Title, p.Description, p.Type, p.Price, p.Category, p.Condition, p.Material, p.Quantity, p.City, p.Country, p.Zip, p.DeliveryMode, p.Dimensions, p.Image, pq.Array(p.Photos), p.Reference, p.Status, itemID, userID).Scan(
+	`, p.Title, p.Description, p.Type, p.Price, p.Category, p.Condition, p.Material, p.Quantity, p.WeightValue, p.WeightUnit, p.WeightGrams, p.City, p.Country, p.Zip, p.DeliveryMode, p.Dimensions, p.Image, pq.Array(p.Photos), p.Reference, p.Status, itemID, userID).Scan(
 		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity,
 		&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.UserID, &it.CreatedAt, &it.UpdatedAt,
 	)
 	if err == nil {
+		it.WeightValue = p.WeightValue
+		it.WeightUnit = p.WeightUnit
+		it.WeightGrams = p.WeightGrams
 		it.Date = it.CreatedAt.Format("02/01/2006")
 	}
 	return it, err
@@ -345,7 +431,8 @@ func (r *Repository) GetUserItemState(itemID, userID int64) (*UserItemState, err
 			(l.item_id IS NOT NULL) AS has_logistics,
 			l.deposited_at,
 			i.title, i.description, i.type, i.price, i.category, i.condition, i.material,
-			i.quantity, i.city, i.country, i.zip, i.delivery_mode, i.dimensions,
+			i.quantity, i.weight_value, i.weight_unit, i.weight_grams,
+			i.city, i.country, i.zip, i.delivery_mode, i.dimensions,
 			i.image, i.photos, i.reference
 		FROM items i
 		LEFT JOIN item_logistics l ON l.item_id = i.id
@@ -364,6 +451,9 @@ func (r *Repository) GetUserItemState(itemID, userID int64) (*UserItemState, err
 		&state.Condition,
 		&state.Material,
 		&state.Quantity,
+		&state.WeightValue,
+		&state.WeightUnit,
+		&state.WeightGrams,
 		&state.City,
 		&state.Country,
 		&state.Zip,
@@ -390,10 +480,137 @@ func (r *Repository) GetUserItemState(itemID, userID int64) (*UserItemState, err
 }
 
 func (r *Repository) MarkCancelledByUser(itemID, userID int64) error {
-	_, err := r.db.Exec(`
-		UPDATE items
-		SET status = 'desactivee', updated_at = NOW()
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var currentStatus string
+	err = tx.QueryRow(`
+		SELECT status
+		FROM items
 		WHERE id = $1 AND user_id = $2 AND deleted_by_user = false
-	`, itemID, userID)
-	return err
+		FOR UPDATE
+	`, itemID, userID).Scan(&currentStatus)
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(currentStatus) == "desactivee" || strings.TrimSpace(currentStatus) == "desactive" {
+		return nil
+	}
+
+	if _, err = tx.Exec(`
+		UPDATE items
+		SET user_cancel_previous_status = status,
+		    status = 'desactivee',
+		    updated_at = NOW()
+		WHERE id = $1 AND user_id = $2 AND deleted_by_user = false
+	`, itemID, userID); err != nil {
+		return err
+	}
+
+	if _, err = tx.Exec(`
+		UPDATE item_logistics
+		SET previous_workflow_status = workflow_status,
+		    workflow_status = 'cancelled',
+		    cancelled_at = NOW(),
+		    cancel_reason = 'Cancelled by user',
+		    cancelled_by_user = true,
+		    updated_at = NOW()
+		WHERE item_id = $1
+	`, itemID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *Repository) UndoCancelledByUser(itemID, userID int64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var currentStatus, previousStatus string
+	err = tx.QueryRow(`
+		SELECT status, COALESCE(user_cancel_previous_status, '')
+		FROM items
+		WHERE id = $1 AND user_id = $2 AND deleted_by_user = false
+		FOR UPDATE
+	`, itemID, userID).Scan(&currentStatus, &previousStatus)
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(currentStatus) != "desactivee" && strings.TrimSpace(currentStatus) != "desactive" {
+		return fmt.Errorf("item is not cancelled")
+	}
+	if strings.TrimSpace(previousStatus) == "" {
+		return fmt.Errorf("no previous status to restore")
+	}
+
+	if _, err = tx.Exec(`
+		UPDATE items
+		SET status = $1,
+		    user_cancel_previous_status = '',
+		    updated_at = NOW()
+		WHERE id = $2 AND user_id = $3
+	`, previousStatus, itemID, userID); err != nil {
+		return err
+	}
+
+	if _, err = tx.Exec(`
+		UPDATE item_logistics
+		SET workflow_status = CASE
+				WHEN previous_workflow_status <> '' THEN previous_workflow_status
+				ELSE 'validated'
+			END,
+			previous_workflow_status = '',
+			cancelled_at = NULL,
+			cancel_reason = '',
+			cancelled_by_user = false,
+			updated_at = NOW()
+		WHERE item_id = $1
+		  AND workflow_status = 'cancelled'
+		  AND cancelled_by_user = true
+	`, itemID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *Repository) IsItemUsedInUpcyclingProject(itemID int64) (bool, error) {
+	tables := []string{"upcycling_project_items", "project_items", "projects_items"}
+
+	for _, tbl := range tables {
+		var exists bool
+		if err := r.db.QueryRow(
+			`SELECT EXISTS(
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'item_id'
+			)`,
+			tbl,
+		).Scan(&exists); err != nil {
+			return false, err
+		}
+		if !exists {
+			continue
+		}
+
+		query := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE item_id = $1)", tbl)
+		var used bool
+		if err := r.db.QueryRow(query, itemID).Scan(&used); err != nil {
+			return false, err
+		}
+		if used {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

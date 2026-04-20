@@ -44,6 +44,8 @@ func getStripeConfig() (*StripeConfig, error) {
 type stripeCheckoutSession struct {
 	ID            string            `json:"id"`
 	URL           string            `json:"url"`
+	Status        string            `json:"status"`
+	PaymentStatus string            `json:"payment_status"`
 	PaymentIntent string            `json:"payment_intent"`
 	Metadata      map[string]string `json:"metadata"`
 }
@@ -117,6 +119,40 @@ func CreateStripeCheckoutSessionPublic(cfg *StripeConfig, itemID, userID int64, 
 type StripeCheckoutSessionPublic struct {
 	ID  string
 	URL string
+}
+
+func fetchStripeCheckoutSession(cfg *StripeConfig, sessionID string) (*stripeCheckoutSession, error) {
+	cleanID := strings.TrimSpace(sessionID)
+	if cleanID == "" {
+		return nil, fmt.Errorf("missing checkout session id")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.stripe.com/v1/checkout/sessions/"+url.PathEscape(cleanID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe checkout fetch failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session stripeCheckoutSession
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(session.ID) == "" {
+		return nil, fmt.Errorf("invalid stripe session response")
+	}
+
+	return &session, nil
 }
 
 type stripeWebhookEvent struct {

@@ -86,6 +86,24 @@ function getDepositAddress(item) {
     return [address, locality, country].filter(Boolean).join(", ") || "Adresse non renseignee";
 }
 
+function formatWeight(item) {
+    const rawValue = item?.weightValue ?? item?.weight_value;
+    const rawUnit = item?.weightUnit ?? item?.weight_unit;
+    const value = Number(rawValue);
+    const unit = String(rawUnit || "").trim().toLowerCase();
+
+    if (Number.isFinite(value) && value > 0 && (unit === "mg" || unit === "g" || unit === "kg")) {
+        return `${value} ${unit}`;
+    }
+
+    const grams = Number(item?.weightGrams ?? item?.weight_grams);
+    if (Number.isFinite(grams) && grams > 0) {
+        return `${grams} g`;
+    }
+
+    return "Non renseigne";
+}
+
 export default function ProfessionalAvailableDetailPage() {
     const router = useRouter();
     const params = useParams();
@@ -184,6 +202,7 @@ export default function ProfessionalAvailableDetailPage() {
     );
     const depositLocation = getDepositLocation(item);
     const depositAddress = getDepositAddress(item);
+    const estimatedWeight = formatWeight(item);
     const depositPointPhoto =
         (Array.isArray(item.depositPointPhotos) && item.depositPointPhotos[0]) ||
         (Array.isArray(item.deposit_point_photos) && item.deposit_point_photos[0]) ||
@@ -410,6 +429,7 @@ export default function ProfessionalAvailableDetailPage() {
                                 { label: "Type", val: isDon ? "Don" : "Vente", icon: isDon ? <Gift size={13} /> : <Tag size={13} /> },
                                 { label: "État", val: item.condition || "N/A", icon: <CheckCircle2 size={13} /> },
                                 { label: "Matière", val: item.material || "N/A", icon: <Package size={13} /> },
+                                { label: "Poids estime", val: estimatedWeight, icon: <Package size={13} /> },
                                 { label: "Publiée le", val: displayDate, icon: <Calendar size={13} /> },
                                 { label: "Point de dépôt", val: item.depositPointName || "Point UC", icon: <Box size={13} /> },
                                 { label: "Conteneur", val: item.containerName || "Box non assignée", icon: <Box size={13} /> },

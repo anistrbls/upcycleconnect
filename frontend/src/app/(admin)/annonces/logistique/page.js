@@ -276,6 +276,8 @@ const styles = {
         outline: "none",
         background: "#fff",
         fontSize: "0.92rem",
+        appearance: "none",
+        WebkitAppearance: "none",
     },
     input: {
         padding: "0.9rem",
@@ -547,6 +549,56 @@ export default function LogisticsDashboard() {
         }
     };
 
+    const handleUndoCancelledFlow = async () => {
+        if (!selectedItem?.item_id) return;
+        try {
+            const res = await fetch(apiUrl(`/admin/logistics/${selectedItem.item_id}/undo-cancel`), {
+                method: "POST",
+                headers: buildAuthHeaders(),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert(err.error || "Impossible d'annuler l'annulation du flux.");
+                return;
+            }
+            setShowCancelModal(false);
+            setSelectedItem(null);
+            setCancelReasonInput("");
+            setRevertToStatusInput("");
+            fetchLogistics();
+        } catch (e) {
+            console.error(e);
+            alert("Erreur réseau lors de la restauration du flux.");
+        }
+    };
+
+    const handleRestoreToModeration = async () => {
+        if (!selectedItem?.item_id) return;
+        try {
+            const res = await fetch(apiUrl(`/admin/logistics/${selectedItem.item_id}/cancel`), {
+                method: "POST",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({
+                    reason: "Retour en moderation",
+                    revert_to_status: "moderation_pending",
+                }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert(err.error || "Impossible de repasser l'annonce en moderation.");
+                return;
+            }
+            setShowCancelModal(false);
+            setSelectedItem(null);
+            setCancelReasonInput("");
+            setRevertToStatusInput("");
+            fetchLogistics();
+        } catch (e) {
+            console.error(e);
+            alert("Erreur réseau lors du retour en moderation.");
+        }
+    };
+
     // --- Helpers ---
 
     useEffect(() => {
@@ -808,10 +860,16 @@ export default function LogisticsDashboard() {
                     {selectedItem?.workflow_status === "cancelled" ? (
                         <>
                             <div style={{ background: '#fee2e2', color: '#991b1b', padding: '1rem', borderRadius: '16px', fontSize: '0.85rem', fontWeight: '500', border: '1px solid #fecaca' }}>
-                                Ce flux est déjà annulé. Vous pouvez supprimer définitivement l'annonce pour la retirer du suivi des flux objets et de la base de données.
+                                Ce flux est déjà annulé. Vous pouvez restaurer le statut précédent du flux, ou supprimer définitivement l'annonce.
                             </div>
                             <div style={styles.modalActions}>
                                 <button style={styles.btnSec} onClick={() => setShowCancelModal(false)}>Fermer</button>
+                                <button style={styles.btnPri} onClick={handleUndoCancelledFlow}>
+                                    Annuler l'annulation
+                                </button>
+                                <button style={{ ...styles.btnPri, background: '#0f766e' }} onClick={handleRestoreToModeration}>
+                                    Repasser en modération
+                                </button>
                                 <button style={{ ...styles.btnPri, background: '#dc2626' }} onClick={handleHardDeleteCancelledItem}>
                                     Supprimer définitivement l'annonce
                                 </button>
@@ -848,6 +906,9 @@ export default function LogisticsDashboard() {
                                     onChange={e => setRevertToStatusInput(e.target.value)}
                                 >
                                     <option value="">Sélectionnez l'action...</option>
+                                    <optgroup label="Modération">
+                                        <option value="moderation_pending">Repasser en modération (en attente)</option>
+                                    </optgroup>
                                     <optgroup label="Revenir à une étape précédente">
                                         {selectedItem && (() => {
                                             const flow = ['validated', 'assigned', 'deposit_code_sent', 'deposited', 'available', 'reserved'];
@@ -883,7 +944,7 @@ export default function LogisticsDashboard() {
                                     onClick={handleCancel}
                                     disabled={!revertToStatusInput}
                                 >
-                                    {revertToStatusInput === "completely_cancel" ? "Confirmer l'annulation totale" : "Confirmer le retour"}
+                                    {revertToStatusInput === "completely_cancel" ? "Confirmer l'annulation totale" : revertToStatusInput === "moderation_pending" ? "Renvoyer en modération" : "Confirmer le retour"}
                                 </button>
                             </div>
                         </>

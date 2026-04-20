@@ -80,6 +80,24 @@ const getAnnonceAuthor = (annonce) => {
     );
 };
 
+const formatWeight = (item) => {
+    const rawValue = item?.weightValue ?? item?.weight_value;
+    const rawUnit = item?.weightUnit ?? item?.weight_unit;
+    const value = Number(rawValue);
+    const unit = String(rawUnit || "").trim().toLowerCase();
+
+    if (Number.isFinite(value) && value > 0 && (unit === "mg" || unit === "g" || unit === "kg")) {
+        return `${value} ${unit}`;
+    }
+
+    const grams = Number(item?.weightGrams ?? item?.weight_grams);
+    if (Number.isFinite(grams) && grams > 0) {
+        return `${grams} g`;
+    }
+
+    return "N/A";
+};
+
 const getInitials = (name) => {
     if (!name) return "AU";
     const parts = String(name).trim().split(/\s+/).filter(Boolean);
@@ -440,6 +458,8 @@ function AnnonceDetailContent() {
         condition: annonce.condition || "",
         material: annonce.material || "",
         quantity: String(annonce.quantity || "1"),
+        weightValue: annonce.weightValue != null ? Number(annonce.weightValue) : null,
+        weightUnit: annonce.weightUnit || "",
         city: annonce.city || "",
         country: annonce.country || "France",
         zip: annonce.zip || "",
@@ -673,6 +693,7 @@ function AnnonceDetailContent() {
     const isPendingAnnonce = statusKey === "en attente";
     const statusLabel = STATUS_LABELS[statusKey] || statusKey;
     const descriptionParts = (annonce.description || "Aucune description fournie.").split("\n\n");
+    const weightDisplay = formatWeight(annonce);
     const savesCount = Number(annonce.savesCount || 0);
     const interestedCount = Number(annonce.interestedCount || 0);
     const authorName = getAnnonceAuthor(annonce);
@@ -1212,6 +1233,7 @@ function AnnonceDetailContent() {
                                 { label: "Type", val: isDon ? "Don" : "Vente", icon: isDon ? <Gift size={13} /> : <Tag size={13} /> },
                                 { label: "État", val: annonce.condition || "N/A", icon: <CheckCircle2 size={13} /> },
                                 { label: "Matière", val: annonce.material || "N/A", icon: <Package size={13} /> },
+                                { label: "Poids estimé", val: weightDisplay, icon: <Package size={13} /> },
                                 { label: "Ville", val: `${annonce.city}${annonce.zip ? " · " + annonce.zip : ""}`, icon: <MapPin size={13} /> },
                                 { label: "Publiée le", val: annonce.date, icon: <Calendar size={13} /> },
                                 { label: "Référence", val: `#${String(annonce.id).padStart(4, "0")}`, icon: <Package size={13} /> },

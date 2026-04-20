@@ -264,6 +264,8 @@ const LIMITED_EDIT_BLOCKED_FIELDS = new Set([
     "condition",
     "material",
     "quantity",
+    "weightValue",
+    "weightUnit",
     "city",
     "country",
     "zip",
@@ -303,6 +305,8 @@ export default function DeposerAnnoncePage() {
         condition: "",
         material: "",
         quantity: "1",
+        weightValue: "",
+        weightUnit: "",
         price: "",
         city: "",
         country: "France",
@@ -363,6 +367,8 @@ export default function DeposerAnnoncePage() {
             condition: normalizeForCompare(getMatch(conditions, form.condition)),
             material: normalizeForCompare(getMatch(materials, form.material)),
             quantity: normalizeForCompare(form.quantity || "1"),
+            weightValue: normalizeForCompare(form.weightValue || ""),
+            weightUnit: normalizeForCompare(form.weightUnit || ""),
             city: normalizeForCompare(form.city),
             country: normalizeForCompare(getMatch(countries, form.country, "France")),
             zip: normalizeForCompare(form.zip),
@@ -379,7 +385,7 @@ export default function DeposerAnnoncePage() {
 
         const keysToCompare = disableRestrictedFields
             ? ["title", "description", "image", "photos"]
-            : ["title", "description", "type", "price", "category", "condition", "material", "quantity", "city", "country", "zip", "deliveryMode", "dimensions", "image", "photos"];
+            : ["title", "description", "type", "price", "category", "condition", "material", "quantity", "weightValue", "weightUnit", "city", "country", "zip", "deliveryMode", "dimensions", "image", "photos"];
 
         return keysToCompare.some((key) => {
             const left = initialSnapshot[key];
@@ -417,6 +423,8 @@ export default function DeposerAnnoncePage() {
                 condition: annonceToEdit.condition || "",
                 material: annonceToEdit.material || "",
                 quantity: annonceToEdit.quantity || "1",
+                weightValue: annonceToEdit.weightValue != null ? String(annonceToEdit.weightValue) : "",
+                weightUnit: annonceToEdit.weightUnit || "",
                 price: annonceToEdit.price || "",
                 city: annonceToEdit.city || "",
                 country: annonceToEdit.country || "France",
@@ -441,6 +449,8 @@ export default function DeposerAnnoncePage() {
                     condition: annonceToEdit.condition || "",
                     material: annonceToEdit.material || "",
                     quantity: annonceToEdit.quantity || "1",
+                    weightValue: annonceToEdit.weightValue != null ? String(annonceToEdit.weightValue) : "",
+                    weightUnit: annonceToEdit.weightUnit || "",
                     price: annonceToEdit.price || "",
                     city: annonceToEdit.city || "",
                     country: annonceToEdit.country || "France",
@@ -586,11 +596,44 @@ export default function DeposerAnnoncePage() {
             }
         }
 
+        const rawWeightValue = String(formData.weightValue ?? "").replace(",", ".").trim();
+        const rawWeightUnit = String(formData.weightUnit ?? "").trim().toLowerCase();
+        const hasWeightValue = rawWeightValue.length > 0;
+        const hasWeightUnit = rawWeightUnit.length > 0;
+        const acceptedWeightUnits = new Set(["mg", "g", "kg"]);
+
+        if (hasWeightValue !== hasWeightUnit) {
+            alert("Veuillez renseigner a la fois la valeur et l'unite du poids.");
+            return;
+        }
+
+        let payloadWeightValue = null;
+        let payloadWeightUnit = "";
+        if (hasWeightValue && hasWeightUnit) {
+            const parsedWeight = Number.parseFloat(rawWeightValue);
+            if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
+                alert("Le poids estime doit etre un nombre strictement positif.");
+                return;
+            }
+            if (!acceptedWeightUnits.has(rawWeightUnit)) {
+                alert("L'unite du poids doit etre mg, g ou kg.");
+                return;
+            }
+            if (!/^\d+(?:[\.,]\d{1,3})?$/.test(rawWeightValue)) {
+                alert("Le poids estime accepte au maximum 3 decimales.");
+                return;
+            }
+            payloadWeightValue = parsedWeight;
+            payloadWeightUnit = rawWeightUnit;
+        }
+
         const payload = {
             ...formData,
             category: getMatch(categories, formData.category),
             condition: getMatch(conditions, formData.condition),
             material: getMatch(materials, formData.material),
+            weightValue: payloadWeightValue,
+            weightUnit: payloadWeightUnit,
             country: getMatch(countries, formData.country, "France"),
             type: effectiveType,
             price: effectiveType === "vente" ? effectivePrice : 0,
@@ -979,6 +1022,38 @@ export default function DeposerAnnoncePage() {
                                     ))}
                                 </select>
                             </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem" }}>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Poids estimé (optionnel)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.001"
+                                    placeholder="Ex: 2.5"
+                                    style={styles.input}
+                                    value={formData.weightValue}
+                                    onChange={e => handleChange("weightValue", e.target.value)}
+                                    disabled={disableRestrictedFields}
+                                />
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Unité</label>
+                                <select
+                                    style={styles.select}
+                                    value={formData.weightUnit}
+                                    onChange={e => handleChange("weightUnit", e.target.value)}
+                                    disabled={disableRestrictedFields}
+                                >
+                                    <option value="">Sélectionner...</option>
+                                    <option value="mg">mg</option>
+                                    <option value="g">g</option>
+                                    <option value="kg">kg</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginTop: "-0.4rem" }}>
+                            Utilisez jusqu'a 3 decimales. Un poids doit toujours etre accompagne de son unite.
                         </div>
                     </section>
 
