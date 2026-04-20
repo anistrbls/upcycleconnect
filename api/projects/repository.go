@@ -57,6 +57,18 @@ func (r *Repository) EnsureSchema() error {
 			added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			CONSTRAINT upcycling_project_images_type_check CHECK (image_type IN ('avant', 'apres', 'autre'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS upcycling_project_likes (
+			project_id  BIGINT NOT NULL REFERENCES upcycling_projects(id) ON DELETE CASCADE,
+			user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (project_id, user_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS upcycling_project_bookmarks (
+			project_id  BIGINT NOT NULL REFERENCES upcycling_projects(id) ON DELETE CASCADE,
+			user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (project_id, user_id)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := r.db.Exec(s); err != nil {
@@ -641,7 +653,7 @@ func (r *Repository) AdminListAll(statusFilter, moderationStatusFilter string) (
 }
 
 // ParticulierListPosted retourne les projets publiés et validés pour l'espace particulier.
-func (r *Repository) ParticulierListPosted() ([]Project, error) {
+func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 	rows, err := r.db.Query(`
 		SELECT p.id, p.pro_user_id,
 		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
@@ -667,18 +679,22 @@ func (r *Repository) ParticulierListPosted() ([]Project, error) {
 		       p.moderation_status, p.moderation_note,
 		       COUNT(pi.id) AS item_count,
 		       COALESCE((
-		         SELECT SUM(COALESCE(i.weight_grams, 0))
+		         SELECT SUM(COALESCE(i2.weight_grams, 0))
 		         FROM upcycling_project_items upi
-		         JOIN items i ON i.id = upi.item_id
+		         JOIN items i2 ON i2.id = upi.item_id
 		         WHERE upi.project_id = p.id
 		       ), 0) AS total_weight_grams,
 		       COALESCE((
-		         SELECT SUM((COALESCE(i.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1))
+		         SELECT SUM((COALESCE(i3.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1))
 		         FROM upcycling_project_items upi
-		         JOIN items i ON i.id = upi.item_id
-		         LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i.material))
+		         JOIN items i3 ON i3.id = upi.item_id
+		         LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i3.material))
 		         WHERE upi.project_id = p.id
 		       ), 0) AS upcycling_score,
+		       (SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
+		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
+		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
+		       EXISTS(SELECT 1 FROM upcycling_project_bookmarks WHERE project_id = p.id AND user_id = $1) AS is_bookmarked,
 		       p.created_at, p.updated_at
 		FROM upcycling_projects p
 		LEFT JOIN upcycling_project_items pi ON pi.project_id = p.id
@@ -712,7 +728,7 @@ func (r *Repository) ParticulierListPosted() ([]Project, error) {
 		WHERE p.status = 'publie' AND p.moderation_status = 'approved'
 		GROUP BY p.id, preview.url, before_img.url, after_img.url, u.id, u.firstname, u.lastname, u.created_at
 		ORDER BY p.updated_at DESC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -725,7 +741,9 @@ func (r *Repository) ParticulierListPosted() ([]Project, error) {
 			&p.PreviewImage, &p.BeforeImage, &p.AfterImage,
 			&p.Title, &p.Description, &p.Category, &p.Status,
 			&p.ModerationStatus, &p.ModerationNote,
-			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
+			&p.LikeCount, &p.BookmarkCount, &p.IsLiked, &p.IsBookmarked,
+			&p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.TotalWeightKg = p.TotalWeightGrams / 1000.0
@@ -736,6 +754,147 @@ func (r *Repository) ParticulierListPosted() ([]Project, error) {
 	}
 	return projects, nil
 }
+
+// ParticulierListParticipated retourne les projets publiés et validés auxquels l'utilisateur a participé via ses objets.
+func (r *Repository) ParticulierListParticipated(userID int64) ([]Project, error) {
+	rows, err := r.db.Query(`
+		SELECT p.id, p.pro_user_id,
+		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
+		       COALESCE(NULLIF(TRIM(u.company_name), ''), 'Professionnel'),
+		       u.created_at,
+		       COALESCE((
+		         SELECT SUM((COALESCE(i2.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1))
+		         FROM upcycling_projects p2
+		         LEFT JOIN upcycling_project_items upi ON upi.project_id = p2.id
+		         LEFT JOIN items i2 ON i2.id = upi.item_id
+		         LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i2.material))
+		         WHERE p2.pro_user_id = u.id
+		       ), 0) AS pro_total_uc_score,
+		       COALESCE((
+		         SELECT COUNT(*)
+		         FROM upcycling_projects p3
+		         WHERE p3.pro_user_id = u.id
+		           AND p3.created_at >= u.created_at
+		       )::int, 0) AS pro_projects_since_signup,
+		       COALESCE(preview.url, ''),
+		       COALESCE(before_img.url, ''),
+		       COALESCE(after_img.url, ''),
+		       p.title, p.description, p.category, p.status,
+		       p.moderation_status, p.moderation_note,
+		       COUNT(DISTINCT pi.id) AS item_count,
+		       COALESCE((
+		         SELECT SUM(COALESCE(i3.weight_grams, 0))
+		         FROM upcycling_project_items upi
+		         JOIN items i3 ON i3.id = upi.item_id
+		         WHERE upi.project_id = p.id
+		       ), 0) AS total_weight_grams,
+		       COALESCE((
+		         SELECT SUM((COALESCE(i4.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1))
+		         FROM upcycling_project_items upi
+		         JOIN items i4 ON i4.id = upi.item_id
+		         LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i4.material))
+		         WHERE upi.project_id = p.id
+		       ), 0) AS upcycling_score,
+		       (SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
+		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
+		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
+		       EXISTS(SELECT 1 FROM upcycling_project_bookmarks WHERE project_id = p.id AND user_id = $1) AS is_bookmarked,
+		       p.created_at, p.updated_at
+		FROM upcycling_projects p
+		JOIN upcycling_project_items pi ON pi.project_id = p.id
+		JOIN items i ON i.id = pi.item_id
+		LEFT JOIN LATERAL (
+			SELECT img.url
+			FROM upcycling_project_images img
+			WHERE img.project_id = p.id
+			ORDER BY CASE
+				WHEN img.image_type = 'apres' THEN 0
+				WHEN img.image_type = 'avant' THEN 1
+				ELSE 2
+			END,
+			img.added_at DESC
+			LIMIT 1
+		) preview ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT img.url
+			FROM upcycling_project_images img
+			WHERE img.project_id = p.id AND img.image_type = 'avant'
+			ORDER BY img.added_at DESC
+			LIMIT 1
+		) before_img ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT img.url
+			FROM upcycling_project_images img
+			WHERE img.project_id = p.id AND img.image_type = 'apres'
+			ORDER BY img.added_at DESC
+			LIMIT 1
+		) after_img ON TRUE
+		JOIN users u ON u.id = p.pro_user_id
+		WHERE i.user_id = $1 AND p.status = 'publie' AND p.moderation_status = 'approved'
+		GROUP BY p.id, preview.url, before_img.url, after_img.url, u.id, u.firstname, u.lastname, u.company_name, u.created_at
+		ORDER BY p.updated_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []Project
+	for rows.Next() {
+		var p Project
+		if err := rows.Scan(&p.ID, &p.ProUserID, &p.ProDisplayName, &p.ProCompanyName, &p.ProJoinedAt, &p.ProTotalUCScore, &p.ProProjectsSinceSignup,
+			&p.PreviewImage, &p.BeforeImage, &p.AfterImage,
+			&p.Title, &p.Description, &p.Category, &p.Status,
+			&p.ModerationStatus, &p.ModerationNote,
+			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
+			&p.LikeCount, &p.BookmarkCount, &p.IsLiked, &p.IsBookmarked,
+			&p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		p.TotalWeightKg = p.TotalWeightGrams / 1000.0
+		projects = append(projects, p)
+	}
+	if projects == nil {
+		projects = []Project{}
+	}
+	return projects, nil
+}
+
+
+// GetUserPersonalScore calcule le score UC personnel du particulier.
+// Il tient compte uniquement des objets lui appartenant dans des projets publiés et approuvés.
+func (r *Repository) GetUserPersonalScore(userID int64) (float64, error) {
+	var score float64
+	err := r.db.QueryRow(`
+		SELECT COALESCE(SUM(
+			(COALESCE(i.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1)
+		), 0)
+		FROM upcycling_project_items upi
+		JOIN items i ON i.id = upi.item_id
+		JOIN upcycling_projects p ON p.id = upi.project_id
+		LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i.material))
+		WHERE i.user_id = $1
+		  AND p.status = 'publie'
+		  AND p.moderation_status = 'approved'
+	`, userID).Scan(&score)
+	return score, err
+}
+
+// GetUserPersonalWeight calcule la masse totale revalorisée par le particulier (en kg).
+func (r *Repository) GetUserPersonalWeight(userID int64) (float64, error) {
+	var grams float64
+	err := r.db.QueryRow(`
+		SELECT COALESCE(SUM(COALESCE(i.weight_grams, 0)), 0)
+		FROM upcycling_project_items upi
+		JOIN items i ON i.id = upi.item_id
+		JOIN upcycling_projects p ON p.id = upi.project_id
+		WHERE i.user_id = $1
+		  AND p.status = 'publie'
+		  AND p.moderation_status = 'approved'
+	`, userID).Scan(&grams)
+	return grams / 1000.0, err
+}
+
 
 // AdminModerate met à jour le statut de modération d'un projet.
 func (r *Repository) AdminModerate(projectID int64, moderationStatus, note string) error {
@@ -848,4 +1007,156 @@ func itoa(v int) string {
 		v /= 10
 	}
 	return string(buf[i:])
+}
+
+// ToggleLike ajoute ou retire un like d'un projet par un utilisateur.
+func (r *Repository) ToggleLike(projectID, userID int64) (bool, int, error) {
+	var exists bool
+	err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = $1 AND user_id = $2)`, projectID, userID).Scan(&exists)
+	if err != nil {
+		return false, 0, err
+	}
+
+	if exists {
+		_, err = r.db.Exec(`DELETE FROM upcycling_project_likes WHERE project_id = $1 AND user_id = $2`, projectID, userID)
+	} else {
+		_, err = r.db.Exec(`INSERT INTO upcycling_project_likes (project_id, user_id) VALUES ($1, $2)`, projectID, userID)
+	}
+	if err != nil {
+		return false, 0, err
+	}
+
+	var count int
+	_ = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = $1`, projectID).Scan(&count)
+	return !exists, count, nil
+}
+
+// ToggleBookmark ajoute ou retire un favori d'un projet par un utilisateur.
+func (r *Repository) ToggleBookmark(projectID, userID int64) (bool, int, error) {
+	var exists bool
+	err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM upcycling_project_bookmarks WHERE project_id = $1 AND user_id = $2)`, projectID, userID).Scan(&exists)
+	if err != nil {
+		return false, 0, err
+	}
+
+	if exists {
+		_, err = r.db.Exec(`DELETE FROM upcycling_project_bookmarks WHERE project_id = $1 AND user_id = $2`, projectID, userID)
+	} else {
+		_, err = r.db.Exec(`INSERT INTO upcycling_project_bookmarks (project_id, user_id) VALUES ($1, $2)`, projectID, userID)
+	}
+	if err != nil {
+		return false, 0, err
+	}
+
+	var count int
+	_ = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = $1`, projectID).Scan(&count)
+	return !exists, count, nil
+}
+
+// ParticulierListFavorites retourne la liste des projets likés ou enregistrés par l'utilisateur.
+func (r *Repository) ParticulierListFavorites(userID int64) ([]Project, error) {
+	rows, err := r.db.Query(`
+		SELECT p.id, p.pro_user_id,
+		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
+		       COALESCE(NULLIF(TRIM(u.company_name), ''), 'Professionnel'),
+		       u.created_at,
+		       COALESCE((
+		         SELECT SUM((COALESCE(i2.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1))
+		         FROM upcycling_projects p2
+		         LEFT JOIN upcycling_project_items upi ON upi.project_id = p2.id
+		         LEFT JOIN items i2 ON i2.id = upi.item_id
+		         LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i2.material))
+		         WHERE p2.pro_user_id = u.id
+		       ), 0) AS pro_total_uc_score,
+		       COALESCE((
+		         SELECT COUNT(*)
+		         FROM upcycling_projects p3
+		         WHERE p3.pro_user_id = u.id
+		           AND p3.created_at >= u.created_at
+		       )::int, 0) AS pro_projects_since_signup,
+		       COALESCE(preview.url, ''),
+		       COALESCE(before_img.url, ''),
+		       COALESCE(after_img.url, ''),
+		       p.title, p.description, p.category, p.status,
+		       p.moderation_status, p.moderation_note,
+		       (SELECT COUNT(pi.id) FROM upcycling_project_items pi WHERE pi.project_id = p.id) AS item_count,
+		       COALESCE((
+		         SELECT SUM(COALESCE(i3.weight_grams, 0))
+		         FROM upcycling_project_items upi
+		         JOIN items i3 ON i3.id = upi.item_id
+		         WHERE upi.project_id = p.id
+		       ), 0) AS total_weight_grams,
+		       COALESCE((
+		         SELECT SUM((COALESCE(i4.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1))
+		         FROM upcycling_project_items upi
+		         JOIN items i4 ON i4.id = upi.item_id
+		         LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i4.material))
+		         WHERE upi.project_id = p.id
+		       ), 0) AS upcycling_score,
+		       (SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
+		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
+		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
+		       EXISTS(SELECT 1 FROM upcycling_project_bookmarks WHERE project_id = p.id AND user_id = $1) AS is_bookmarked,
+		       p.created_at, p.updated_at
+		FROM upcycling_projects p
+		JOIN users u ON u.id = p.pro_user_id
+		LEFT JOIN LATERAL (
+			SELECT img.url
+			FROM upcycling_project_images img
+			WHERE img.project_id = p.id
+			ORDER BY CASE
+				WHEN img.image_type = 'apres' THEN 0
+				WHEN img.image_type = 'avant' THEN 1
+				ELSE 2
+			END,
+			img.added_at DESC
+			LIMIT 1
+		) preview ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT img.url
+			FROM upcycling_project_images img
+			WHERE img.project_id = p.id AND img.image_type = 'avant'
+			ORDER BY img.added_at DESC
+			LIMIT 1
+		) before_img ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT img.url
+			FROM upcycling_project_images img
+			WHERE img.project_id = p.id AND img.image_type = 'apres'
+			ORDER BY img.added_at DESC
+			LIMIT 1
+		) after_img ON TRUE
+		WHERE (
+		  EXISTS(SELECT 1 FROM upcycling_project_likes l WHERE l.project_id = p.id AND l.user_id = $1)
+		  OR
+		  EXISTS(SELECT 1 FROM upcycling_project_bookmarks b WHERE b.project_id = p.id AND b.user_id = $1)
+		)
+		AND p.status = 'publie' AND p.moderation_status = 'approved'
+		GROUP BY p.id, preview.url, before_img.url, after_img.url, u.id, u.firstname, u.lastname, u.company_name, u.created_at
+		ORDER BY p.updated_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []Project
+	for rows.Next() {
+		var p Project
+		if err := rows.Scan(&p.ID, &p.ProUserID, &p.ProDisplayName, &p.ProCompanyName, &p.ProJoinedAt, &p.ProTotalUCScore, &p.ProProjectsSinceSignup,
+			&p.PreviewImage, &p.BeforeImage, &p.AfterImage,
+			&p.Title, &p.Description, &p.Category, &p.Status,
+			&p.ModerationStatus, &p.ModerationNote,
+			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
+			&p.LikeCount, &p.BookmarkCount, &p.IsLiked, &p.IsBookmarked,
+			&p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		p.TotalWeightKg = p.TotalWeightGrams / 1000.0
+		projects = append(projects, p)
+	}
+	if projects == nil {
+		projects = []Project{}
+	}
+	return projects, nil
 }

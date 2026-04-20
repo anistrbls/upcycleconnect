@@ -63,6 +63,9 @@ type User struct {
 	// Note interne
 	AdminNote        string     `json:"adminNote"`
 
+	// Invalidation de session
+	SessionsInvalidBefore *time.Time `json:"sessionsInvalidBefore,omitempty"`
+
 	// Dates
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
@@ -141,8 +144,28 @@ type UpdatePayload struct {
 	AdminNote string `json:"adminNote"`
 }
 
+// UpdateProfilePayload contient les champs modifiables par l'utilisateur lui-même.
+type UpdateProfilePayload struct {
+	Firstname string `json:"firstname"`
+	Lastname  string `json:"lastname"`
+	Email     string `json:"email"`
+	Phone     string `json:"phone"`
+	City      string `json:"city"`
+}
+
+// UpdatePasswordPayload contient les champs pour changer son mot de passe.
+type UpdatePasswordPayload struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
+}
+
 type StatusPayload struct {
 	Status string `json:"status"`
+}
+
+type ResetPasswordPayload struct {
+	Password       string `json:"password"`
+	DisconnectUser bool   `json:"disconnectUser"`
 }
 
 type ListFilters struct {

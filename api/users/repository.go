@@ -71,6 +71,9 @@ func (r *Repository) EnsureSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)`,
+
+		// Invalidation de session
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_invalid_before TIMESTAMPTZ`,
 	}
 
 	for _, stmt := range statements {
@@ -94,7 +97,7 @@ func (r *Repository) List(f ListFilters) ([]User, error) {
 		       activity_type, intervention_zone, subscription_type, subscription_start,
 		       employment_status, job_function, employee_role, site_location, skills,
 		       admin_role, admin_note,
-		       created_at, updated_at, last_login_at
+		       created_at, updated_at, last_login_at, sessions_invalid_before
 		FROM users
 		WHERE ($1 = '' OR firstname ILIKE '%' || $1 || '%'
 		                OR lastname  ILIKE '%' || $1 || '%'
@@ -131,7 +134,7 @@ func (r *Repository) GetByID(id int64) (User, error) {
 		       activity_type, intervention_zone, subscription_type, subscription_start,
 		       employment_status, job_function, employee_role, site_location, skills,
 		       admin_role, admin_note,
-		       created_at, updated_at, last_login_at
+		       created_at, updated_at, last_login_at, sessions_invalid_before
 		FROM users
 		WHERE id = $1
 	`, id)
@@ -183,7 +186,7 @@ func (r *Repository) Create(p CreatePayload, passwordHash string) (User, error) 
 		          activity_type, intervention_zone, subscription_type, subscription_start,
 		          employment_status, job_function, employee_role, site_location, skills,
 		          admin_role, admin_note,
-		          created_at, updated_at, last_login_at
+		          created_at, updated_at, last_login_at, sessions_invalid_before
 	`,
 		strings.TrimSpace(p.Firstname),
 		strings.TrimSpace(p.Lastname),
@@ -259,7 +262,7 @@ func (r *Repository) Update(id int64, p UpdatePayload) (User, error) {
 		          activity_type, intervention_zone, subscription_type, subscription_start,
 		          employment_status, job_function, employee_role, site_location, skills,
 		          admin_role, admin_note,
-		          created_at, updated_at, last_login_at
+		          created_at, updated_at, last_login_at, sessions_invalid_before
 	`,
 		strings.TrimSpace(p.Firstname),
 		strings.TrimSpace(p.Lastname),
@@ -311,7 +314,7 @@ func (r *Repository) SetStatus(id int64, status string) (User, error) {
 		          activity_type, intervention_zone, subscription_type, subscription_start,
 		          employment_status, job_function, employee_role, site_location, skills,
 		          admin_role, admin_note,
-		          created_at, updated_at, last_login_at
+		          created_at, updated_at, last_login_at, sessions_invalid_before
 	`, status, id)
 	return scanRow(row)
 }
@@ -327,12 +330,60 @@ func (r *Repository) EmailExists(email string, excludeID int64) (bool, error) {
 	return exists, err
 }
 
+// SetPassword met à jour le mot de passe d'un utilisateur.
+func (r *Repository) SetPassword(id int64, hash string, invalidateSessions bool) error {
+	query := `UPDATE users SET password_hash = $1, updated_at = NOW()`
+	if invalidateSessions {
+		query += `, sessions_invalid_before = NOW()`
+	}
+	query += ` WHERE id = $2`
+	_, err := r.db.Exec(query, hash, id)
+	return err
+}
+
+// UpdateProfile met à jour les informations de base de l'utilisateur.
+func (r *Repository) UpdateProfile(id int64, p UpdateProfilePayload) (User, error) {
+	row := r.db.QueryRow(`
+		UPDATE users
+		SET firstname = $1,
+		    lastname  = $2,
+		    email     = $3,
+		    phone     = $4,
+		    city      = $5,
+		    updated_at = NOW()
+		WHERE id = $6
+		RETURNING id, firstname, lastname, email, role, status,
+		          phone, city,
+		          company_name, company_manager, siret, address, zip_code,
+		          activity_type, intervention_zone, subscription_type, subscription_start,
+		          employment_status, job_function, employee_role, site_location, skills,
+		          admin_role, admin_note,
+		          created_at, updated_at, last_login_at, sessions_invalid_before
+	`,
+		strings.TrimSpace(p.Firstname),
+		strings.TrimSpace(p.Lastname),
+		strings.ToLower(strings.TrimSpace(p.Email)),
+		strings.TrimSpace(p.Phone),
+		strings.TrimSpace(p.City),
+		id,
+	)
+	return scanRow(row)
+}
+
+// GetPasswordHash retourne le hash du mot de passe pour vérification.
+func (r *Repository) GetPasswordHash(id int64) (string, error) {
+	var hash string
+	err := r.db.QueryRow(`SELECT password_hash FROM users WHERE id = $1`, id).Scan(&hash)
+	return hash, err
+}
+
 // --- helpers scan ---
 
 func scanRows(rows *sql.Rows) (User, error) {
 	var u User
 	var lastLogin sql.NullTime
 	var subscriptionStart sql.NullTime
+	var sessionsInvalidBefore sql.NullTime
 	err := rows.Scan(
 		&u.ID, &u.Firstname, &u.Lastname, &u.Email,
 		&u.Role, &u.Status,
@@ -341,7 +392,7 @@ func scanRows(rows *sql.Rows) (User, error) {
 		&u.ActivityType, &u.InterventionZone, &u.SubscriptionType, &subscriptionStart,
 		&u.EmploymentStatus, &u.JobFunction, &u.EmployeeRole, &u.SiteLocation, &u.Skills,
 		&u.AdminRole, &u.AdminNote,
-		&u.CreatedAt, &u.UpdatedAt, &lastLogin,
+		&u.CreatedAt, &u.UpdatedAt, &lastLogin, &sessionsInvalidBefore,
 	)
 	if err != nil {
 		return User{}, err
@@ -353,6 +404,10 @@ func scanRows(rows *sql.Rows) (User, error) {
 	if subscriptionStart.Valid {
 		t := subscriptionStart.Time
 		u.SubscriptionStart = &t
+	}
+	if sessionsInvalidBefore.Valid {
+		t := sessionsInvalidBefore.Time
+		u.SessionsInvalidBefore = &t
 	}
 	return u, nil
 }
@@ -361,6 +416,7 @@ func scanRow(row *sql.Row) (User, error) {
 	var u User
 	var lastLogin sql.NullTime
 	var subscriptionStart sql.NullTime
+	var sessionsInvalidBefore sql.NullTime
 	err := row.Scan(
 		&u.ID, &u.Firstname, &u.Lastname, &u.Email,
 		&u.Role, &u.Status,
@@ -369,7 +425,7 @@ func scanRow(row *sql.Row) (User, error) {
 		&u.ActivityType, &u.InterventionZone, &u.SubscriptionType, &subscriptionStart,
 		&u.EmploymentStatus, &u.JobFunction, &u.EmployeeRole, &u.SiteLocation, &u.Skills,
 		&u.AdminRole, &u.AdminNote,
-		&u.CreatedAt, &u.UpdatedAt, &lastLogin,
+		&u.CreatedAt, &u.UpdatedAt, &lastLogin, &sessionsInvalidBefore,
 	)
 	if err != nil {
 		return User{}, err
@@ -381,6 +437,10 @@ func scanRow(row *sql.Row) (User, error) {
 	if subscriptionStart.Valid {
 		t := subscriptionStart.Time
 		u.SubscriptionStart = &t
+	}
+	if sessionsInvalidBefore.Valid {
+		t := sessionsInvalidBefore.Time
+		u.SessionsInvalidBefore = &t
 	}
 	return u, nil
 }

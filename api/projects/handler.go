@@ -344,13 +344,92 @@ func (h *Handler) AdminListHandler(w http.ResponseWriter, r *http.Request) {
 
 // ParticulierListPostedHandler gère GET /api/part/projects — liste des projets publiés.
 func (h *Handler) ParticulierListPostedHandler(w http.ResponseWriter, r *http.Request) {
-	projects, err := h.repo.ParticulierListPosted()
+	claims, _ := r.Context().Value("authClaims").(jwt.MapClaims)
+	var userID int64
+	if claims != nil {
+		if uid, ok := claims["userId"].(float64); ok {
+			userID = int64(uid)
+		}
+	}
+
+	projects, err := h.repo.ParticulierListPosted(userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list posted projects")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
 }
+
+// ParticulierDetailHandler gère GET /api/part/projects/{id} — détail d'un projet publié.
+func (h *Handler) ParticulierDetailHandler(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := parseID(r.URL.Path, "/api/part/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	p, err := h.repo.GetByID(projectID, 0) // 0 = pas de vérification ownership
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	// Vérifier que le projet est publié et approuvé
+	if p.Status != StatusPublished || p.ModerationStatus != "approved" {
+		writeError(w, http.StatusForbidden, "project not accessible")
+		return
+	}
+
+	items, _ := h.repo.ListItems(projectID)
+	images, _ := h.repo.ListImages(projectID)
+	author, err := h.repo.AdminProSummary(projectID)
+	if err != nil {
+		author = &ProSummary{
+			UserID:                   p.ProUserID,
+			FullName:                 strings.TrimSpace(p.ProDisplayName),
+			CompanyName:              "N/A",
+			TotalUCScore:             p.UpcyclingScore,
+			TotalProjectsSinceSignup: 1,
+			JoinedAt:                 p.CreatedAt,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project": p,
+		"items":   items,
+		"images":  images,
+		"author":  author,
+	})
+}
+
+// ParticulierListParticipatedHandler gère GET /api/part/projects/participated.
+// Retourne la liste des projets publiés qui utilisent des objets donnés/vendus par l'utilisateur.
+func (h *Handler) ParticulierListParticipatedHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userIDVal, ok := claims["userId"].(float64)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "invalid user id in token")
+		return
+	}
+	userID := int64(userIDVal)
+
+	projects, err := h.repo.ParticulierListParticipated(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not fetch participated projects")
+		return
+	}
+
+	myScore, _ := h.repo.GetUserPersonalScore(userID)
+	myWeight, _ := h.repo.GetUserPersonalWeight(userID)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"projects": projects,
+		"myScore":  myScore,
+		"myWeight": myWeight,
+	})
+}
+
 
 // AdminDetailHandler gère GET /api/admin/projects/{id} — détail d'un projet (admin).
 func (h *Handler) AdminDetailHandler(w http.ResponseWriter, r *http.Request) {
@@ -432,4 +511,78 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// LikeHandler gère POST /api/part/projects/{id}/like.
+func (h *Handler) LikeHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID := int64(claims["userId"].(float64))
+
+	path := strings.TrimSuffix(r.URL.Path, "/like")
+	projectID, ok := parseID(path, "/api/part/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+
+	isLiked, count, err := h.repo.ToggleLike(projectID, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"isLiked":   isLiked,
+		"likeCount": count,
+	})
+}
+
+// BookmarkHandler gère POST /api/part/projects/{id}/bookmark.
+func (h *Handler) BookmarkHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID := int64(claims["userId"].(float64))
+
+	path := strings.TrimSuffix(r.URL.Path, "/bookmark")
+	projectID, ok := parseID(path, "/api/part/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+
+	isBookmarked, count, err := h.repo.ToggleBookmark(projectID, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"isBookmarked":  isBookmarked,
+		"bookmarkCount": count,
+	})
+}
+
+// FavoritesHandler gère GET /api/part/projects/favorites.
+func (h *Handler) FavoritesHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID := int64(claims["userId"].(float64))
+
+	projects, err := h.repo.ParticulierListFavorites(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
 }

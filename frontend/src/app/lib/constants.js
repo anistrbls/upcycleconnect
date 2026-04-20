@@ -57,7 +57,7 @@ export const NAV_MODULES = [
         icon: "M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6 M12 12V2 M12 2l4 4 M12 2L8 6",
         subNav: [
             { key: "deposer", label: "Déposer une annonce", shortLabel: "Déposer" },
-            { key: "mes-annonces", label: "Mes annonces", shortLabel: "Mes" },
+            { key: "mes-annonces", label: "Annonces", shortLabel: "Annonces" },
             { key: "brouillons", label: "Brouillons", shortLabel: "Brouillons" },
         ],
     },
@@ -155,6 +155,15 @@ export const NAV_MODULES = [
             { key: "journal-systeme", label: "Journal système", shortLabel: "Journal" },
         ],
     },
+    {
+        key: "mon-compte",
+        label: "Mon compte",
+        shortLabel: "Compte",
+        icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z",
+        subNav: [
+            { key: "", label: "Mon profil", shortLabel: "Profil" },
+        ],
+    },
 ];
 
 export const PRO_MODULES = [
@@ -176,6 +185,15 @@ export const PRO_MODULES = [
         subNav: [
             { key: "mes-projets", label: "Mes projets", shortLabel: "Mes projets" },
             { key: "nouveau", label: "Nouveau projet", shortLabel: "Nouveau" },
+        ],
+    },
+    {
+        key: "mon-compte",
+        label: "Mon compte",
+        shortLabel: "Compte",
+        icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z",
+        subNav: [
+            { key: "", label: "Mon profil", shortLabel: "Profil" },
         ],
     },
 ];
@@ -232,6 +250,15 @@ export const SALARIE_MODULES = [
             { key: "a-moderer", label: "À modérer", shortLabel: "À modérer" },
         ],
     },
+    {
+        key: "mon-compte",
+        label: "Mon compte",
+        shortLabel: "Compte",
+        icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z",
+        subNav: [
+            { key: "", label: "Mon profil", shortLabel: "Profil" },
+        ],
+    },
 ];
 
 export const PARTICULIER_MODULES = [
@@ -282,6 +309,26 @@ export const PARTICULIER_MODULES = [
         subNav: [
             { key: "tous-conseils", label: "Tous les conseils", shortLabel: "Conseils" },
             { key: "favoris", label: "Mes favoris", shortLabel: "Favoris" },
+        ],
+    },
+    {
+        key: "projets",
+        label: "Projets upcycle",
+        shortLabel: "Projets",
+        icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+        subNav: [
+            { key: "postes", label: "Projets postés", shortLabel: "Postés" },
+            { key: "participes", label: "My Upcycle", shortLabel: "Participés" },
+            { key: "favoris", label: "Projets favoris", shortLabel: "Favoris" },
+        ],
+    },
+    {
+        key: "mon-compte",
+        label: "Mon compte",
+        shortLabel: "Compte",
+        icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z",
+        subNav: [
+            { key: "", label: "Mon profil", shortLabel: "Profil" },
         ],
     },
 ];

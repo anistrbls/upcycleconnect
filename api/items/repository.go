@@ -151,7 +151,7 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		FROM items i
 		JOIN users u ON u.id = i.user_id
 		LEFT JOIN item_logistics l ON l.item_id = i.id
-		AND ($1 = '' OR i.status = $1)
+		WHERE ($1 = '' OR i.status = $1)
 		AND ($2 = '' OR i.title ILIKE '%' || $2 || '%' OR i.description ILIKE '%' || $2 || '%' OR i.city ILIKE '%' || $2 || '%')
 		ORDER BY i.created_at DESC`
 

@@ -9,10 +9,11 @@ const (
 
 // Project représente un projet d'upcycling créé par un professionnel.
 type Project struct {
-	ID                int64     `json:"id"`
-	ProUserID         int64     `json:"proUserId"`
-	ProDisplayName    string    `json:"proDisplayName,omitempty"`
-	ProJoinedAt       time.Time `json:"proJoinedAt,omitempty"`
+	ID                     int64     `json:"id"`
+	ProUserID              int64     `json:"proUserId"`
+	ProDisplayName         string    `json:"proDisplayName,omitempty"`
+	ProCompanyName         string    `json:"companyName,omitempty"`
+	ProJoinedAt            time.Time `json:"proJoinedAt,omitempty"`
 	ProTotalUCScore   float64   `json:"proTotalUCScore"`
 	ProProjectsSinceSignup int  `json:"proProjectsSinceSignup"`
 	PreviewImage      string    `json:"previewImage,omitempty"`
@@ -28,6 +29,10 @@ type Project struct {
 	TotalWeightGrams  float64   `json:"totalWeightGrams"`
 	TotalWeightKg     float64   `json:"totalWeightKg"`
 	UpcyclingScore    float64   `json:"upcyclingScore"`
+	LikeCount         int       `json:"likeCount"`
+	BookmarkCount     int       `json:"bookmarkCount"`
+	IsLiked           bool      `json:"isLiked"`
+	IsBookmarked      bool      `json:"isBookmarked"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 }

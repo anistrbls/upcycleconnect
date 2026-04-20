@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // RegisterRoutes enregistre toutes les routes du module users dans le mux fourni.
@@ -36,14 +38,45 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	mux.Handle("/api/admin/users/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Routing manuel pour la sous-route /status
+		// Routing manuel pour les sous-routes
 		if hasSuffix(path, "/status") {
 			h.StatusHandler(w, r)
+			return
+		}
+		if hasSuffix(path, "/reset-password") {
+			h.ResetPasswordHandler(w, r)
 			return
 		}
 
 		// Route de base : GET/PUT/DELETE /api/admin/users/:id
 		h.ByIDHandler(w, r)
+	})))
+
+	// Routes Profil (pour n'importe quel utilisateur connecté)
+	mux.Handle("/api/profile", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := int64(claims["userId"].(float64))
+
+		if r.Method == http.MethodGet {
+			h.GetProfileHandler(w, userID)
+			return
+		}
+		h.UpdateProfileHandler(w, r, userID)
+	})))
+
+	mux.Handle("/api/profile/password", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := int64(claims["userId"].(float64))
+
+		h.UpdatePasswordHandler(w, r, userID)
 	})))
 }
 
