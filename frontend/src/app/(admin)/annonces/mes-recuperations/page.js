@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { CreditCard, MapPin, PackageCheck, CheckCircle2, CalendarClock, AlertCircle } from "lucide-react";
 
 const styles = {
@@ -275,11 +275,42 @@ function formatDate(value) {
 }
 
 export default function MyRecoveriesPage() {
+    const router = useRouter();
     const searchParams = useSearchParams();
+    const stripeState = (searchParams?.get("stripe") || "").toLowerCase();
+    const stripeSessionId = (searchParams?.get("session_id") || "").trim();
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [busyId, setBusyId] = useState(0);
+    const [accessChecked, setAccessChecked] = useState(false);
+    const [forbidden, setForbidden] = useState(false);
+
+    useEffect(() => {
+        try {
+            const token = localStorage.getItem(TOKEN_KEY);
+            if (!token) {
+                setAccessChecked(true);
+                return;
+            }
+            const payload = JSON.parse(atob(token.split(".")[1] || ""));
+            const role = String(payload?.role || "").toLowerCase();
+            if (role === "particulier") {
+                setForbidden(true);
+                if (stripeState === "success" && stripeSessionId) {
+                    router.replace(`/evenements/activites?stripe=success&session_id=${encodeURIComponent(stripeSessionId)}`);
+                } else if (stripeState === "cancel") {
+                    router.replace("/evenements/activites?stripe=cancel");
+                } else {
+                    router.replace("/evenements/activites");
+                }
+            }
+        } catch {
+            // Ignore parsing errors and fallback to normal guard behavior.
+        } finally {
+            setAccessChecked(true);
+        }
+    }, [router, stripeState, stripeSessionId]);
 
     const fetchReservations = async () => {
         setLoading(true);
@@ -299,17 +330,33 @@ export default function MyRecoveriesPage() {
     };
 
     useEffect(() => {
+        if (!accessChecked || forbidden) {
+            return;
+        }
         fetchReservations();
-    }, []);
-
-    const stripeState = (searchParams?.get("stripe") || "").toLowerCase();
-    const stripeSessionId = (searchParams?.get("session_id") || "").trim();
+    }, [accessChecked, forbidden]);
 
     useEffect(() => {
         let cancelled = false;
 
         const confirmStripeSession = async () => {
             if (stripeState !== "success" || !stripeSessionId) return;
+
+            // Si la session Stripe correspond a un paiement d'evenement,
+            // on redirige tout de suite vers la page evenement particulier.
+            try {
+                const eventRes = await fetch(apiUrl(`/events/confirm-payment?session_id=${encodeURIComponent(stripeSessionId)}`), {
+                    method: "GET",
+                    headers: buildAuthHeaders(),
+                });
+                const eventData = await eventRes.json().catch(() => ({}));
+                if (!cancelled && eventRes.ok && eventData?.eventId) {
+                    router.replace(`/evenements/activites?id=${eventData.eventId}&payment=success`);
+                    return;
+                }
+            } catch {
+                // Ignore: ce n'est probablement pas une session d'evenement.
+            }
 
             for (let attempt = 0; attempt < 5; attempt += 1) {
                 try {
@@ -339,7 +386,7 @@ export default function MyRecoveriesPage() {
         return () => {
             cancelled = true;
         };
-    }, [stripeState, stripeSessionId]);
+    }, [stripeState, stripeSessionId, router]);
 
     const grouped = useMemo(() => {
         const groups = { pending_payment: [], reserved: [], picked_up: [] };
@@ -350,6 +397,10 @@ export default function MyRecoveriesPage() {
         }
         return groups;
     }, [items]);
+
+    if (!accessChecked || forbidden) {
+        return <div style={{ padding: "2rem 0", color: "var(--text-muted)", fontSize: "0.9rem" }}>Redirection...</div>;
+    }
 
     const paymentNotice =
         stripeState === "success"

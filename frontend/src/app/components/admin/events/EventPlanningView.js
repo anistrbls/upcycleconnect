@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const WEEKDAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
@@ -30,7 +31,8 @@ const isSameDay = (left, right) => (
     && left.getDate() === right.getDate()
 );
 
-export default function EventPlanningView({ events, onOpenEvent, title, subtitle }) {
+export default function EventPlanningView({ events = [], title = "Planning des événements", subtitle = "Événements", onOpenEvent }) {
+    const router = useRouter();
     const [currentMonth, setCurrentMonth] = useState(() => {
         const today = new Date();
         return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -43,7 +45,7 @@ export default function EventPlanningView({ events, onOpenEvent, title, subtitle
     const eventsByDay = useMemo(() => {
         const map = new Map();
         events.forEach((item) => {
-            if (item.validationStatus === "rejected") {
+            if (item.validationStatus === "pending" || item.validationStatus === "rejected") {
                 return;
             }
             const key = toDayKey(item.dateDebut);
@@ -101,13 +103,14 @@ export default function EventPlanningView({ events, onOpenEvent, title, subtitle
 
     return (
         <>
-            <div className="header-section">
-                <div className="title-area">
-                    <span className="activities-label">{subtitle ?? "Événements"}</span>
-                    <h1>{title ?? "Planning"}</h1>
+            {(title || subtitle) && (
+                <div className="header-section">
+                    <div className="title-area">
+                        {subtitle && <span className="activities-label">{subtitle}</span>}
+                        {title && <h1>{title}</h1>}
+                    </div>
                 </div>
-            </div>
-
+            )}
             <div className="panel" style={{ display: "grid", gap: "1rem" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -182,7 +185,7 @@ export default function EventPlanningView({ events, onOpenEvent, title, subtitle
                                                 key={item.id}
                                                 onClick={(event) => {
                                                     event.stopPropagation();
-                                                    onOpenEvent(item);
+                                                    router.push(`/evenements/${item.id}`);
                                                 }}
                                                 style={{
                                                     fontSize: "0.7rem",
@@ -237,25 +240,38 @@ export default function EventPlanningView({ events, onOpenEvent, title, subtitle
                                     <button
                                         key={item.id}
                                         type="button"
-                                        onClick={() => onOpenEvent(item)}
+                                        onClick={() => router.push(`/evenements/${item.id}`)}
                                         style={{
                                             border: "1px solid #d8e3e4",
                                             textAlign: "left",
                                             width: "100%",
-                                            borderRadius: "12px",
+                                            borderRadius: "16px",
                                             padding: "0.75rem",
                                             background: "#ffffff",
-                                            display: "grid",
-                                            gap: "0.3rem",
+                                            display: "flex",
+                                            gap: "1rem",
+                                            alignItems: "center",
                                             cursor: "pointer",
+                                            transition: "transform 0.1s, box-shadow 0.1s",
                                         }}
                                     >
-                                        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.7rem", alignItems: "center" }}>
-                                            <span style={{ fontWeight: 600 }}>{item.name}</span>
-                                            <span className="db-badge" style={{ background: item.status === "valide" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>{item.status}</span>
+                                        <div style={{ width: "110px", height: "110px", borderRadius: "18px", background: "#f0f4f5", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                            {item.imageUrl ? (
+                                                <img src={item.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                            ) : (
+                                                <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#cbd5e1" }}>{item.name?.charAt(0) || "?"}</div>
+                                            )}
                                         </div>
-                                        <span style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>{startText} - {endText}</span>
-                                        <span style={{ fontSize: "0.84rem", color: "var(--text-main)" }}>{item.lieu || "Lieu à confirmer"}</span>
+                                        <div style={{ flex: 1, display: "grid", gap: "0.25rem" }}>
+                                            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.7rem", alignItems: "center" }}>
+                                                <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>{item.name}</span>
+                                                <span className="db-badge" style={{ background: item.status === "valide" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>{item.status}</span>
+                                            </div>
+                                            <div style={{ display: "flex", flexDirection: "column" }}>
+                                                <span style={{ color: "var(--text-muted)", fontSize: "0.82rem", fontWeight: 500 }}>{startText} - {endText}</span>
+                                                <span style={{ fontSize: "0.84rem", color: "var(--text-main)", opacity: 0.8 }}>{item.lieu || "Lieu à confirmer"}</span>
+                                            </div>
+                                        </div>
                                     </button>
                                 );
                             })}

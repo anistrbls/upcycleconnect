@@ -226,12 +226,12 @@ body {
 }
 
 .action-btn.primary {
-  background-color: var(--black);
-  color: #fff;
+  background-color: #fff;
+  color: var(--black);
 }
 
 .action-btn.primary:hover {
-  background-color: #1D2426;
+  background-color: #f0f4f5;
 }
 
 .action-btn svg {

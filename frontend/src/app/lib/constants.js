@@ -95,6 +95,7 @@ export const NAV_MODULES = [
         subNav: [
             { key: "tous-evenements", label: "Tous les événements", shortLabel: "Tous" },
             { key: "planning", label: "Planning", shortLabel: "Planning" },
+            { key: "moderation", label: "Modération", shortLabel: "Modération" },
         ],
     },
     {
@@ -214,7 +215,7 @@ export const SALARIE_MODULES = [
         key: "salarie-formations",
         label: "Formations & événements",
         shortLabel: "Formations",
-        icon: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z",
+        icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12.01l8.73-5.05 M12 22.08V12",
         subNav: [
             { key: "creer", label: "Création d'événements", shortLabel: "Création" },
             { key: "mes-evenements", label: "Mes événements", shortLabel: "Mes événements" },
@@ -290,14 +291,6 @@ export const PARTICULIER_MODULES = [
         subNav: [
             { key: "activites", label: "Activités", shortLabel: "Activités" },
             { key: "mes-inscriptions", label: "Mes inscriptions", shortLabel: "Inscriptions" },
-        ],
-    },
-    {
-        key: "particulier-planning",
-        label: "Mon planning",
-        shortLabel: "Planning",
-        icon: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z",
-        subNav: [
             { key: "agenda", label: "Agenda", shortLabel: "Agenda" },
         ],
     },

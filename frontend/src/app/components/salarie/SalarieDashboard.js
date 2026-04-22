@@ -11,13 +11,21 @@ const KpiCard = ({ title, value, trend, accent }) => (
     </div>
 );
 
+import { useRouter } from "next/navigation";
+
 const EventRow = ({ event }) => {
+    const router = useRouter();
     const start = new Date(event.dateDebut);
     const dateStr = Number.isNaN(start.getTime()) ? "-" : start.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
     const timeStr = Number.isNaN(start.getTime()) ? "" : start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
     return (
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.65rem 0", borderBottom: "1px solid #EAF0F1" }}>
+        <div 
+            onClick={() => router.push(`/salarie-formations/mes-evenements?id=${event.id}`)}
+            style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.65rem 0", borderBottom: "1px solid #EAF0F1", cursor: "pointer", transition: "background 0.2s" }}
+            onMouseOver={(e) => e.currentTarget.style.background = "var(--surface-hover)"}
+            onMouseOut={(e) => e.currentTarget.style.background = "transparent"}
+        >
             <div style={{ background: "#E5FFBC", borderRadius: "12px", padding: "0.4rem 0.7rem", minWidth: "72px", textAlign: "center" }}>
                 <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600 }}>{dateStr.split(" ")[1]?.toUpperCase()}</div>
                 <div style={{ fontSize: "1.1rem", fontWeight: 700, lineHeight: 1 }}>{dateStr.split(" ")[0]}</div>

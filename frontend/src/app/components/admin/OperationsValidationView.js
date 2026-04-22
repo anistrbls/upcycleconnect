@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import AdminModal from "./AdminModal";
 import { fieldStyle, labelStyle, pillInputStyle } from "../../lib/styles";
 import { formatDateFR } from "../../lib/formatters";
@@ -11,6 +12,17 @@ const TABS = [
     { key: "annonces", label: "Annonces" },
     { key: "projets", label: "Projets" },
 ];
+
+const IconTrash = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
+    </svg>
+);
+const IconPencil = () => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </svg>
+);
 
 // ─── Onglet Conseils ──────────────────────────────────────────────────────────
 
@@ -114,6 +126,7 @@ function ConseilsValidation({ contents, loading, errorMessage, onReload, onValid
 // ─── Onglet Événements ────────────────────────────────────────────────────────
 
 function EvenementsValidation({ events, loading, errorMessage, onReload, onValidate, onReject }) {
+    const router = useRouter();
     const [query, setQuery] = useState("");
     const [rejectTarget, setRejectTarget] = useState(null);
     const [rejectComment, setRejectComment] = useState("");
@@ -134,6 +147,10 @@ function EvenementsValidation({ events, loading, errorMessage, onReload, onValid
     };
 
     const openReject = (event) => { setRejectTarget(event); setRejectComment(""); setLocalError(""); };
+
+    const goToEventDetails = (eventId) => {
+        router.push(`/evenements/tous-evenements?id=${eventId}`);
+    };
 
     const handleRejectSubmit = async (e) => {
         e.preventDefault();
@@ -164,37 +181,117 @@ function EvenementsValidation({ events, loading, errorMessage, onReload, onValid
 
             {errorMessage && <p style={{ color: "#a23b3b", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{errorMessage}</p>}
 
-            <div className="panel">
+            <div>
                 <div className="section-header" style={{ marginBottom: "0.75rem" }}>
                     <span className="section-title">Événements en attente</span>
-                    <span className="db-badge" style={{ background: "#FFF3E0", color: "#A56A2A" }}>{pending.length}</span>
                 </div>
 
                 {loading && <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>}
                 {!loading && pending.length === 0 && (
                     <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Aucun événement en attente de validation.</p>
                 )}
-                {!loading && pending.map((event) => (
-                    <div key={event.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "1rem", alignItems: "start", padding: "1rem 0", borderBottom: "1px solid #EAF0F1" }}>
-                        <div style={{ minWidth: 0 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.3rem" }}>
-                                <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>{event.name}</span>
-                                {event.intervenant && (
-                                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>par {event.intervenant}</span>
-                                )}
-                            </div>
-                            <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                                {event.dateDebut && <span>{formatDateFR(event.dateDebut)}</span>}
-                                {event.lieu && <span>{event.lieu}</span>}
-                                {event.type && <span className="db-badge" style={{ background: "#EAF4FF", textTransform: "capitalize" }}>{event.type}</span>}
-                            </div>
-                        </div>
-                        <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0, paddingTop: "0.15rem" }}>
-                            <button className="action-cta task-action-btn" style={{ fontSize: "0.78rem", padding: "0.4rem 0.85rem" }} type="button" onClick={() => handleValidate(event)}>Valider</button>
-                            <button className="action-cta" style={{ fontSize: "0.78rem", padding: "0.4rem 0.85rem", background: "#FDE8E8", color: "#a23b3b" }} type="button" onClick={() => openReject(event)}>Refuser</button>
-                        </div>
+                {!loading && pending.length > 0 && (
+                    <div style={{ display: "grid", gap: "1.25rem", gridTemplateColumns: "repeat(auto-fill, minmax(min(380px, 100%), 1fr))" }}>
+                        {pending.map((event) => (
+                            <article
+                                key={event.id}
+                                onClick={() => goToEventDetails(event.id)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        goToEventDetails(event.id);
+                                    }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                style={{
+                                    position: "relative",
+                                    borderRadius: "28px",
+                                    overflow: "hidden",
+                                    height: "400px",
+                                    background: "#111",
+                                    boxShadow: "0 4px 24px rgba(0,0,0,0.10)",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                <img
+                                    src={event.imageUrl || ""}
+                                    alt={event.name}
+                                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                                />
+                                <div style={{ position: "absolute", inset: 0, backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", maskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)", WebkitMaskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)", pointerEvents: "none" }} />
+                                <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(5, 10, 5, 0.92) 0%, rgba(5, 10, 5, 0.6) 38%, rgba(5, 10, 5, 0.1) 62%, transparent 78%)", pointerEvents: "none" }} />
+
+                                <div style={{ position: "absolute", top: "14px", right: "14px", zIndex: 2, display: "flex", gap: "0.4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                    <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(255, 255, 255, 0.12)", color: "#EAF5F4", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255, 255, 255, 0.22)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                                        En attente
+                                    </span>
+                                </div>
+
+                                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.65rem", zIndex: 2 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "0.75rem" }}>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                goToEventDetails(event.id);
+                                            }}
+                                            style={{
+                                                border: "none",
+                                                background: "none",
+                                                padding: 0,
+                                                margin: 0,
+                                                color: "white",
+                                                fontWeight: 700,
+                                                fontSize: "1.15rem",
+                                                lineHeight: 1.3,
+                                                textAlign: "left",
+                                                cursor: "pointer",
+                                                flex: 1,
+                                            }}
+                                        >
+                                            {event.name}
+                                        </button>
+                                        <div style={{ padding: "5px 14px", borderRadius: "999px", background: "rgba(255, 255, 255, 0.15)", color: "white", fontSize: "0.88rem", fontWeight: 700, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255, 255, 255, 0.25)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                                            {event.pricingType === "payant" && Number(event.price) > 0 ? `${Number(event.price).toLocaleString("fr-FR")} €` : "Gratuit"}
+                                        </div>
+                                    </div>
+
+                                    <p style={{ fontSize: "0.82rem", color: "rgba(255, 255, 255, 0.7)", margin: 0, lineHeight: 1.5 }}>
+                                        {event.dateDebut
+                                            ? new Date(event.dateDebut).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                                            : "Date non renseignée"}
+                                        {event.lieu ? ` · ${event.lieu}` : ""}
+                                    </p>
+
+                                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                                        {event.type && (
+                                            <span style={{ padding: "4px 12px", borderRadius: "999px", background: "rgba(255, 255, 255, 0.12)", fontSize: "0.75rem", color: "rgba(255, 255, 255, 0.85)", fontWeight: 500, border: "1px solid rgba(255, 255, 255, 0.2)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", textTransform: "capitalize" }}>
+                                                {event.type}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                                        <button type="button" title="Modifier" onClick={(e) => { e.stopPropagation(); goToEventDetails(event.id); }} style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(255, 255, 255, 0.25)", background: "rgba(255, 255, 255, 0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                            <IconPencil />
+                                        </button>
+                                        <button type="button" title="Supprimer" onClick={(e) => { e.stopPropagation(); openReject(event); }} style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(220, 60, 60, 0.35)", background: "rgba(220, 60, 60, 0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "rgb(255, 128, 128)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                            <IconTrash />
+                                        </button>
+                                        <button type="button" onClick={(e) => { e.stopPropagation(); handleValidate(event); }} style={{ flex: 1, padding: "0.72rem 0.8rem", borderRadius: "999px", border: "1px solid rgba(255, 255, 255, 0.28)", background: "rgba(255, 255, 255, 0.16)", color: "rgba(255, 255, 255, 0.95)", fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 650, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.35rem", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
+                                            Valider
+                                        </button>
+                                        <button type="button" onClick={(e) => { e.stopPropagation(); openReject(event); }} style={{ flex: 1, padding: "0.72rem 1rem", borderRadius: "999px", border: "1px solid rgba(248, 113, 113, 0.45)", background: "rgba(185, 28, 28, 0.32)", color: "#ffe4e6", fontFamily: "inherit", fontSize: "0.84rem", fontWeight: 650, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
+                                            Refuser
+                                        </button>
+                                    </div>
+                                </div>
+                            </article>
+                        ))}
                     </div>
-                ))}
+                )}
             </div>
 
             <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.name || ""}`} onClose={() => setRejectTarget(null)}>
