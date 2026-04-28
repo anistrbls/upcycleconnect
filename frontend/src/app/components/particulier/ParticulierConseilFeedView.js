@@ -153,7 +153,7 @@ export default function ParticulierConseilFeedView({ feedItems = [], loading, er
 
             {errorMessage && <p style={{ color: "#a23b3b", fontSize: "0.85rem", marginBottom: "1rem" }}>{errorMessage}</p>}
 
-            <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px" }}>
+            <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px", marginLeft: "auto", marginRight: "auto" }}>
                 {loading && [1, 2, 3].map((k) => (
                     <div key={k} style={{ background: "#F7F9F9", borderRadius: "20px", height: "130px", opacity: 0.5 }} />
                 ))}

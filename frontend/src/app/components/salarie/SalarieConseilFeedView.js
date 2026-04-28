@@ -430,7 +430,7 @@ export default function SalarieConseilFeedView({
                     </div>
                 )}
                 {!loading && drafts.length > 0 && (
-                    <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px" }}>
+                    <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px", marginLeft: "auto", marginRight: "auto" }}>
                         {drafts.map((item, idx) => (
                             <ConseilCard
                                 key={item.id}
@@ -530,7 +530,7 @@ export default function SalarieConseilFeedView({
             {!loading && feedItems.length > 0 && <div className="feed-divider">Conseils publiés</div>}
 
             {/* Feed */}
-            <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px" }}>
+            <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px", marginLeft: "auto", marginRight: "auto" }}>
                 {loading && [1, 2, 3].map((k) => (
                     <div key={k} style={{ background: "#F7F9F9", borderRadius: "20px", height: "130px", opacity: 0.5 }} />
                 ))}

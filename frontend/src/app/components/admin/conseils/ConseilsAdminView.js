@@ -114,7 +114,11 @@ function AdminConseilCard({ item, onDetail, onEdit, onValidate, onOpenReject, on
                     <p style={{ fontSize: "0.8rem", color: "#B24A4A", margin: 0 }}>{item.rejectionComment}</p>
                 </div>
             )}
-            <div style={{ borderTop: "1px solid #EFF3F4", marginTop: "0.85rem", paddingTop: "0.55rem", display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+            <div style={{ borderTop: "1px solid #EFF3F4", marginTop: "0.85rem", paddingTop: "0.65rem", display: "flex", gap: "1rem", fontSize: "0.8rem", color: "#71767B", marginBottom: "0.5rem" }}>
+                <span><strong style={{ color: "#0F1419" }}>{item.likeCount ?? 0}</strong> J&apos;aime</span>
+                <span><strong style={{ color: "#0F1419" }}>{item.favoriteCount ?? 0}</strong> Favoris</span>
+            </div>
+            <div style={{ borderTop: "1px solid #EFF3F4", paddingTop: "0.55rem", display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                 <button type="button" onClick={() => onDetail(item)} title="Voir" style={btnIcon}><IconEye /></button>
                 <button type="button" onClick={() => onEdit(item)} title="Modifier" style={btnIcon}><IconPencil /></button>
                 {item.status === "en_attente" && (
@@ -295,6 +299,14 @@ function ConseilDetailView({ item, onBack, onEdit, onDelete, onValidate, onOpenR
                             <div style={{ display: "flex", justifyContent: "space-between" }}>
                                 <span style={{ color: "var(--text-muted)" }}>Modifié le</span>
                                 <span>{formatDateFR(item.updatedAt)}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                <span style={{ color: "var(--text-muted)" }}>J&apos;aime</span>
+                                <span style={{ fontWeight: 600 }}>{item.likeCount ?? 0}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                <span style={{ color: "var(--text-muted)" }}>Favoris</span>
+                                <span style={{ fontWeight: 600 }}>{item.favoriteCount ?? 0}</span>
                             </div>
                             {item.isPinned && (
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.25rem", padding: "0.45rem 0.65rem", borderRadius: "10px", background: "#FFF8EC", border: "1px solid #f3d9a0" }}>

@@ -60,7 +60,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       # Clé secrète pour signer les tokens JWT (valeur par défaut en dev seulement)
       - JWT_SECRET=${JWT_SECRET:-dev-only-secret-change-me-please}
-      - JWT_EXPIRES_HOURS=${JWT_EXPIRES_HOURS:-12}
+      - JWT_EXPIRES_HOURS=${JWT_EXPIRES_HOURS:-168}
       # Compte admin créé automatiquement au démarrage
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@upcycleconnect.fr}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin1234}

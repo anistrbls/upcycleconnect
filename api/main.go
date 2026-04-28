@@ -484,17 +484,17 @@ type servicePayload struct {
 }
 
 type eventPayload struct {
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	CategoryID       int64  `json:"categoryId"`
-	Type             string `json:"type"`
-	DateDebut        string `json:"dateDebut"`
-	DateFin          string `json:"dateFin"`
-	Lieu             string `json:"lieu"`
-	Capacite         *int64 `json:"capacite"`
-	Status           string `json:"status"`
-	Intervenant      string `json:"intervenant"`
-	IntervenantID    *int64 `json:"intervenantId"`
+	Name             string  `json:"name"`
+	Description      string  `json:"description"`
+	CategoryID       int64   `json:"categoryId"`
+	Type             string  `json:"type"`
+	DateDebut        string  `json:"dateDebut"`
+	DateFin          string  `json:"dateFin"`
+	Lieu             string  `json:"lieu"`
+	Capacite         *int64  `json:"capacite"`
+	Status           string  `json:"status"`
+	Intervenant      string  `json:"intervenant"`
+	IntervenantID    *int64  `json:"intervenantId"`
 	ValidationStatus string  `json:"validationStatus"`
 	RejectionComment string  `json:"rejectionComment"`
 	ImageUrl         string  `json:"imageUrl"`
@@ -2519,7 +2519,7 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rows, err := db.Query(`
-			SELECT id, user_id, type, title, body, status, rejection_comment, created_at, updated_at
+			SELECT id, user_id, type, title, body, status, rejection_comment, image_url, created_at, updated_at
 			FROM salarie_contents
 			WHERE user_id = $1
 			ORDER BY created_at DESC
@@ -2532,15 +2532,16 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		items := make([]map[string]interface{}, 0)
 		for rows.Next() {
 			var id, userID int64
-			var contentType, title, body, status, rejectionComment string
+			var contentType, title, body, status, rejectionComment, imageURL string
 			var createdAt, updatedAt time.Time
-			if err := rows.Scan(&id, &userID, &contentType, &title, &body, &status, &rejectionComment, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &userID, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &createdAt, &updatedAt); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse content")
 				return
 			}
 			items = append(items, map[string]interface{}{
 				"id": id, "userId": userID, "type": contentType, "title": title,
 				"body": body, "status": status, "rejectionComment": rejectionComment,
+				"imageUrl":  imageURL,
 				"createdAt": createdAt.UTC().Format(time.RFC3339),
 				"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 			})
@@ -2566,10 +2567,11 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var payload struct {
-			Type   string `json:"type"`
-			Title  string `json:"title"`
-			Body   string `json:"body"`
-			Status string `json:"status"`
+			Type     string `json:"type"`
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			Status   string `json:"status"`
+			ImageUrl string `json:"imageUrl"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -2600,10 +2602,10 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			postStatus = "en_attente"
 		}
 		err := db.QueryRow(`
-			INSERT INTO salarie_contents (user_id, type, title, body, status)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO salarie_contents (user_id, type, title, body, status, image_url)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id, created_at, updated_at
-		`, userID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), postStatus).Scan(&id, &createdAt, &updatedAt)
+		`, userID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), postStatus, strings.TrimSpace(payload.ImageUrl)).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create content")
 			return
@@ -2611,6 +2613,7 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": id, "userId": userID, "type": payload.Type,
 			"title": strings.TrimSpace(payload.Title), "body": strings.TrimSpace(payload.Body),
+			"imageUrl":  strings.TrimSpace(payload.ImageUrl),
 			"status":    postStatus,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
@@ -2779,10 +2782,11 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPut:
 		var payload struct {
-			Title  string `json:"title"`
-			Body   string `json:"body"`
-			Status string `json:"status"`
-			Type   string `json:"type"`
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			Status   string `json:"status"`
+			Type     string `json:"type"`
+			ImageUrl string `json:"imageUrl"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -2801,9 +2805,9 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		var updatedAt time.Time
 		res := db.QueryRow(`
-			UPDATE salarie_contents SET title = $1, body = $2, status = $3, rejection_comment = CASE WHEN $3 = 'en_attente' THEN '' ELSE rejection_comment END, updated_at = NOW()
-			WHERE id = $4 RETURNING updated_at
-		`, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, id)
+			UPDATE salarie_contents SET title = $1, body = $2, status = $3, image_url = $4, rejection_comment = CASE WHEN $3 = 'en_attente' THEN '' ELSE rejection_comment END, updated_at = NOW()
+			WHERE id = $5 RETURNING updated_at
+		`, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, strings.TrimSpace(payload.ImageUrl), id)
 		if err := res.Scan(&updatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "content not found")
@@ -2843,7 +2847,9 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
 
 		rows, err := db.Query(`
-			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.is_pinned, sc.created_at, sc.updated_at
+			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.is_pinned, sc.created_at, sc.updated_at,
+			       (SELECT COUNT(*) FROM conseil_likes cl WHERE cl.content_id = sc.id) AS like_count,
+			       (SELECT COUNT(*) FROM conseil_favorites cf WHERE cf.content_id = sc.id) AS favorite_count
 			FROM salarie_contents sc
 			JOIN users u ON u.id = sc.user_id
 			WHERE ($1 = '' OR sc.status = $1)
@@ -2861,8 +2867,9 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			var id, userID int64
 			var firstname, lastname, contentType, title, body, status, rejectionComment, imageURL string
 			var isPinned bool
+			var likeCount, favoriteCount int64
 			var createdAt, updatedAt time.Time
-			if err := rows.Scan(&id, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &isPinned, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &isPinned, &createdAt, &updatedAt, &likeCount, &favoriteCount); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse content")
 				return
 			}
@@ -2876,6 +2883,8 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 				"rejectionComment": rejectionComment,
 				"imageUrl":         imageURL,
 				"isPinned":         isPinned,
+				"likeCount":        likeCount,
+				"favoriteCount":    favoriteCount,
 				"createdAt":        createdAt.UTC().Format(time.RFC3339),
 				"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 			})
