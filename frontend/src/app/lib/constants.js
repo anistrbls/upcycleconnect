@@ -109,6 +109,16 @@ export const NAV_MODULES = [
         ],
     },
     {
+        key: "forum",
+        label: "Forum",
+        shortLabel: "Forum",
+        icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        subNav: [
+            { key: "sujets", label: "Tous les sujets", shortLabel: "Sujets" },
+            { key: "moderation", label: "Modération", shortLabel: "Modération" },
+        ],
+    },
+    {
         key: "finances",
         label: "Finances",
         shortLabel: "Finances",
@@ -189,6 +199,15 @@ export const PRO_MODULES = [
         ],
     },
     {
+        key: "forum",
+        label: "Forum",
+        shortLabel: "Forum",
+        icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        subNav: [
+            { key: "sujets", label: "Forum", shortLabel: "Forum" },
+        ],
+    },
+    {
         key: "mon-compte",
         label: "Mon compte",
         shortLabel: "Compte",
@@ -249,6 +268,16 @@ export const SALARIE_MODULES = [
         icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
         subNav: [
             { key: "a-moderer", label: "À modérer", shortLabel: "À modérer" },
+        ],
+    },
+    {
+        key: "forum",
+        label: "Forum",
+        shortLabel: "Forum",
+        icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        subNav: [
+            { key: "sujets", label: "Tous les sujets", shortLabel: "Sujets" },
+            { key: "moderation", label: "Signalements", shortLabel: "Signalements" },
         ],
     },
     {
@@ -313,6 +342,15 @@ export const PARTICULIER_MODULES = [
             { key: "postes", label: "Projets postés", shortLabel: "Postés" },
             { key: "participes", label: "My Upcycle", shortLabel: "Participés" },
             { key: "favoris", label: "Projets favoris", shortLabel: "Favoris" },
+        ],
+    },
+    {
+        key: "forum",
+        label: "Forum",
+        shortLabel: "Forum",
+        icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        subNav: [
+            { key: "sujets", label: "Forum", shortLabel: "Forum" },
         ],
     },
     {

@@ -293,6 +293,19 @@ func main() {
 	// Module salarié — événements (mes formations)
 	mux.Handle("/api/salarie/events", authMiddleware(http.HandlerFunc(salarieMemberEventsHandler)))
 	mux.Handle("/api/salarie/events/", authMiddleware(http.HandlerFunc(salarieMemberEventByIDHandler)))
+
+	// Module Forum
+	if err := ensureForumSchema(); err != nil {
+		log.Fatalf("Forum schema error: %v", err)
+	}
+	log.Println("✓ Forum schema initialized")
+	mux.Handle("/api/forum/topics", authMiddleware(http.HandlerFunc(forumTopicsHandler)))
+	mux.Handle("/api/forum/topics/", authMiddleware(http.HandlerFunc(forumTopicByIDHandler)))
+	mux.Handle("/api/forum/replies", authMiddleware(http.HandlerFunc(forumRepliesHandler)))
+	mux.Handle("/api/forum/replies/", authMiddleware(http.HandlerFunc(forumReplyByIDHandler)))
+	mux.Handle("/api/forum/reports", authMiddleware(http.HandlerFunc(forumReportsHandler)))
+	mux.Handle("/api/forum/reports/", authMiddleware(http.HandlerFunc(forumReportByIDHandler)))
+
 	port := getEnv("API_PORT", "8080")
 
 	loggerMiddleware := func(next http.Handler) http.Handler {
@@ -535,7 +548,6 @@ type eventPayload struct {
 type eventRejectPayload struct {
 	Comment string `json:"comment"`
 }
-
 
 func ensureOffersSchema() error {
 	statements := []string{
@@ -1352,8 +1364,6 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-
-
 		var intervenantName string
 		var intervenantID sql.NullInt64
 		if payload.IntervenantID != nil {
@@ -1513,8 +1523,6 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-
-
 
 		var intervenantName string
 		var intervenantID sql.NullInt64
@@ -1862,30 +1870,30 @@ func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		item := map[string]interface{}{
-			"id":               id,
-			"name":             name,
-			"description":      description,
-			"type":             typeName,
-			"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
-			"dateFin":          dateFin.UTC().Format(time.RFC3339),
-			"lieu":             lieu,
-			"capacite":         nil,
-			"status":           status,
-			"intervenant":      intervenant,
-			"intervenantId":    nil,
-			"validationStatus": validationStatus,
-			"rejectionComment": rejectionComment,
-			"imageUrl":         imageUrl,
-			"pricingType":      pricingType,
-			"price":            price,
-			"participantCount": participantCount,
-			"paymentStatus":    paymentStatus,
+			"id":                 id,
+			"name":               name,
+			"description":        description,
+			"type":               typeName,
+			"dateDebut":          dateDebut.UTC().Format(time.RFC3339),
+			"dateFin":            dateFin.UTC().Format(time.RFC3339),
+			"lieu":               lieu,
+			"capacite":           nil,
+			"status":             status,
+			"intervenant":        intervenant,
+			"intervenantId":      nil,
+			"validationStatus":   validationStatus,
+			"rejectionComment":   rejectionComment,
+			"imageUrl":           imageUrl,
+			"pricingType":        pricingType,
+			"price":              price,
+			"participantCount":   participantCount,
+			"paymentStatus":      paymentStatus,
 			"registrationStatus": regStatus,
-			"refundStatus":     refundStatus,
-			"refundAmount":     refundAmount,
-			"transactionRef":   nil,
-			"createdAt":        createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
+			"refundStatus":       refundStatus,
+			"refundAmount":       refundAmount,
+			"transactionRef":     nil,
+			"createdAt":          createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":          updatedAt.UTC().Format(time.RFC3339),
 		}
 		if capacite.Valid {
 			item["capacite"] = capacite.Int64
@@ -2064,7 +2072,7 @@ func adminEventRegistrationMarkAbsentHandler(w http.ResponseWriter, r *http.Requ
 	}
 	idRaw := parts[4]
 	userIDRaw := parts[6]
-	
+
 	id, err := strconv.ParseInt(idRaw, 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid event id")
@@ -2397,9 +2405,9 @@ func eventConfirmPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	`, eventID)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"ok":          true,
-		"eventId":     eventID,
-		"registered":  true,
+		"ok":            true,
+		"eventId":       eventID,
+		"registered":    true,
 		"paymentStatus": "paid",
 	})
 }
@@ -2535,8 +2543,6 @@ func parseAdminEventActionID(path string, action string) (int64, error) {
 	}
 	return id, nil
 }
-
-
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -4692,8 +4698,6 @@ func salarieMemberEventsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-
-
 		var firstname, lastname string
 		_ = db.QueryRow(`SELECT firstname, lastname FROM users WHERE id = $1`, userID).Scan(&firstname, &lastname)
 		intervenantName := strings.TrimSpace(firstname + " " + lastname)
@@ -4776,7 +4780,6 @@ func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-
 
 		capacity := sql.NullInt64{}
 		if payload.Capacite != nil {
@@ -4903,3 +4906,537 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": transactions})
 }
 func (t *PaymentTransaction) placeholder() {} // avoid unused struct warning if needed, but not here
+
+// ─── FORUM ────────────────────────────────────────────────────────────────────
+
+func ensureForumSchema() error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS forum_topics (
+			id         BIGSERIAL PRIMARY KEY,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			title      TEXT NOT NULL,
+			content    TEXT NOT NULL DEFAULT '',
+			status     TEXT NOT NULL DEFAULT 'open',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			CONSTRAINT forum_topics_status_check CHECK (status IN ('open','closed','hidden'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS forum_replies (
+			id         BIGSERIAL PRIMARY KEY,
+			topic_id   BIGINT NOT NULL REFERENCES forum_topics(id) ON DELETE CASCADE,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			content    TEXT NOT NULL,
+			status     TEXT NOT NULL DEFAULT 'visible',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			CONSTRAINT forum_replies_status_check CHECK (status IN ('visible','reported','hidden','deleted'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS forum_reports (
+			id          BIGSERIAL PRIMARY KEY,
+			topic_id    BIGINT REFERENCES forum_topics(id) ON DELETE CASCADE,
+			reply_id    BIGINT REFERENCES forum_replies(id) ON DELETE CASCADE,
+			reported_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			reason      TEXT NOT NULL DEFAULT '',
+			status      TEXT NOT NULL DEFAULT 'pending',
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			CONSTRAINT forum_reports_status_check CHECK (status IN ('pending','resolved','ignored'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS forum_reply_likes (
+			user_id  BIGINT NOT NULL,
+			reply_id BIGINT NOT NULL,
+			PRIMARY KEY (user_id, reply_id)
+		)`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func forumCallerID(r *http.Request) (int64, string, error) {
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	email, _ := claims["sub"].(string)
+	role, _ := claims["role"].(string)
+	var id int64
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&id); err != nil {
+		return 0, "", err
+	}
+	return id, role, nil
+}
+
+// GET /api/forum/topics          — liste
+// POST /api/forum/topics         — créer un sujet
+func forumTopicsHandler(w http.ResponseWriter, r *http.Request) {
+	callerID, callerRole, err := forumCallerID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		statusFilter := r.URL.Query().Get("status") // "" = tous visibles
+		var rows *sql.Rows
+		if callerRole == "admin" || callerRole == "salarie" {
+			if statusFilter != "" {
+				rows, err = db.Query(`
+					SELECT t.id, t.user_id, u.firstname, u.lastname, t.title, t.content, t.status, t.created_at, t.updated_at,
+					       (SELECT COUNT(*) FROM forum_replies r WHERE r.topic_id = t.id AND r.status != 'deleted') AS reply_count
+					FROM forum_topics t JOIN users u ON u.id = t.user_id
+					WHERE t.status = $1 ORDER BY t.created_at DESC
+				`, statusFilter)
+			} else {
+				rows, err = db.Query(`
+					SELECT t.id, t.user_id, u.firstname, u.lastname, t.title, t.content, t.status, t.created_at, t.updated_at,
+					       (SELECT COUNT(*) FROM forum_replies r WHERE r.topic_id = t.id AND r.status != 'deleted') AS reply_count
+					FROM forum_topics t JOIN users u ON u.id = t.user_id ORDER BY t.created_at DESC
+				`)
+			}
+		} else {
+			rows, err = db.Query(`
+				SELECT t.id, t.user_id, u.firstname, u.lastname, t.title, t.content, t.status, t.created_at, t.updated_at,
+				       (SELECT COUNT(*) FROM forum_replies r WHERE r.topic_id = t.id AND r.status != 'deleted') AS reply_count
+				FROM forum_topics t JOIN users u ON u.id = t.user_id
+				WHERE t.status IN ('open','closed') ORDER BY t.created_at DESC
+			`)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list topics")
+			return
+		}
+		defer rows.Close()
+		items := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, userID, replyCount int64
+			var fn, ln, title, content, status string
+			var createdAt, updatedAt time.Time
+			if err := rows.Scan(&id, &userID, &fn, &ln, &title, &content, &status, &createdAt, &updatedAt, &replyCount); err != nil {
+				continue
+			}
+			items = append(items, map[string]interface{}{
+				"id": id, "userId": userID,
+				"authorName": strings.TrimSpace(fn + " " + ln),
+				"title": title, "content": content, "status": status,
+				"replyCount": replyCount,
+				"isOwn":      userID == callerID,
+				"createdAt":  createdAt.UTC().Format(time.RFC3339),
+				"updatedAt":  updatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+
+	case http.MethodPost:
+		var p struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil || strings.TrimSpace(p.Title) == "" {
+			writeError(w, http.StatusBadRequest, "title required")
+			return
+		}
+		var id int64
+		var createdAt, updatedAt time.Time
+		err = db.QueryRow(`INSERT INTO forum_topics (user_id, title, content) VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`,
+			callerID, strings.TrimSpace(p.Title), strings.TrimSpace(p.Content)).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create topic")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id": id, "userId": callerID, "title": p.Title, "content": p.Content,
+			"status": "open", "replyCount": 0,
+			"createdAt": createdAt.UTC().Format(time.RFC3339),
+			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// GET /api/forum/topics/{id}     — détail + replies
+// PUT /api/forum/topics/{id}     — modifier (owner ou admin/salarié)
+// DELETE /api/forum/topics/{id}  — supprimer (owner ou admin)
+// PATCH /api/forum/topics/{id}   — changer le statut (admin/salarié)
+func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
+	topicID, err := parseIDFromPath(r.URL.Path, "/api/forum/topics/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	callerID, callerRole, err := forumCallerID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		var topicUserID int64
+		var fn, ln, title, content, status string
+		var createdAt, updatedAt time.Time
+		if err := db.QueryRow(`
+			SELECT t.user_id, u.firstname, u.lastname, t.title, t.content, t.status, t.created_at, t.updated_at
+			FROM forum_topics t JOIN users u ON u.id = t.user_id WHERE t.id = $1
+		`, topicID).Scan(&topicUserID, &fn, &ln, &title, &content, &status, &createdAt, &updatedAt); err != nil {
+			writeError(w, http.StatusNotFound, "topic not found")
+			return
+		}
+		if status == "hidden" && callerRole != "admin" && callerRole != "salarie" {
+			writeError(w, http.StatusForbidden, "topic not accessible")
+			return
+		}
+		// replies
+		replyRows, err := db.Query(`
+			SELECT r.id, r.user_id, u.firstname, u.lastname, r.content, r.status, r.created_at, r.updated_at,
+			       (SELECT COUNT(*) FROM forum_reply_likes l WHERE l.reply_id = r.id) AS like_count,
+			       EXISTS(SELECT 1 FROM forum_reply_likes l2 WHERE l2.reply_id = r.id AND l2.user_id = $2) AS liked_by_me
+			FROM forum_replies r JOIN users u ON u.id = r.user_id
+			WHERE r.topic_id = $1 AND r.status != 'deleted'
+			ORDER BY r.created_at ASC
+		`, topicID, callerID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load replies")
+			return
+		}
+		defer replyRows.Close()
+		replies := make([]map[string]interface{}, 0)
+		for replyRows.Next() {
+			var rid, ruID, lc int64
+			var rfn, rln, rc, rs string
+			var rca, rua time.Time
+			var likedByMe bool
+			if err := replyRows.Scan(&rid, &ruID, &rfn, &rln, &rc, &rs, &rca, &rua, &lc, &likedByMe); err != nil {
+				continue
+			}
+			if rs == "hidden" && callerRole != "admin" && callerRole != "salarie" {
+				continue
+			}
+			replies = append(replies, map[string]interface{}{
+				"id": rid, "userId": ruID,
+				"authorName": strings.TrimSpace(rfn + " " + rln),
+				"content": rc, "status": rs,
+				"likeCount": lc, "likedByMe": likedByMe,
+				"isOwn":     ruID == callerID,
+				"createdAt": rca.UTC().Format(time.RFC3339),
+				"updatedAt": rua.UTC().Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": topicID, "userId": topicUserID,
+			"authorName": strings.TrimSpace(fn + " " + ln),
+			"title": title, "content": content, "status": status,
+			"isOwn":     topicUserID == callerID,
+			"replies":   replies,
+			"createdAt": createdAt.UTC().Format(time.RFC3339),
+			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
+		})
+
+	case http.MethodPut:
+		var p struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+		}
+		json.NewDecoder(r.Body).Decode(&p)
+		var ownerID int64
+		db.QueryRow(`SELECT user_id FROM forum_topics WHERE id = $1`, topicID).Scan(&ownerID)
+		if ownerID != callerID && callerRole != "admin" {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if _, err := db.Exec(`UPDATE forum_topics SET title=$1, content=$2, updated_at=NOW() WHERE id=$3`,
+			strings.TrimSpace(p.Title), strings.TrimSpace(p.Content), topicID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update topic")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+
+	case http.MethodPatch:
+		if callerRole != "admin" && callerRole != "salarie" {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		var p struct{ Status string `json:"status"` }
+		json.NewDecoder(r.Body).Decode(&p)
+		allowed := map[string]bool{"open": true, "closed": true, "hidden": true}
+		if !allowed[p.Status] {
+			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+		if _, err := db.Exec(`UPDATE forum_topics SET status=$1, updated_at=NOW() WHERE id=$2`, p.Status, topicID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update status")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+
+	case http.MethodDelete:
+		var ownerID int64
+		db.QueryRow(`SELECT user_id FROM forum_topics WHERE id = $1`, topicID).Scan(&ownerID)
+		if ownerID != callerID && callerRole != "admin" {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		db.Exec(`DELETE FROM forum_topics WHERE id = $1`, topicID)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// POST /api/forum/replies        — créer une réponse
+func forumRepliesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	callerID, _, err := forumCallerID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var p struct {
+		TopicID int64  `json:"topicId"`
+		Content string `json:"content"`
+	}
+	json.NewDecoder(r.Body).Decode(&p)
+	if p.TopicID == 0 || strings.TrimSpace(p.Content) == "" {
+		writeError(w, http.StatusBadRequest, "topicId and content required")
+		return
+	}
+	// vérifier que le sujet est ouvert
+	var topicStatus string
+	db.QueryRow(`SELECT status FROM forum_topics WHERE id = $1`, p.TopicID).Scan(&topicStatus)
+	if topicStatus != "open" {
+		writeError(w, http.StatusBadRequest, "topic is closed")
+		return
+	}
+	var id int64
+	var createdAt time.Time
+	err = db.QueryRow(`INSERT INTO forum_replies (topic_id, user_id, content) VALUES ($1,$2,$3) RETURNING id, created_at`,
+		p.TopicID, callerID, strings.TrimSpace(p.Content)).Scan(&id, &createdAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create reply")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"id": id, "topicId": p.TopicID, "userId": callerID,
+		"content": p.Content, "status": "visible", "likeCount": 0, "likedByMe": false,
+		"isOwn": true, "createdAt": createdAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// PUT    /api/forum/replies/{id}        — modifier son propre message
+// DELETE /api/forum/replies/{id}        — supprimer (owner ou admin/salarié)
+// PATCH  /api/forum/replies/{id}        — changer statut (admin/salarié)
+// POST   /api/forum/replies/{id}/like   — liker
+// DELETE /api/forum/replies/{id}/like   — unliker
+func forumReplyByIDHandler(w http.ResponseWriter, r *http.Request) {
+	callerID, callerRole, err := forumCallerID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := r.URL.Path
+
+	// Like / unlike
+	if strings.HasSuffix(path, "/like") {
+		replyID, err := parseIDFromPath(strings.TrimSuffix(path, "/like"), "/api/forum/replies/")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid id")
+			return
+		}
+		switch r.Method {
+		case http.MethodPost:
+			db.Exec(`INSERT INTO forum_reply_likes (user_id, reply_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, callerID, replyID)
+			writeJSON(w, http.StatusOK, map[string]interface{}{"liked": true})
+		case http.MethodDelete:
+			db.Exec(`DELETE FROM forum_reply_likes WHERE user_id=$1 AND reply_id=$2`, callerID, replyID)
+			writeJSON(w, http.StatusOK, map[string]interface{}{"liked": false})
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
+	replyID, err := parseIDFromPath(path, "/api/forum/replies/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var p struct{ Content string `json:"content"` }
+		json.NewDecoder(r.Body).Decode(&p)
+		var ownerID int64
+		db.QueryRow(`SELECT user_id FROM forum_replies WHERE id = $1`, replyID).Scan(&ownerID)
+		if ownerID != callerID && callerRole != "admin" {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		db.Exec(`UPDATE forum_replies SET content=$1, updated_at=NOW() WHERE id=$2`, strings.TrimSpace(p.Content), replyID)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+
+	case http.MethodPatch:
+		if callerRole != "admin" && callerRole != "salarie" {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		var p struct{ Status string `json:"status"` }
+		json.NewDecoder(r.Body).Decode(&p)
+		allowed := map[string]bool{"visible": true, "hidden": true, "deleted": true}
+		if !allowed[p.Status] {
+			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+		db.Exec(`UPDATE forum_replies SET status=$1, updated_at=NOW() WHERE id=$2`, p.Status, replyID)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+
+	case http.MethodDelete:
+		var ownerID int64
+		db.QueryRow(`SELECT user_id FROM forum_replies WHERE id = $1`, replyID).Scan(&ownerID)
+		if ownerID != callerID && callerRole != "admin" && callerRole != "salarie" {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		db.Exec(`UPDATE forum_replies SET status='deleted', updated_at=NOW() WHERE id=$1`, replyID)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// POST /api/forum/reports        — signaler
+// GET  /api/forum/reports        — liste signalements (admin/salarié)
+func forumReportsHandler(w http.ResponseWriter, r *http.Request) {
+	callerID, callerRole, err := forumCallerID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		var p struct {
+			TopicID *int64 `json:"topicId"`
+			ReplyID *int64 `json:"replyId"`
+			Reason  string `json:"reason"`
+		}
+		json.NewDecoder(r.Body).Decode(&p)
+		if p.TopicID == nil && p.ReplyID == nil {
+			writeError(w, http.StatusBadRequest, "topicId or replyId required")
+			return
+		}
+		var topicIDVal, replyIDVal interface{}
+		if p.TopicID != nil {
+			topicIDVal = *p.TopicID
+		}
+		if p.ReplyID != nil {
+			replyIDVal = *p.ReplyID
+		}
+		if _, err := db.Exec(`INSERT INTO forum_reports (topic_id, reply_id, reported_by, reason) VALUES ($1,$2,$3,$4)`,
+			topicIDVal, replyIDVal, callerID, strings.TrimSpace(p.Reason)); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create report")
+			return
+		}
+		// marquer la réponse comme reported
+		if p.ReplyID != nil {
+			db.Exec(`UPDATE forum_replies SET status='reported' WHERE id=$1 AND status='visible'`, *p.ReplyID)
+		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{"success": true})
+
+	case http.MethodGet:
+		if callerRole != "admin" && callerRole != "salarie" {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		statusFilter := r.URL.Query().Get("status")
+		var rows *sql.Rows
+		if statusFilter != "" {
+			rows, err = db.Query(`
+				SELECT rp.id, rp.topic_id, rp.reply_id, rp.reported_by, u.firstname, u.lastname, rp.reason, rp.status, rp.created_at,
+				       COALESCE(r.content, t.content, '') AS content,
+				       COALESCE(au.firstname||' '||au.lastname, '') AS author_name
+				FROM forum_reports rp
+				JOIN users u ON u.id = rp.reported_by
+				LEFT JOIN forum_replies r ON r.id = rp.reply_id
+				LEFT JOIN forum_topics t ON t.id = rp.topic_id
+				LEFT JOIN users au ON au.id = COALESCE(r.user_id, t.user_id)
+				WHERE rp.status = $1 ORDER BY rp.created_at DESC
+			`, statusFilter)
+		} else {
+			rows, err = db.Query(`
+				SELECT rp.id, rp.topic_id, rp.reply_id, rp.reported_by, u.firstname, u.lastname, rp.reason, rp.status, rp.created_at,
+				       COALESCE(r.content, t.content, '') AS content,
+				       COALESCE(au.firstname||' '||au.lastname, '') AS author_name
+				FROM forum_reports rp
+				JOIN users u ON u.id = rp.reported_by
+				LEFT JOIN forum_replies r ON r.id = rp.reply_id
+				LEFT JOIN forum_topics t ON t.id = rp.topic_id
+				LEFT JOIN users au ON au.id = COALESCE(r.user_id, t.user_id)
+				ORDER BY rp.created_at DESC
+			`)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load reports")
+			return
+		}
+		defer rows.Close()
+		items := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, reportedBy int64
+			var topicIDn, replyIDn sql.NullInt64
+			var fn, ln, reason, status, content, authorName string
+			var createdAt time.Time
+			if err := rows.Scan(&id, &topicIDn, &replyIDn, &reportedBy, &fn, &ln, &reason, &status, &createdAt, &content, &authorName); err != nil {
+				continue
+			}
+			item := map[string]interface{}{
+				"id": id, "reportedBy": reportedBy,
+				"reporterName": strings.TrimSpace(fn + " " + ln),
+				"authorName":   strings.TrimSpace(authorName),
+				"reason": reason, "status": status, "content": content,
+				"createdAt": createdAt.UTC().Format(time.RFC3339),
+			}
+			if topicIDn.Valid {
+				item["topicId"] = topicIDn.Int64
+			}
+			if replyIDn.Valid {
+				item["replyId"] = replyIDn.Int64
+			}
+			items = append(items, item)
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// PATCH /api/forum/reports/{id}  — résoudre ou ignorer un signalement
+func forumReportByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	_, callerRole, err := forumCallerID(r)
+	if err != nil || (callerRole != "admin" && callerRole != "salarie") {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	reportID, err := parseIDFromPath(r.URL.Path, "/api/forum/reports/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var p struct{ Status string `json:"status"` }
+	json.NewDecoder(r.Body).Decode(&p)
+	allowed := map[string]bool{"resolved": true, "ignored": true}
+	if !allowed[p.Status] {
+		writeError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	db.Exec(`UPDATE forum_reports SET status=$1 WHERE id=$2`, p.Status, reportID)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
