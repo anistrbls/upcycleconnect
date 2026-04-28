@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
 import { formatDateFR } from "../../lib/formatters";
 
@@ -59,8 +59,6 @@ export default function ForumModerationView() {
     const [tab, setTab] = useState("pending");
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [loaded, setLoaded] = useState(false);
-    const [loadedTab, setLoadedTab] = useState(null);
 
     const loadReports = async (status) => {
         setLoading(true);
@@ -69,10 +67,10 @@ export default function ForumModerationView() {
             const data = await res.json();
             setReports(data.items || []);
         } catch { /* silent */ }
-        finally { setLoading(false); setLoaded(true); setLoadedTab(status); }
+        finally { setLoading(false); }
     };
 
-    if (loadedTab !== tab) loadReports(tab);
+    useEffect(() => { loadReports(tab); }, [tab]);
 
     const patchReport = async (reportId, status) => {
         await fetch(apiUrl(`/forum/reports/${reportId}`), {

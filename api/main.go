@@ -5017,7 +5017,7 @@ func forumTopicsHandler(w http.ResponseWriter, r *http.Request) {
 			items = append(items, map[string]interface{}{
 				"id": id, "userId": userID,
 				"authorName": strings.TrimSpace(fn + " " + ln),
-				"title": title, "content": content, "status": status,
+				"title":      title, "content": content, "status": status,
 				"replyCount": replyCount,
 				"isOwn":      userID == callerID,
 				"createdAt":  createdAt.UTC().Format(time.RFC3339),
@@ -5115,7 +5115,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 			replies = append(replies, map[string]interface{}{
 				"id": rid, "userId": ruID,
 				"authorName": strings.TrimSpace(rfn + " " + rln),
-				"content": rc, "status": rs,
+				"content":    rc, "status": rs,
 				"likeCount": lc, "likedByMe": likedByMe,
 				"isOwn":     ruID == callerID,
 				"createdAt": rca.UTC().Format(time.RFC3339),
@@ -5125,7 +5125,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id": topicID, "userId": topicUserID,
 			"authorName": strings.TrimSpace(fn + " " + ln),
-			"title": title, "content": content, "status": status,
+			"title":      title, "content": content, "status": status,
 			"isOwn":     topicUserID == callerID,
 			"replies":   replies,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
@@ -5156,7 +5156,9 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		var p struct{ Status string `json:"status"` }
+		var p struct {
+			Status string `json:"status"`
+		}
 		json.NewDecoder(r.Body).Decode(&p)
 		allowed := map[string]bool{"open": true, "closed": true, "hidden": true}
 		if !allowed[p.Status] {
@@ -5267,7 +5269,9 @@ func forumReplyByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodPut:
-		var p struct{ Content string `json:"content"` }
+		var p struct {
+			Content string `json:"content"`
+		}
 		json.NewDecoder(r.Body).Decode(&p)
 		var ownerID int64
 		db.QueryRow(`SELECT user_id FROM forum_replies WHERE id = $1`, replyID).Scan(&ownerID)
@@ -5283,7 +5287,9 @@ func forumReplyByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		var p struct{ Status string `json:"status"` }
+		var p struct {
+			Status string `json:"status"`
+		}
 		json.NewDecoder(r.Body).Decode(&p)
 		allowed := map[string]bool{"visible": true, "hidden": true, "deleted": true}
 		if !allowed[p.Status] {
@@ -5396,7 +5402,7 @@ func forumReportsHandler(w http.ResponseWriter, r *http.Request) {
 				"id": id, "reportedBy": reportedBy,
 				"reporterName": strings.TrimSpace(fn + " " + ln),
 				"authorName":   strings.TrimSpace(authorName),
-				"reason": reason, "status": status, "content": content,
+				"reason":       reason, "status": status, "content": content,
 				"createdAt": createdAt.UTC().Format(time.RFC3339),
 			}
 			if topicIDn.Valid {
@@ -5430,7 +5436,9 @@ func forumReportByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	var p struct{ Status string `json:"status"` }
+	var p struct {
+		Status string `json:"status"`
+	}
 	json.NewDecoder(r.Body).Decode(&p)
 	allowed := map[string]bool{"resolved": true, "ignored": true}
 	if !allowed[p.Status] {

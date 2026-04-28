@@ -172,8 +172,12 @@ export default function AdminLayout({ children }) {
         ? PRO_MODULES.map(m => m.key)
         : isParticulier
         ? PARTICULIER_MODULES.map(m => m.key)
+        : isSalarie
+        ? SALARIE_MODULES.map(m => m.key)
         : ["vue-globale", "annonces"];
-    const isSalarieModule = activeModule.key.startsWith("salarie-");
+    const isSalarieModule = isSalarie
+        ? SALARIE_MODULES.some(m => m.key === activeModule.key)
+        : activeModule.key.startsWith("salarie-");
     const isModuleAllowed = isAdmin || (isSalarie && isSalarieModule) || allowedModulesForUsers.includes(activeModule.key);
 
     // Filtrer la sidebar

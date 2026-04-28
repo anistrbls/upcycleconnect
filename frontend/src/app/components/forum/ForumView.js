@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
 import { formatDateFR } from "../../lib/formatters";
 import AdminModal from "../admin/AdminModal";
@@ -172,9 +172,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
         }
     };
 
-    useState(() => { load(); }, [topicId]);
-    // useEffect equivalent via useState trick — more robust:
-    if (!topic && !loading && !error) load();
+    useEffect(() => { load(); }, [topicId]);
 
     const handleSendReply = async () => {
         if (!replyContent.trim()) return;
@@ -507,7 +505,6 @@ export default function ForumView({ role = "particulier", callerUserId }) {
     const [newForm, setNewForm] = useState({ title: "", content: "" });
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState("");
-    const [loaded, setLoaded] = useState(false);
 
     const loadTopics = async () => {
         setLoading(true);
@@ -519,11 +516,10 @@ export default function ForumView({ role = "particulier", callerUserId }) {
             /* silent */
         } finally {
             setLoading(false);
-            setLoaded(true);
         }
     };
 
-    if (!loaded && !loading) loadTopics();
+    useEffect(() => { loadTopics(); }, []);
 
     const handleCreate = async () => {
         if (!newForm.title.trim()) { setCreateError("Le titre est requis."); return; }
