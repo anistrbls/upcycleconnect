@@ -132,24 +132,43 @@ func main() {
 		}
 		serviceByIDHandler(w, r)
 	})))
+	mux.Handle("/api/admin/finances/payments", authMiddleware(http.HandlerFunc(adminFinancesPaymentsHandler)))
 	mux.Handle("/api/admin/offers/overview", authMiddleware(http.HandlerFunc(offersOverviewHandler)))
 	mux.Handle("/api/admin/events", authMiddleware(http.HandlerFunc(eventsHandler)))
 	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if strings.HasSuffix(path, "/validate") && r.Method == http.MethodPost {
-			eventValidateHandler(w, r)
-			return
+		// Handling POST actions
+		if r.Method == http.MethodPost {
+			if strings.HasSuffix(path, "/validate") {
+				eventValidateHandler(w, r)
+				return
+			}
+			if strings.HasSuffix(path, "/reject") {
+				eventRejectHandler(w, r)
+				return
+			}
+			if strings.HasSuffix(path, "/cancel") {
+				adminEventCancelHandler(w, r)
+				return
+			}
+			if strings.Contains(path, "/participants/") && strings.HasSuffix(path, "/absent") {
+				adminEventRegistrationMarkAbsentHandler(w, r)
+				return
+			}
 		}
-		if strings.HasSuffix(path, "/reject") && r.Method == http.MethodPost {
-			eventRejectHandler(w, r)
-			return
+		// Handling GET actions
+		if r.Method == http.MethodGet {
+			if strings.HasSuffix(path, "/participants") {
+				eventParticipantsHandler(w, r)
+				return
+			}
 		}
+		// Default to ID handler
 		eventByIDHandler(w, r)
 	})))
-	mux.Handle("/api/admin/event-categories", authMiddleware(http.HandlerFunc(eventCategoriesHandler)))
-	mux.Handle("/api/admin/event-categories/", authMiddleware(http.HandlerFunc(eventCategoryByIDHandler)))
 	mux.HandleFunc("GET /api/events", publicEventsHandler)
 	mux.Handle("/api/events/my-registrations", authMiddleware(http.HandlerFunc(myRegistrationsHandler)))
+	mux.Handle("/api/events/confirm-payment", authMiddleware(http.HandlerFunc(eventConfirmPaymentHandler)))
 	mux.Handle("/api/events/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if strings.HasSuffix(path, "/register") {
@@ -158,6 +177,14 @@ func main() {
 		}
 		if strings.HasSuffix(path, "/checkout") {
 			eventCheckoutHandler(w, r)
+			return
+		}
+		if strings.HasSuffix(path, "/participants") && r.Method == http.MethodGet {
+			eventParticipantsHandler(w, r)
+			return
+		}
+		if r.Method == http.MethodGet {
+			eventByIDHandler(w, r)
 			return
 		}
 		http.NotFound(w, r)
@@ -263,6 +290,9 @@ func main() {
 		}
 	})))
 
+	// Module salarié — événements (mes formations)
+	mux.Handle("/api/salarie/events", authMiddleware(http.HandlerFunc(salarieMemberEventsHandler)))
+	mux.Handle("/api/salarie/events/", authMiddleware(http.HandlerFunc(salarieMemberEventByIDHandler)))
 	port := getEnv("API_PORT", "8080")
 
 	loggerMiddleware := func(next http.Handler) http.Handler {
@@ -506,11 +536,6 @@ type eventRejectPayload struct {
 	Comment string `json:"comment"`
 }
 
-type eventCategoryPayload struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-}
 
 func ensureOffersSchema() error {
 	statements := []string{
@@ -1201,11 +1226,21 @@ func ensureEventsSchema() error {
 			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			payment_status TEXT NOT NULL DEFAULT 'gratuit',
 			stripe_session_id TEXT NOT NULL DEFAULT '',
+			stripe_payment_intent_id TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			UNIQUE(event_id, user_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_event_registrations_user_id ON event_registrations(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_event_registrations_event_id ON event_registrations(event_id)`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS is_absent BOOLEAN NOT NULL DEFAULT false`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS refund_status TEXT NOT NULL DEFAULT 'none'`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS refund_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS stripe_refund_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS refund_error TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS cancelled_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT NOT NULL DEFAULT ''`,
 		`DO $$ BEGIN
 			IF NOT EXISTS (
 				SELECT 1 FROM pg_constraint WHERE conname = 'events_validation_status_check'
@@ -1218,101 +1253,10 @@ func ensureEventsSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_events_intervenant_id ON events(intervenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)`,
-		`CREATE INDEX IF NOT EXISTS idx_events_category_id ON events(category_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_event_categories_status ON event_categories(status)`,
-		`ALTER TABLE events DROP CONSTRAINT IF EXISTS events_category_id_fkey`,
-		`ALTER TABLE events ADD CONSTRAINT events_category_id_fkey FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE RESTRICT`,
 	}
 
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
-			return err
-		}
-	}
-
-	seedCategories := []struct {
-		name        string
-		description string
-		status      string
-	}{
-		{"Ateliers", "Sessions pratiques de reutilisation et transformation.", "actif"},
-		{"Formations", "Parcours pedagogiques et montees en competence.", "actif"},
-		{"Conferences", "Interventions et prises de parole publiques.", "actif"},
-		{"Evenements communautaires", "Rencontres, portes ouvertes et journees speciales.", "actif"},
-	}
-
-	for _, category := range seedCategories {
-		if _, err := db.Exec(`
-			INSERT INTO event_categories (name, description, status)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (name) DO NOTHING
-		`, category.name, category.description, category.status); err != nil {
-			return err
-		}
-	}
-
-	if _, err := db.Exec(`
-		UPDATE events e
-		SET category_id = c.id
-		FROM event_categories c
-		WHERE e.category_id IS NULL
-		AND c.name = CASE
-			WHEN e.type = 'atelier' THEN 'Ateliers'
-			WHEN e.type = 'formation' THEN 'Formations'
-			WHEN e.type = 'conference' THEN 'Conferences'
-			ELSE 'Evenements communautaires'
-		END
-	`); err != nil {
-		return err
-	}
-
-	var eventCount int64
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
-		return err
-	}
-
-	if eventCount > 0 {
-		return nil
-	}
-
-	seedRows := []struct {
-		name        string
-		description string
-		typeName    string
-		start       string
-		end         string
-		location    string
-		capacity    int64
-		status      string
-		speaker     string
-	}{
-		{"Atelier transformation de cagettes en etagere", "Atelier pratique de reutilisation bois pour mobilier utile.", "atelier", "2026-03-20T14:00:00Z", "2026-03-20T17:00:00Z", "Atelier La Fayette", 20, "planifie", "Claire Martin"},
-		{"Formation initiation a l'upcycling", "Session de decouverte des bases pour particuliers.", "formation", "2026-03-23T09:30:00Z", "2026-03-23T12:30:00Z", "Paris 10", 25, "valide", "Yassine B."},
-		{"Conference locale economie circulaire", "Conference ouverte autour des initiatives locales.", "conference", "2026-03-27T18:00:00Z", "2026-03-27T20:00:00Z", "Montreuil", 80, "planifie", "Sophie Laurent"},
-		{"Atelier customisation textile", "Customisation creative de vetements recuperes.", "atelier", "2026-03-29T10:00:00Z", "2026-03-29T13:00:00Z", "Ivry", 16, "planifie", "Julien R."},
-		{"Journee decouverte projets UpcycleConnect", "Presentation des projets et rencontre des animateurs.", "evenement", "2026-04-02T09:00:00Z", "2026-04-02T17:00:00Z", "Bourg-la-Reine", 60, "valide", "Claire Martin"},
-	}
-
-	for _, row := range seedRows {
-		var categoryID int64
-		categoryName := "Evenements communautaires"
-		switch row.typeName {
-		case "atelier":
-			categoryName = "Ateliers"
-		case "formation":
-			categoryName = "Formations"
-		case "conference":
-			categoryName = "Conferences"
-		}
-
-		if err := db.QueryRow(`SELECT id FROM event_categories WHERE name = $1`, categoryName).Scan(&categoryID); err != nil {
-			return err
-		}
-
-		if _, err := db.Exec(`
-			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, row.name, row.description, categoryID, row.typeName, row.start, row.end, row.location, row.capacity, row.status, row.speaker); err != nil {
 			return err
 		}
 	}
@@ -1329,9 +1273,8 @@ func publicEventsHandler(w http.ResponseWriter, r *http.Request) {
 	typeFilter := normalizeEventType(strings.TrimSpace(r.URL.Query().Get("type")))
 
 	rows, err := db.Query(`
-		SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+		SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
 		FROM events e
-		LEFT JOIN event_categories c ON c.id = e.category_id
 		WHERE e.validation_status = 'approved'
 		AND e.status = 'planifie'
 		AND e.date_fin > NOW()
@@ -1364,35 +1307,21 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		statusFilter := normalizeEventStatus(strings.TrimSpace(r.URL.Query().Get("status")))
 		typeFilter := normalizeEventType(strings.TrimSpace(r.URL.Query().Get("type")))
 
-		var categoryID interface{}
-		categoryRaw := strings.TrimSpace(r.URL.Query().Get("categoryId"))
-		if categoryRaw != "" {
-			parsedCategoryID, err := strconv.ParseInt(categoryRaw, 10, 64)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid categoryId")
-				return
-			}
-			categoryID = parsedCategoryID
-		} else {
-			categoryID = nil
-		}
-
 		validationStatusFilter := strings.TrimSpace(r.URL.Query().Get("validationStatus"))
 		if validationStatusFilter != "pending" && validationStatusFilter != "approved" && validationStatusFilter != "rejected" {
 			validationStatusFilter = ""
 		}
 
 		rows, err := db.Query(`
-			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
 			FROM events e
-			JOIN event_categories c ON c.id = e.category_id
-			WHERE ($1 = '' OR e.name ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.lieu ILIKE '%' || $1 || '%' OR e.intervenant ILIKE '%' || $1 || '%' OR c.name ILIKE '%' || $1 || '%')
+			WHERE ($1 = '' OR e.name ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.lieu ILIKE '%' || $1 || '%' OR e.intervenant ILIKE '%' || $1 || '%')
 			AND ($2 = '' OR e.status = $2)
 			AND ($3 = '' OR e.type = $3)
-			AND ($4::BIGINT IS NULL OR e.category_id = $4)
-			AND ($5 = '' OR e.validation_status = $5)
+			AND ($4 = '' OR e.validation_status = $4)
+			AND (e.status != 'annule' OR $2 = 'annule')
 			ORDER BY date_debut ASC, created_at DESC
-		`, q, statusFilter, typeFilter, categoryID, validationStatusFilter)
+		`, q, statusFilter, typeFilter, validationStatusFilter)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list events")
 			return
@@ -1423,15 +1352,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var categoryName string
-		if err := db.QueryRow(`SELECT name FROM event_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName); err != nil {
-			if err == sql.ErrNoRows {
-				writeError(w, http.StatusBadRequest, "category does not exist")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "could not validate category")
-			return
-		}
+
 
 		var intervenantName string
 		var intervenantID sql.NullInt64
@@ -1470,13 +1391,12 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err = db.QueryRow(`
-			INSERT INTO events (name, description, category_id, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			INSERT INTO events (name, description, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status, image_url, pricing_type, price)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING id, created_at, updated_at
 		`,
 			strings.TrimSpace(payload.Name),
 			strings.TrimSpace(payload.Description),
-			payload.CategoryID,
 			normalizeEventType(payload.Type),
 			startAt,
 			endAt,
@@ -1486,6 +1406,9 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			intervenantName,
 			intervenantID,
 			postValidationStatus,
+			strings.TrimSpace(payload.ImageUrl),
+			payload.PricingType,
+			payload.Price,
 		).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create event")
@@ -1494,7 +1417,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 
 		payload.Intervenant = intervenantName
 		payload.ValidationStatus = postValidationStatus
-		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, categoryName, startAt, endAt, createdAt, updatedAt))
+		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1502,7 +1425,11 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDFromPath(r.URL.Path, "/api/admin/events/")
+	prefix := "/api/admin/events/"
+	if strings.HasPrefix(r.URL.Path, "/api/events/") {
+		prefix = "/api/events/"
+	}
+	id, err := parseIDFromPath(r.URL.Path, prefix)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid event id")
 		return
@@ -1510,21 +1437,72 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		row := db.QueryRow(`
-			SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
-			FROM events e
-			JOIN event_categories c ON c.id = e.category_id
-			WHERE e.id = $1
-		`, id)
+		claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+		var userID int64
+		if claims != nil {
+			if val, ok := claims["userId"].(float64); ok {
+				userID = int64(val)
+			}
+		}
 
-		item, err := scanEventSingleRow(row)
+		row := db.QueryRow(`
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at,
+			       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref
+			FROM events e
+			LEFT JOIN event_registrations er ON e.id = er.event_id AND er.user_id = $2
+			WHERE e.id = $1
+		`, id, userID)
+
+		var transactionRef sql.NullString
+		var idVal int64
+		var name, description, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
+		var dateDebut, dateFin, createdAt, updatedAt time.Time
+		var capacite sql.NullInt64
+		var intervenantID sql.NullInt64
+		var price float64
+		var participantCount int64
+
+		err := row.Scan(&idVal, &name, &description, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt, &transactionRef)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "event not found")
 				return
 			}
+			log.Printf("Error fetching event %d: %v", id, err)
 			writeError(w, http.StatusInternalServerError, "could not fetch event")
 			return
+		}
+
+		item := map[string]interface{}{
+			"id":               idVal,
+			"name":             name,
+			"description":      description,
+			"type":             typeName,
+			"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
+			"dateFin":          dateFin.UTC().Format(time.RFC3339),
+			"lieu":             lieu,
+			"capacite":         nil,
+			"status":           status,
+			"intervenant":      intervenant,
+			"intervenantId":    nil,
+			"validationStatus": validationStatus,
+			"rejectionComment": rejectionComment,
+			"imageUrl":         imageUrl,
+			"pricingType":      pricingType,
+			"price":            price,
+			"participantCount": participantCount,
+			"createdAt":        createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
+			"transactionRef":   nil,
+		}
+		if transactionRef.Valid {
+			item["transactionRef"] = transactionRef.String
+		}
+		if capacite.Valid {
+			item["capacite"] = capacite.Int64
+		}
+		if intervenantID.Valid {
+			item["intervenantId"] = intervenantID.Int64
 		}
 
 		writeJSON(w, http.StatusOK, item)
@@ -1536,15 +1514,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var categoryName string
-		if err := db.QueryRow(`SELECT name FROM event_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName); err != nil {
-			if err == sql.ErrNoRows {
-				writeError(w, http.StatusBadRequest, "category does not exist")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "could not validate category")
-			return
-		}
+
 
 		var intervenantName string
 		var intervenantID sql.NullInt64
@@ -1581,24 +1551,25 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			UPDATE events
 			SET name = $1,
 				description = $2,
-				category_id = $3,
-				type = $4,
-				date_debut = $5,
-				date_fin = $6,
-				lieu = $7,
-				capacite = $8,
-				status = $9,
-				intervenant = $10,
-				intervenant_id = $11,
-				validation_status = CASE WHEN $13 = 'salarie' THEN 'pending' ELSE validation_status END,
-				rejection_comment = CASE WHEN $13 = 'salarie' THEN '' ELSE rejection_comment END,
+				type = $3,
+				date_debut = $4,
+				date_fin = $5,
+				lieu = $6,
+				capacite = $7,
+				status = $8,
+				intervenant = $9,
+				intervenant_id = $10,
+				image_url = $13,
+				pricing_type = $14,
+				price = $15,
+				validation_status = CASE WHEN $12 = 'salarie' THEN 'pending' ELSE validation_status END,
+				rejection_comment = CASE WHEN $12 = 'salarie' THEN '' ELSE rejection_comment END,
 				updated_at = NOW()
-			WHERE id = $12
+			WHERE id = $11
 			RETURNING created_at, updated_at, validation_status, rejection_comment
 		`,
 			strings.TrimSpace(payload.Name),
 			strings.TrimSpace(payload.Description),
-			payload.CategoryID,
 			normalizeEventType(payload.Type),
 			startAt,
 			endAt,
@@ -1609,6 +1580,9 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			intervenantID,
 			id,
 			putCallerRole,
+			strings.TrimSpace(payload.ImageUrl),
+			payload.PricingType,
+			payload.Price,
 		)
 
 		var retValidationStatus, retRejectionComment string
@@ -1624,9 +1598,24 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		payload.Intervenant = intervenantName
 		payload.ValidationStatus = retValidationStatus
 		payload.RejectionComment = retRejectionComment
-		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, categoryName, startAt, endAt, createdAt, updatedAt))
+		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
 
 	case http.MethodDelete:
+		var registeredCount int64
+		if err := db.QueryRow(`
+			SELECT COUNT(*)
+			FROM event_registrations
+			WHERE event_id = $1 AND payment_status <> 'pending'
+		`, id).Scan(&registeredCount); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not verify event registrations")
+			return
+		}
+
+		if registeredCount > 0 {
+			writeError(w, http.StatusConflict, "cannot delete event with registered participants; cancel it instead")
+			return
+		}
+
 		result, err := db.Exec(`DELETE FROM events WHERE id = $1`, id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not delete event")
@@ -1654,9 +1643,6 @@ func parseAndValidateEventPayload(r *http.Request) (eventPayload, time.Time, tim
 
 	if strings.TrimSpace(payload.Name) == "" {
 		return payload, time.Time{}, time.Time{}, fmt.Errorf("name is required")
-	}
-	if payload.CategoryID <= 0 {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("categoryId is required")
 	}
 	if normalizeEventType(payload.Type) == "" {
 		return payload, time.Time{}, time.Time{}, fmt.Errorf("invalid type")
@@ -1708,13 +1694,11 @@ func normalizeValidationStatus(raw string) string {
 	return "approved"
 }
 
-func mapEventPayload(id int64, payload eventPayload, categoryName string, startAt time.Time, endAt time.Time, createdAt time.Time, updatedAt time.Time) map[string]interface{} {
+func mapEventPayload(id int64, payload eventPayload, startAt time.Time, endAt time.Time, createdAt time.Time, updatedAt time.Time) map[string]interface{} {
 	data := map[string]interface{}{
 		"id":               id,
 		"name":             strings.TrimSpace(payload.Name),
 		"description":      strings.TrimSpace(payload.Description),
-		"categoryId":       payload.CategoryID,
-		"categoryName":     categoryName,
 		"type":             normalizeEventType(payload.Type),
 		"dateDebut":        startAt.UTC().Format(time.RFC3339),
 		"dateFin":          endAt.UTC().Format(time.RFC3339),
@@ -1747,15 +1731,15 @@ func mapEventPayload(id int64, payload eventPayload, categoryName string, startA
 }
 
 func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
-	var id, categoryID int64
-	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
+	var id int64
+	var name, description, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
 	var intervenantID sql.NullInt64
 	var price float64
 	var participantCount int64
 
-	err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
+	err := rows.Scan(&id, &name, &description, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1764,8 +1748,6 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 		"id":               id,
 		"name":             name,
 		"description":      description,
-		"categoryId":       categoryID,
-		"categoryName":     categoryName,
 		"type":             typeName,
 		"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
 		"dateFin":          dateFin.UTC().Format(time.RFC3339),
@@ -1793,15 +1775,15 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 }
 
 func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
-	var id, categoryID int64
-	var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
+	var id int64
+	var name, description, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
 	var dateDebut, dateFin, createdAt, updatedAt time.Time
 	var capacite sql.NullInt64
 	var intervenantID sql.NullInt64
 	var price float64
 	var participantCount int64
 
-	err := row.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
+	err := row.Scan(&id, &name, &description, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1810,8 +1792,6 @@ func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 		"id":               id,
 		"name":             name,
 		"description":      description,
-		"categoryId":       categoryID,
-		"categoryName":     categoryName,
 		"type":             typeName,
 		"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
 		"dateFin":          dateFin.UTC().Format(time.RFC3339),
@@ -1849,11 +1829,11 @@ func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
 	userID := int64(userIDVal)
 
 	rows, err := db.Query(`
-		SELECT e.id, e.name, e.description, e.category_id, c.name, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at, er.payment_status
+		SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at, er.payment_status, er.status as reg_status, er.refund_status, er.refund_amount,
+		       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref
 		FROM event_registrations er
 		JOIN events e ON e.id = er.event_id
-		LEFT JOIN event_categories c ON c.id = e.category_id
-		WHERE er.user_id = $1
+		WHERE er.user_id = $1 AND er.payment_status <> 'pending'
 		ORDER BY e.date_debut ASC
 	`, userID)
 	if err != nil {
@@ -1864,16 +1844,18 @@ func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]map[string]interface{}, 0)
 	for rows.Next() {
-		var id, categoryID int64
-		var name, description, categoryName, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
+		var id int64
+		var name, description, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
 		var dateDebut, dateFin, createdAt, updatedAt time.Time
 		var capacite sql.NullInt64
 		var intervenantID sql.NullInt64
 		var price float64
 		var participantCount int64
-		var paymentStatus string
+		var paymentStatus, regStatus, refundStatus string
+		var refundAmount float64
+		var transactionRef sql.NullString
 
-		err := rows.Scan(&id, &name, &description, &categoryID, &categoryName, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt, &paymentStatus)
+		err := rows.Scan(&id, &name, &description, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt, &paymentStatus, &regStatus, &refundStatus, &refundAmount, &transactionRef)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not parse registration")
 			return
@@ -1883,8 +1865,6 @@ func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
 			"id":               id,
 			"name":             name,
 			"description":      description,
-			"categoryId":       categoryID,
-			"categoryName":     categoryName,
 			"type":             typeName,
 			"dateDebut":        dateDebut.UTC().Format(time.RFC3339),
 			"dateFin":          dateFin.UTC().Format(time.RFC3339),
@@ -1900,6 +1880,10 @@ func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
 			"price":            price,
 			"participantCount": participantCount,
 			"paymentStatus":    paymentStatus,
+			"registrationStatus": regStatus,
+			"refundStatus":     refundStatus,
+			"refundAmount":     refundAmount,
+			"transactionRef":   nil,
 			"createdAt":        createdAt.UTC().Format(time.RFC3339),
 			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 		}
@@ -1915,8 +1899,203 @@ func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 }
 
+func eventParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	path := r.URL.Path
+	prefix := "/api/events/"
+	if strings.HasPrefix(path, "/api/admin/events/") {
+		prefix = "/api/admin/events/"
+	}
+	path = strings.TrimSuffix(path, "/participants")
+
+	id, err := parseIDFromPath(path, prefix)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT u.id, u.firstname, u.lastname, u.email, er.created_at, er.status, er.payment_status, er.is_absent, er.refund_status, er.refund_amount, er.refund_error
+		FROM users u
+		JOIN event_registrations er ON er.user_id = u.id
+		WHERE er.event_id = $1
+		ORDER BY er.created_at ASC
+	`, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not fetch participants")
+		return
+	}
+	defer rows.Close()
+
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var uid int64
+		var fname, lname, email string
+		var createdAt time.Time
+		var status, paymentStatus, refundStatus, refundError string
+		var isAbsent bool
+		var refundAmount float64
+		if err := rows.Scan(&uid, &fname, &lname, &email, &createdAt, &status, &paymentStatus, &isAbsent, &refundStatus, &refundAmount, &refundError); err != nil {
+			continue
+		}
+		items = append(items, map[string]interface{}{
+			"id":            uid,
+			"firstname":     fname,
+			"lastname":      lname,
+			"email":         email,
+			"registeredAt":  createdAt.UTC().Format(time.RFC3339),
+			"status":        status,
+			"paymentStatus": paymentStatus,
+			"isAbsent":      isAbsent,
+			"refundStatus":  refundStatus,
+			"refundAmount":  refundAmount,
+			"refundError":   refundError,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+// adminEventCancelHandler handles POST /api/admin/events/{id}/cancel
+func adminEventCancelHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	path := strings.TrimSuffix(r.URL.Path, "/cancel")
+	id, err := parseIDFromPath(path, "/api/admin/events/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	callerRole, _ := claims["role"].(string)
+	if callerRole != "admin" && callerRole != "salarie" {
+		writeError(w, http.StatusForbidden, "not authorized")
+		return
+	}
+
+	var ePrice float64
+	var eName string
+	err = db.QueryRow(`
+		UPDATE events SET status = 'annule', validation_status = 'rejected', updated_at = NOW() WHERE id = $1 RETURNING price, name
+	`, id).Scan(&ePrice, &eName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "event not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not cancel event")
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT user_id, payment_status, stripe_session_id 
+		FROM event_registrations 
+		WHERE event_id = $1 AND status = 'active'
+	`, id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"cancelled": true, "refunds": 0})
+		return
+	}
+	defer rows.Close()
+
+	type reg struct {
+		UserID    int64
+		PStatus   string
+		SessionID string
+	}
+	var regs []reg
+	for rows.Next() {
+		var r reg
+		if rows.Scan(&r.UserID, &r.PStatus, &r.SessionID) == nil {
+			regs = append(regs, r)
+		}
+	}
+
+	cfg, _ := items.GetStripeConfigPublic()
+
+	refundsCount := 0
+	for _, r := range regs {
+		db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'admin' WHERE event_id = $1 AND user_id = $2`, id, r.UserID)
+
+		if r.PStatus == "paid" && r.SessionID != "" && cfg != nil {
+			pi, err := items.GetStripePaymentIntentFromSessionPublic(cfg, r.SessionID)
+			if err == nil && pi != "" {
+				refundID, refundErr := items.RefundStripePaymentIntentPublic(cfg, pi)
+				if refundErr == nil {
+					db.Exec(`UPDATE event_registrations SET refund_status = 'refunded', stripe_refund_id = $1, refund_amount = $2 WHERE event_id = $3 AND user_id = $4`, refundID, ePrice, id, r.UserID)
+					refundsCount++
+				} else {
+					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, refundErr.Error(), id, r.UserID)
+				}
+			} else {
+				if err != nil {
+					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, err.Error(), id, r.UserID)
+				}
+			}
+		} else if r.PStatus == "paid" {
+			db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = 'missing stripe configuration or session id' WHERE event_id = $1 AND user_id = $2`, id, r.UserID)
+		}
+	}
+
+	db.Exec(`UPDATE events SET participant_count = 0 WHERE id = $1`, id)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"cancelled": true, "refundsCount": refundsCount})
+}
+
+// adminEventRegistrationMarkAbsentHandler handles POST /api/admin/events/{id}/participants/{userId}/absent
+func adminEventRegistrationMarkAbsentHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 6 {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	idRaw := parts[4]
+	userIDRaw := parts[6]
+	
+	id, err := strconv.ParseInt(idRaw, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+	userID, err := strconv.ParseInt(userIDRaw, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	res, err := db.Exec(`UPDATE event_registrations SET is_absent = true WHERE event_id = $1 AND user_id = $2 AND status = 'active'`, id, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update registration")
+		return
+	}
+	aff, _ := res.RowsAffected()
+	if aff == 0 {
+		writeError(w, http.StatusNotFound, "active registration not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"absent": true})
+}
+
 func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDFromPath(r.URL.Path, "/api/events/")
+	path := r.URL.Path
+	if strings.HasSuffix(path, "/register") {
+		path = strings.TrimSuffix(path, "/register")
+	}
+	id, err := parseIDFromPath(path, "/api/events/")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid event id")
 		return
@@ -1964,21 +2143,77 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 3. Update participant count
-		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1) WHERE id = $1`, id)
+		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
 
 		writeJSON(w, http.StatusOK, map[string]bool{"registered": true})
 
 	case http.MethodDelete:
-		_, err = db.Exec(`DELETE FROM event_registrations WHERE event_id = $1 AND user_id = $2`, id, userID)
+		var paymentStatus, sessionID string
+		var eventStart time.Time
+		var eventPrice float64
+		var currentStatus string
+		err = db.QueryRow(`
+			SELECT er.payment_status, er.stripe_session_id, er.status, e.date_debut, e.price
+			FROM event_registrations er
+			JOIN events e ON e.id = er.event_id
+			WHERE er.event_id = $1 AND er.user_id = $2
+		`, id, userID).Scan(&paymentStatus, &sessionID, &currentStatus, &eventStart, &eventPrice)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not unregister")
+			writeError(w, http.StatusNotFound, "registration not found")
 			return
 		}
 
-		// Update participant count
-		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1) WHERE id = $1`, id)
+		if currentStatus != "active" {
+			writeError(w, http.StatusBadRequest, "registration is already cancelled")
+			return
+		}
 
-		writeJSON(w, http.StatusOK, map[string]bool{"unregistered": true})
+		if paymentStatus == "gratuit" || paymentStatus == "pending" {
+			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user' WHERE event_id = $1 AND user_id = $2`, id, userID)
+			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			writeJSON(w, http.StatusOK, map[string]bool{"unregistered": true})
+			return
+		}
+
+		now := time.Now().UTC()
+		diff := eventStart.Sub(now)
+
+		if diff.Hours() < 24 {
+			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'non_refundable' WHERE event_id = $1 AND user_id = $2`, id, userID)
+			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refunded": false, "reason": "less than 24h before event"})
+			return
+		}
+
+		cfg, err := items.GetStripeConfigPublic()
+		if err != nil {
+			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, err.Error(), id, userID)
+			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			writeError(w, http.StatusInternalServerError, "stripe not configured, cancellation saved but refund failed")
+			return
+		}
+
+		paymentIntentID, err := items.GetStripePaymentIntentFromSessionPublic(cfg, sessionID)
+		var refundID string
+		if err == nil && paymentIntentID != "" {
+			refundID, err = items.RefundStripePaymentIntentPublic(cfg, paymentIntentID)
+		}
+
+		if err != nil {
+			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, err.Error(), id, userID)
+			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			writeError(w, http.StatusInternalServerError, "refund failed: "+err.Error())
+			return
+		}
+
+		db.Exec(`
+			UPDATE event_registrations 
+			SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'refunded', stripe_refund_id = $1, refund_amount = $2 
+			WHERE event_id = $3 AND user_id = $4`, refundID, eventPrice, id, userID)
+
+		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refunded": true, "refundAmount": eventPrice})
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1991,7 +2226,8 @@ func eventCheckoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := parseIDFromPath(r.URL.Path, "/api/events/")
+	path := strings.TrimSuffix(r.URL.Path, "/checkout")
+	id, err := parseIDFromPath(path, "/api/events/")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid event id")
 		return
@@ -2028,8 +2264,16 @@ func eventCheckoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	frontendBase := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	if frontendBase == "" {
+		frontendBase = "http://localhost:3000"
+	}
+	frontendBase = strings.TrimRight(frontendBase, "/")
+	cfg.SuccessURL = fmt.Sprintf("%s/evenements/activites?id=%d&stripe=success&session_id={CHECKOUT_SESSION_ID}", frontendBase, id)
+	cfg.CancelURL = fmt.Sprintf("%s/evenements/activites?id=%d&stripe=cancel", frontendBase, id)
+
 	amountCents := int64(price * 100)
-	session, err := items.CreateStripeCheckoutSessionPublic(cfg, id, userID, "Inscription : "+name, amountCents, "eur")
+	session, err := items.CreateStripeEventCheckoutSessionPublic(cfg, id, userID, "Inscription : "+name, amountCents)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create stripe session")
 		return
@@ -2045,9 +2289,123 @@ func eventCheckoutHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"url": session.URL})
 }
 
+func eventConfirmPaymentHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	userIDVal, _ := claims["userId"].(float64)
+	userID := int64(userIDVal)
+
+	cfg, err := items.GetStripeConfigPublic()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "stripe not configured")
+		return
+	}
+
+	sessionDetails, err := items.RetrieveStripeEventSessionDetails(cfg.SecretKey, sessionID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "could not verify stripe session")
+		return
+	}
+	paymentStatus := strings.TrimSpace(sessionDetails.PaymentStatus)
+	metadataEventID := sessionDetails.EventID
+	metadataUserID := sessionDetails.UserID
+
+	if metadataUserID > 0 && metadataUserID != userID {
+		writeError(w, http.StatusForbidden, "session does not belong to current user")
+		return
+	}
+
+	var eventID int64
+	var registrationStatus string
+	err = db.QueryRow(`
+		SELECT event_id, payment_status
+		FROM event_registrations
+		WHERE user_id = $1 AND stripe_session_id = $2
+	`, userID, sessionID).Scan(&eventID, &registrationStatus)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			writeError(w, http.StatusInternalServerError, "could not load registration")
+			return
+		}
+
+		if metadataEventID <= 0 {
+			writeError(w, http.StatusNotFound, "registration not found")
+			return
+		}
+
+		eventID = metadataEventID
+		err = db.QueryRow(`
+			SELECT payment_status
+			FROM event_registrations
+			WHERE user_id = $1 AND event_id = $2
+		`, userID, eventID).Scan(&registrationStatus)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				_, err = db.Exec(`
+					INSERT INTO event_registrations (event_id, user_id, payment_status, stripe_session_id)
+					VALUES ($1, $2, 'pending', $3)
+				`, eventID, userID, sessionID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "could not create registration")
+					return
+				}
+				registrationStatus = "pending"
+			} else {
+				writeError(w, http.StatusInternalServerError, "could not load registration")
+				return
+			}
+		} else {
+			_, _ = db.Exec(`
+				UPDATE event_registrations
+				SET stripe_session_id = $3
+				WHERE event_id = $1 AND user_id = $2
+			`, eventID, userID, sessionID)
+		}
+	}
+
+	if paymentStatus != "paid" {
+		writeError(w, http.StatusBadRequest, "payment not completed")
+		return
+	}
+
+	if registrationStatus != "paid" {
+		_, err = db.Exec(`
+			UPDATE event_registrations
+			SET payment_status = 'paid', stripe_session_id = $3, stripe_payment_intent_id = $4
+			WHERE user_id = $1 AND event_id = $2
+		`, userID, eventID, sessionID, sessionDetails.PaymentIntent)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update registration status")
+			return
+		}
+	}
+
+	_, _ = db.Exec(`
+		UPDATE events
+		SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND payment_status <> 'pending' AND status = 'active')
+		WHERE id = $1
+	`, eventID)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":          true,
+		"eventId":     eventID,
+		"registered":  true,
+		"paymentStatus": "paid",
+	})
+}
+
 func eventValidateHandler(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimSuffix(r.URL.Path, "/validate")
-	id, err := parseIDFromPath(path, "/api/admin/events/")
+	id, err := parseAdminEventActionID(r.URL.Path, "validate")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid event id")
 		return
@@ -2057,7 +2415,7 @@ func eventValidateHandler(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRow(`
 		UPDATE events
 		SET validation_status = 'approved', rejection_comment = '', status = 'planifie', updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND status != 'annule'
 		RETURNING updated_at
 	`, id).Scan(&updatedAt)
 	if err != nil {
@@ -2078,8 +2436,7 @@ func eventValidateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func eventRejectHandler(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimSuffix(r.URL.Path, "/reject")
-	id, err := parseIDFromPath(path, "/api/admin/events/")
+	id, err := parseAdminEventActionID(r.URL.Path, "reject")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid event id")
 		return
@@ -2096,7 +2453,7 @@ func eventRejectHandler(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRow(`
 		UPDATE events
 		SET validation_status = 'rejected', rejection_comment = $1, updated_at = NOW()
-		WHERE id = $2
+		WHERE id = $2 AND status != 'annule'
 		RETURNING updated_at
 	`, comment, id).Scan(&updatedAt)
 	if err != nil {
@@ -2116,194 +2473,70 @@ func eventRejectHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func eventCategoriesHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		q := strings.TrimSpace(r.URL.Query().Get("q"))
-		statusFilter := normalizeEventCategoryStatus(strings.TrimSpace(r.URL.Query().Get("status")))
-
-		rows, err := db.Query(`
-			SELECT c.id, c.name, c.description, c.status, c.created_at, c.updated_at, COUNT(e.id) AS linked_events
-			FROM event_categories c
-			LEFT JOIN events e ON e.category_id = c.id
-			WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.description ILIKE '%' || $1 || '%')
-			AND ($2 = '' OR c.status = $2)
-			GROUP BY c.id
-			ORDER BY c.created_at DESC
-		`, q, statusFilter)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not list categories")
-			return
-		}
-		defer rows.Close()
-
-		items := make([]map[string]interface{}, 0)
-		for rows.Next() {
-			var id int64
-			var name, description, status string
-			var createdAt, updatedAt time.Time
-			var linkedEvents int64
-
-			if err := rows.Scan(&id, &name, &description, &status, &createdAt, &updatedAt, &linkedEvents); err != nil {
-				writeError(w, http.StatusInternalServerError, "could not parse categories")
-				return
-			}
-
-			items = append(items, map[string]interface{}{
-				"id":           id,
-				"name":         name,
-				"description":  description,
-				"status":       status,
-				"linkedEvents": linkedEvents,
-				"createdAt":    createdAt.UTC().Format(time.RFC3339),
-				"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
-			})
-		}
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
-
-	case http.MethodPost:
-		var payload eventCategoryPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-
-		name := strings.TrimSpace(payload.Name)
-		description := strings.TrimSpace(payload.Description)
-		status := normalizeEventCategoryStatus(payload.Status)
-
-		if name == "" {
-			writeError(w, http.StatusBadRequest, "name is required")
-			return
-		}
-		if status == "" {
-			status = "actif"
-		}
-
-		var id int64
-		var createdAt, updatedAt time.Time
-		err := db.QueryRow(`
-			INSERT INTO event_categories (name, description, status)
-			VALUES ($1, $2, $3)
-			RETURNING id, created_at, updated_at
-		`, name, description, status).Scan(&id, &createdAt, &updatedAt)
-		if err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "unique") {
-				writeError(w, http.StatusConflict, "category already exists")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "could not create category")
-			return
-		}
-
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"id":           id,
-			"name":         name,
-			"description":  description,
-			"status":       status,
-			"linkedEvents": 0,
-			"createdAt":    createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
-		})
-
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func eventCategoryByIDHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDFromPath(r.URL.Path, "/api/admin/event-categories/")
+func eventCancelHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseAdminEventActionID(r.URL.Path, "cancel")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid category id")
+		writeError(w, http.StatusBadRequest, "invalid event id")
 		return
 	}
 
-	switch r.Method {
-	case http.MethodPut:
-		var payload eventCategoryPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-
-		name := strings.TrimSpace(payload.Name)
-		description := strings.TrimSpace(payload.Description)
-		status := normalizeEventCategoryStatus(payload.Status)
-
-		if name == "" {
-			writeError(w, http.StatusBadRequest, "name is required")
-			return
-		}
-		if status == "" {
-			writeError(w, http.StatusBadRequest, "invalid status")
-			return
-		}
-
-		var createdAt, updatedAt time.Time
-		result := db.QueryRow(`
-			UPDATE event_categories
-			SET name = $1, description = $2, status = $3, updated_at = NOW()
-			WHERE id = $4
-			RETURNING created_at, updated_at
-		`, name, description, status, id)
-
-		if err := result.Scan(&createdAt, &updatedAt); err != nil {
-			if err == sql.ErrNoRows {
-				writeError(w, http.StatusNotFound, "category not found")
-				return
-			}
-			if strings.Contains(strings.ToLower(err.Error()), "unique") {
-				writeError(w, http.StatusConflict, "category already exists")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "could not update category")
-			return
-		}
-
-		var linkedEvents int64
-		_ = db.QueryRow(`SELECT COUNT(*) FROM events WHERE category_id = $1`, id).Scan(&linkedEvents)
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":           id,
-			"name":         name,
-			"description":  description,
-			"status":       status,
-			"linkedEvents": linkedEvents,
-			"createdAt":    createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
-		})
-
-	case http.MethodDelete:
-		var linkedEvents int64
-		if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE category_id = $1`, id).Scan(&linkedEvents); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not check category relations")
-			return
-		}
-
-		if linkedEvents > 0 {
-			writeError(w, http.StatusConflict, "cannot delete a category with linked events")
-			return
-		}
-
-		result, err := db.Exec(`DELETE FROM event_categories WHERE id = $1`, id)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not delete category")
-			return
-		}
-
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			writeError(w, http.StatusNotFound, "category not found")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
-
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	var payload eventRejectPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
 	}
+
+	comment := strings.TrimSpace(payload.Comment)
+	if comment == "" {
+		writeError(w, http.StatusBadRequest, "cancellation comment is required")
+		return
+	}
+
+	var updatedAt time.Time
+	err = db.QueryRow(`
+		UPDATE events
+		SET status = 'annule', rejection_comment = $1, validation_status = 'rejected', updated_at = NOW()
+		WHERE id = $2
+		RETURNING updated_at
+	`, comment, id).Scan(&updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "event not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not cancel event")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":                  id,
+		"status":              "annule",
+		"cancellationComment": comment,
+		"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+	})
 }
+
+func parseAdminEventActionID(path string, action string) (int64, error) {
+	trimmedPath := strings.TrimSpace(path)
+	suffix := "/" + strings.Trim(strings.TrimSpace(action), "/")
+	trimmedPath = strings.TrimSuffix(trimmedPath, suffix)
+	trimmedPath = strings.Trim(trimmedPath, "/")
+	parts := strings.Split(trimmedPath, "/")
+	if len(parts) == 0 {
+		return 0, fmt.Errorf("missing id")
+	}
+	rawID := strings.TrimSpace(parts[len(parts)-1])
+	if rawID == "" {
+		return 0, fmt.Errorf("missing id")
+	}
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid id")
+	}
+	return id, nil
+}
+
+
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -4421,3 +4654,252 @@ func itemCountryByIDAdminHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
+
+func salarieMemberEventsHandler(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	userIDVal, _ := claims["userId"].(float64)
+	userID := int64(userIDVal)
+
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(`
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+			FROM events e
+			WHERE e.intervenant_id = $1
+			ORDER BY e.date_debut ASC
+		`, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list your events")
+			return
+		}
+		defer rows.Close()
+
+		items := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			item, err := scanEventRow(rows)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not parse events")
+				return
+			}
+			items = append(items, item)
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+
+	case http.MethodPost:
+		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+
+
+		var firstname, lastname string
+		_ = db.QueryRow(`SELECT firstname, lastname FROM users WHERE id = $1`, userID).Scan(&firstname, &lastname)
+		intervenantName := strings.TrimSpace(firstname + " " + lastname)
+
+		var id int64
+		var createdAt, updatedAt time.Time
+		capacity := sql.NullInt64{}
+		if payload.Capacite != nil {
+			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
+		}
+
+		err = db.QueryRow(`
+			INSERT INTO events (name, description, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status, image_url, pricing_type, price)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			RETURNING id, created_at, updated_at
+		`,
+			strings.TrimSpace(payload.Name), strings.TrimSpace(payload.Description),
+			normalizeEventType(payload.Type), startAt, endAt, strings.TrimSpace(payload.Lieu),
+			capacity, normalizeEventStatus(payload.Status), intervenantName, userID,
+			"pending", strings.TrimSpace(payload.ImageUrl), payload.PricingType, payload.Price,
+		).Scan(&id, &createdAt, &updatedAt)
+		if err != nil {
+			log.Printf("Error creating event: %v", err)
+			writeError(w, http.StatusInternalServerError, "could not create event")
+			return
+		}
+		payload.Intervenant = intervenantName
+		payload.ValidationStatus = "pending"
+		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/api/salarie/events/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	userIDVal, _ := claims["userId"].(float64)
+	userID := int64(userIDVal)
+
+	// Check ownership
+	var ownerID int64
+	err = db.QueryRow(`SELECT intervenant_id FROM events WHERE id = $1`, id).Scan(&ownerID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "event not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if ownerID != userID {
+		writeError(w, http.StatusForbidden, "not your event")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		row := db.QueryRow(`
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+			FROM events e
+			WHERE e.id = $1
+		`, id)
+		item, err := scanEventSingleRow(row)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not fetch event")
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
+
+	case http.MethodPut:
+		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+
+		capacity := sql.NullInt64{}
+		if payload.Capacite != nil {
+			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
+		}
+
+		var updatedAt time.Time
+		err = db.QueryRow(`
+			UPDATE events SET name=$1, description=$2, type=$3, date_debut=$4, date_fin=$5, lieu=$6, capacite=$7, status=$8, image_url=$9, pricing_type=$10, price=$11, validation_status='pending', rejection_comment='', updated_at=NOW()
+			WHERE id=$12 RETURNING updated_at
+		`, strings.TrimSpace(payload.Name), strings.TrimSpace(payload.Description),
+			normalizeEventType(payload.Type), startAt, endAt, strings.TrimSpace(payload.Lieu),
+			capacity, normalizeEventStatus(payload.Status), strings.TrimSpace(payload.ImageUrl),
+			payload.PricingType, payload.Price, id,
+		).Scan(&updatedAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update event")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
+
+	case http.MethodDelete:
+		_, err = db.Exec(`DELETE FROM events WHERE id = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete event")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+type PaymentTransaction struct {
+	Source         string    `json:"source"`
+	SourceID       int64     `json:"sourceId"`
+	UserID         int64     `json:"userId"`
+	UserName       string    `json:"userName"`
+	EntityName     string    `json:"entityName"`
+	Date           time.Time `json:"date"`
+	Amount         float64   `json:"amount"`
+	Status         string    `json:"status"`
+	TransactionRef string    `json:"transactionRef"`
+}
+
+func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	role, _ := claims["role"].(string)
+	if role != "admin" {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	query := `
+		SELECT 'Inscription événement' AS source, er.id AS source_id, u.id AS user_id, 
+		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name, 
+		       e.name AS entity_name, er.created_at AS date, e.price AS amount, 
+		       er.payment_status AS status, COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref
+		FROM event_registrations er
+		JOIN events e ON er.event_id = e.id
+		JOIN users u ON er.user_id = u.id
+		WHERE e.price > 0
+		
+		UNION ALL
+		
+		SELECT 'Vente annonce' AS source, i.id AS source_id, COALESCE(u.id, i.user_id) AS user_id, 
+		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email, 'Client') AS user_name, 
+		       i.title AS entity_name, COALESCE(il.stripe_paid_at, il.updated_at, i.updated_at) AS date, 
+		       i.price AS amount, 
+		       CASE 
+		           WHEN il.stripe_payment_status IN ('paid', 'succeeded') THEN 'paid'
+		           WHEN il.stripe_payment_status = 'refunded' THEN 'refunded'
+		           WHEN i.status IN ('vendu', 'vendue') THEN 'paid'
+		           ELSE COALESCE(NULLIF(il.stripe_payment_status, ''), 'pending')
+		       END AS status, 
+		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref
+		FROM items i
+		LEFT JOIN item_logistics il ON il.item_id = i.id
+		LEFT JOIN users u ON il.reserved_by_user_id = u.id
+		WHERE (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded'))
+		
+		UNION ALL
+		
+		SELECT 'Réservation service' AS source, sb.id AS source_id, u.id AS user_id, 
+		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name, 
+		       s.name AS entity_name, sb.created_at AS date, sb.amount AS amount, 
+		       sb.payment_status AS status, '' AS transaction_ref
+		FROM service_bookings sb
+		JOIN services s ON sb.service_id = s.id
+		JOIN users u ON sb.user_id = u.id
+		WHERE sb.amount > 0
+		
+		ORDER BY date DESC;
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Printf("[Finances] Error querying payments: %v", err)
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer rows.Close()
+
+	transactions := []PaymentTransaction{}
+	for rows.Next() {
+		var t PaymentTransaction
+		var date sql.NullTime
+		if err := rows.Scan(&t.Source, &t.SourceID, &t.UserID, &t.UserName, &t.EntityName, &date, &t.Amount, &t.Status, &t.TransactionRef); err != nil {
+			log.Printf("[Finances] Error scanning payment row: %v", err)
+			continue
+		}
+		if date.Valid {
+			t.Date = date.Time
+		}
+		transactions = append(transactions, t)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": transactions})
+}
+func (t *PaymentTransaction) placeholder() {} // avoid unused struct warning if needed, but not here

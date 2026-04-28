@@ -9,7 +9,6 @@ import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 export default function SalarieFormationsPage({ params }) {
     const { subpage } = use(params);
     const [events, setEvents] = useState([]);
-    const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
@@ -26,8 +25,14 @@ export default function SalarieFormationsPage({ params }) {
         setLoading(true);
         setError("");
         try {
-            const evRes = await fetch(apiUrl("/salarie/events"), { headers: buildAuthHeaders() });
-            const evData = await parseResponse(evRes);
+            const [evRes] = await Promise.all([
+                fetch(apiUrl("/salarie/events"), { headers: buildAuthHeaders() })
+            ]);
+
+            const [evData] = await Promise.all([
+                parseResponse(evRes)
+            ]);
+
             setEvents(evData.items || []);
         } catch (err) {
             setError(String(err?.message || "Impossible de charger les données."));
@@ -72,7 +77,7 @@ export default function SalarieFormationsPage({ params }) {
             <SalarieFormationsView
                 subpage={subpage}
                 events={events}
-                categories={categories}
+                categories={[]}
                 loading={loading}
                 errorMessage={error}
                 onCreate={handleCreate}

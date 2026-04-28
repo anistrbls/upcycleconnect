@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { pillInputStyle } from "../../lib/styles";
 import AdminModal from "../admin/AdminModal";
 import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../lib/api";
@@ -71,11 +72,8 @@ function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout
 
             {/* Badges haut droite */}
             <div style={{ position: "absolute", top: "14px", right: "14px", display: "flex", gap: "0.4rem", zIndex: 2, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {isFull && (
-                    <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(220,38,38,0.75)", color: "#fff", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.22)", letterSpacing: "0.04em", textTransform: "uppercase" }}>Complet</div>
-                )}
                 {isRegistered && (
-                    <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(50,200,100,0.75)", color: "#fff", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.22)", letterSpacing: "0.04em" }}>Inscrit</div>
+                    <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.24)", letterSpacing: "0.03em" }}>Inscrit</div>
                 )}
             </div>
 
@@ -186,33 +184,126 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
     );
 }
 
+/* ── Modale Confirmation Annulation ── */
+function CancelConfirmModal({ item, open, onClose, onConfirm, isLoading }) {
+    if (!item) return null;
+    const isPaid = item.pricingType === "payant" || item.paymentStatus === "paid";
+    const start = new Date(item.dateDebut);
+    const now = new Date();
+    const diffHours = (start - now) / (1000 * 60 * 60);
+    const isRefundable = diffHours >= 24;
+
+    return (
+        <AdminModal open={open} title="Annuler ma participation" onClose={onClose}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--text-main)" }}>
+                    Êtes-vous sûr de vouloir annuler votre participation à l'événement <strong>{item.name}</strong> ?
+                </p>
+                {isPaid && (
+                    <div style={{ background: isRefundable ? "rgba(34,197,94,0.1)" : "rgba(220,38,38,0.1)", padding: "1rem", borderRadius: "12px", border: isRefundable ? "1px solid rgba(34,197,94,0.3)" : "1px solid rgba(220,38,38,0.3)" }}>
+                        <h4 style={{ margin: "0 0 0.4rem 0", color: isRefundable ? "#166534" : "#991B1B", fontSize: "0.95rem" }}>
+                            Condition de remboursement
+                        </h4>
+                        <p style={{ margin: 0, fontSize: "0.85rem", color: isRefundable ? "#166534" : "#991B1B", lineHeight: 1.5 }}>
+                            {isRefundable 
+                                ? "L'événement commence dans plus de 24h. Vous serez intégralement remboursé sur votre moyen de paiement."
+                                : "L'événement commence dans moins de 24h. Conformément à nos conditions, aucun remboursement n'est possible."}
+                        </p>
+                    </div>
+                )}
+                {!isPaid && (
+                    <div style={{ background: "rgba(59,130,246,0.1)", padding: "1rem", borderRadius: "12px", border: "1px solid rgba(59,130,246,0.3)" }}>
+                        <p style={{ margin: 0, fontSize: "0.85rem", color: "#1D4ED8", lineHeight: 1.5 }}>
+                            Il s'agit d'un événement gratuit. Votre place sera libérée pour un autre participant.
+                        </p>
+                    </div>
+                )}
+                <div style={{ display: "flex", gap: "0.65rem", paddingTop: "0.5rem" }}>
+                    <button type="button" disabled={isLoading} onClick={() => onConfirm(item)} className="action-cta" style={{ flex: 1, background: "#DC2626", color: "white", border: "none", fontSize: "0.9rem", fontFamily: "inherit" }}>
+                        {isLoading ? "…" : "Confirmer l'annulation"}
+                    </button>
+                    <button type="button" onClick={onClose} className="action-cta" style={{ background: "#E8ECEE", color: "var(--text-main)", fontSize: "0.9rem", fontFamily: "inherit" }}>Annuler</button>
+                </div>
+            </div>
+        </AdminModal>
+    );
+}
+
 /* ── Carte inscription (Mes inscriptions) ── */
 function RegistrationCard({ item, index, onDetail, onUnregister, isLoading }) {
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
     const start = new Date(item.dateDebut);
     const isPaid = item.paymentStatus === "paid";
     const isPending = item.paymentStatus === "pending";
+    const isCancelled = item.status === "annule";
+    const paymentLabel = isPending ? "Paiement en attente" : isPaid ? "Paye" : "Gratuit";
+    const paymentStyle = isPending
+        ? { bg: "rgba(245, 158, 11, 0.18)", color: "#FCD34D", border: "1px solid rgba(245, 158, 11, 0.35)" }
+        : isPaid
+            ? { bg: "rgba(59,130,246,0.18)", color: "#BFDBFE", border: "1px solid rgba(59,130,246,0.35)" }
+            : { bg: "rgba(34,197,94,0.18)", color: "#BBF7D0", border: "1px solid rgba(34,197,94,0.35)" };
+
     return (
-        <article style={{ background: "var(--surface-hover)", borderRadius: "20px", padding: "1.25rem", display: "grid", gap: "0.75rem", animation: "cardAppear 0.45s ease-out both", animationDelay: `${(index ?? 0) * 0.07}s` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.75rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 600, margin: 0, flex: 1, lineHeight: 1.35 }}>{item.name}</h3>
-                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <span style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "0.73rem", fontWeight: 700, background: tc.bg, color: tc.color }}>{TYPE_LABELS[item.type] || item.type}</span>
-                    <span style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "0.73rem", fontWeight: 700, background: isPending ? "#FFF3E0" : isPaid ? "#EAF4FF" : "#E5FFBC", color: isPending ? "#A56A2A" : isPaid ? "#2563EB" : "#166534" }}>
-                        {isPending ? "Paiement en attente" : isPaid ? "Payé" : "Gratuit"}
-                    </span>
+        <article
+            style={{ position: "relative", borderRadius: "28px", overflow: "hidden", height: "380px", background: item.imageUrl ? "#111" : tc.bg, boxShadow: "0 4px 24px rgba(0,0,0,0.10)", cursor: "pointer", animation: "cardAppear 0.45s ease-out both", animationDelay: `${(index ?? 0) * 0.06}s` }}
+            onClick={() => onDetail(item)}
+        >
+            {item.imageUrl ? (
+                <>
+                    <img src={item.imageUrl} alt={item.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} onError={e => e.target.style.display = "none"} />
+                    <div style={{ position: "absolute", inset: 0, backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", maskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)", WebkitMaskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)", pointerEvents: "none" }} />
+                </>
+            ) : null}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(5,10,5,0.92) 0%, rgba(5,10,5,0.6) 38%, rgba(5,10,5,0.1) 62%, transparent 78%)", pointerEvents: "none" }} />
+
+            <div style={{ position: "absolute", top: "14px", right: "14px", display: "flex", gap: "0.4rem", zIndex: 2, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {isCancelled && (
+                    <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(214, 78, 40, 0.16)", color: "#FECACA", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(214, 78, 40, 0.28)", letterSpacing: "0.03em" }}>
+                        Annule
+                    </div>
+                )}
+                <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: paymentStyle.bg, color: paymentStyle.color, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: paymentStyle.border, letterSpacing: "0.03em" }}>
+                    {paymentLabel}
                 </div>
             </div>
-            <div style={{ display: "grid", gap: "0.25rem", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                {!isNaN(start.getTime()) && <span>{formatDate(item.dateDebut)}</span>}
-                {item.lieu && <span>{item.lieu}</span>}
-                {item.intervenant && <span>Intervenant : {item.intervenant}</span>}
-            </div>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button type="button" onClick={() => onDetail(item)} className="action-cta task-action-btn" style={{ fontSize: "0.8rem", padding: "0.45rem 0.9rem" }}>Détail</button>
-                <button type="button" disabled={isLoading} onClick={() => onUnregister(item)} className="action-cta" style={{ fontSize: "0.8rem", padding: "0.45rem 0.9rem", background: "#F0F0F0", color: "var(--text-main)" }}>
-                    {isLoading ? "…" : "Se désinscrire"}
-                </button>
+
+            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.6rem", zIndex: 2 }} onClick={e => e.stopPropagation()}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "0.75rem" }}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }}>{item.name}</h3>
+                    <div style={{ padding: "5px 14px", borderRadius: "999px", background: "rgba(255,255,255,0.15)", color: "white", fontSize: "0.88rem", fontWeight: 700, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                        {formatPrice(item)}
+                    </div>
+                </div>
+                <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.7)", margin: 0 }}>
+                    {!isNaN(start.getTime()) && start.toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {item.lieu && ` · ${item.lieu}`}
+                </p>
+                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                    <span style={{ padding: "3px 10px", borderRadius: "999px", background: "rgba(255,255,255,0.12)", fontSize: "0.73rem", color: "rgba(255,255,255,0.85)", fontWeight: 500, border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(4px)" }}>
+                        {TYPE_LABELS[item.type] || item.type}
+                    </span>
+                    {item.intervenant && (
+                        <span style={{ padding: "3px 10px", borderRadius: "999px", background: "rgba(255,255,255,0.12)", fontSize: "0.73rem", color: "rgba(255,255,255,0.85)", fontWeight: 500, border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(4px)" }}>
+                            {item.intervenant}
+                        </span>
+                    )}
+                </div>
+                {isCancelled && (
+                    <div style={{ background: "rgba(214, 78, 40, 0.14)", border: "1px solid rgba(214, 78, 40, 0.24)", color: "#FEE2E2", borderRadius: "14px", padding: "0.7rem 0.8rem", fontSize: "0.78rem", lineHeight: 1.45, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
+                        <strong>Evenement annule.</strong>
+                        {item.rejectionComment ? ` ${item.rejectionComment}` : " L'organisateur a annule cet evenement."}
+                    </div>
+                )}
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    <button type="button" onClick={() => onDetail(item)} style={{ padding: "9px 14px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, fontFamily: "inherit" }}>
+                        Voir le detail
+                    </button>
+                    {!isCancelled && (
+                        <button type="button" disabled={isLoading} onClick={() => onUnregister(item)} style={{ flex: 1, padding: "9px 14px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "rgba(255,255,255,0.78)", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, fontFamily: "inherit" }}>
+                            {isLoading ? "…" : (isPaid ? "Demander remboursement" : "Se desinscrire")}
+                        </button>
+                    )}
+                </div>
             </div>
         </article>
     );
@@ -220,23 +311,97 @@ function RegistrationCard({ item, index, onDetail, onUnregister, isLoading }) {
 
 /* ══════════════════════════════════════════════════════════ */
 export default function ParticulierEvenementsView({ events = [], registrations = [], loading, errorMessage, onReload, subpage = "activites" }) {
+    const router = useRouter();
+    const searchParams = useSearchParams();
     const [typeFilter, setTypeFilter] = useState("all");
     const [priceFilter, setPriceFilter] = useState("all");
     const [query, setQuery] = useState("");
     const [detailItem, setDetailItem] = useState(null);
+    const [cancelItem, setCancelItem] = useState(null);
     const [toast, setToast] = useState(null);
     const [loadingIds, setLoadingIds] = useState(new Set());
-    const [registeredIds, setRegisteredIds] = useState(() => new Set((registrations || []).filter(r => r.paymentStatus !== "pending").map(r => r.id ?? r.eventId)));
+    const [registeredIds, setRegisteredIds] = useState(() => new Set((registrations || []).filter(r => r.paymentStatus !== "pending" && r.registrationStatus !== "cancelled").map(r => r.id ?? r.eventId)));
+    const toastTimerRef = useRef(null);
+    const handledPaymentRef = useRef("");
 
     // Sync registeredIds when registrations prop changes
     const syncRegistrations = useCallback((regs) => {
         setRegisteredIds(new Set((regs || []).filter(r => r.paymentStatus !== "pending").map(r => r.id ?? r.eventId)));
     }, []);
 
+    useEffect(() => {
+        syncRegistrations(registrations);
+    }, [registrations, syncRegistrations]);
+
     const showToast = (msg, ok = true) => {
+        if (toastTimerRef.current) {
+            clearTimeout(toastTimerRef.current);
+        }
         setToast({ msg, ok });
-        setTimeout(() => setToast(null), 3500);
+        toastTimerRef.current = setTimeout(() => setToast(null), 3500);
     };
+
+    useEffect(() => {
+        return () => {
+            if (toastTimerRef.current) {
+                clearTimeout(toastTimerRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        const selectedIdRaw = searchParams.get("id");
+        if (!selectedIdRaw || !events.length || subpage !== "activites") {
+            return;
+        }
+        const selectedId = Number(selectedIdRaw);
+        if (Number.isNaN(selectedId)) {
+            return;
+        }
+        const selected = events.find((event) => Number(event.id) === selectedId);
+        if (selected) {
+            setDetailItem(selected);
+        }
+    }, [searchParams, events, subpage]);
+
+    useEffect(() => {
+        if (subpage !== "activites") {
+            return;
+        }
+        const paymentState = searchParams.get("payment");
+        const paidEventIdRaw = searchParams.get("id");
+
+        if (paymentState !== "success" && paymentState !== "failed") {
+            return;
+        }
+
+        const paymentKey = `${paymentState}:${paidEventIdRaw || ""}`;
+        if (handledPaymentRef.current === paymentKey) {
+            return;
+        }
+        handledPaymentRef.current = paymentKey;
+
+        if (paymentState === "success") {
+            const paidEventId = Number(paidEventIdRaw);
+            if (!Number.isNaN(paidEventId)) {
+                setRegisteredIds((prev) => new Set([...prev, paidEventId]));
+            }
+            if (onReload) {
+                onReload();
+            }
+            showToast("Paiement confirme. Vous etes inscrit a l'evenement.");
+        } else {
+            showToast("Le paiement n'a pas pu etre confirme. Reessayez depuis l'evenement.", false);
+        }
+
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("payment");
+        const query = params.toString();
+        const nextPath = query ? `/evenements/activites?${query}` : "/evenements/activites";
+        if (typeof window !== "undefined") {
+            window.history.replaceState(window.history.state, "", nextPath);
+        }
+    }, [searchParams, subpage, onReload]);
 
     const setLoading = (id, val) => {
         setLoadingIds(prev => {
@@ -262,19 +427,41 @@ export default function ParticulierEvenementsView({ events = [], registrations =
         }
     };
 
-    const handleUnregister = async (item) => {
+    const handleDetailAction = (item) => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("id", item.id);
+        router.push(`/evenements/${subpage}?${params.toString()}`);
+    };
+
+    const handleUnregisterClick = (item) => {
+        setCancelItem(item);
+    };
+
+    const handleConfirmCancel = async (item) => {
         setLoading(item.id, true);
         try {
             const res = await fetch(apiUrl(`/events/${item.id}/register`), { method: "DELETE", headers: buildAuthHeaders() });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || "Erreur de désinscription");
+            
+            // Check the HTTP status explicitly
+            if (!res.ok) throw new Error(data.error || "Erreur d'annulation");
+            
             setRegisteredIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
-            showToast(`Désinscription effectuée.`);
+            
+            if (data.refunded) {
+                showToast(`Annulation confirmée et remboursement de ${data.refundAmount}€ initié.`);
+            } else if (data.refunded === false) {
+                showToast(`Annulation confirmée. Non remboursable : ${data.reason}.`, false);
+            } else {
+                showToast(`Désinscription effectuée.`);
+            }
             if (onReload) onReload();
         } catch (err) {
             showToast(err.message, false);
         } finally {
             setLoading(item.id, false);
+            setCancelItem(null);
+            setDetailItem(null);
         }
     };
 
@@ -359,23 +546,23 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                 {!loading && visible.length > 0 && (
                     <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
                         {visible.map((item, index) => (
-                            <EventCard key={item.id} index={index} item={item} onDetail={setDetailItem}
-                                onRegister={handleRegister} onUnregister={handleUnregister} onCheckout={handleCheckout}
+                            <EventCard key={item.id} index={index} item={item} onDetail={handleDetailAction}
+                                onRegister={handleRegister} onUnregister={handleUnregisterClick} onCheckout={handleCheckout}
                                 registeredIds={registeredIds} loadingIds={loadingIds} />
                         ))}
                     </div>
                 )}
-
-                <EventDetailModal item={detailItem} open={!!detailItem} onClose={() => setDetailItem(null)}
-                    onRegister={handleRegister} onUnregister={handleUnregister} onCheckout={handleCheckout}
-                    isRegistered={detailItem ? registeredIds.has(detailItem.id) : false}
-                    isLoading={detailItem ? loadingIds.has(detailItem.id) : false} />
+                
+                <CancelConfirmModal item={cancelItem} open={!!cancelItem} onClose={() => setCancelItem(null)}
+                    onConfirm={handleConfirmCancel} isLoading={cancelItem ? loadingIds.has(cancelItem.id) : false} />
             </>
         );
     }
 
     /* ── Vue Mes inscriptions ── */
     if (subpage === "mes-inscriptions") {
+        const visibleRegistrations = (registrations || []).filter((item) => item.paymentStatus !== "pending");
+
         return (
             <>
                 {toast && (
@@ -396,24 +583,23 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                         ))}
                     </div>
                 )}
-                {!loading && registrations.length === 0 && (
+                {!loading && visibleRegistrations.length === 0 && (
                     <div className="panel" style={{ textAlign: "center", padding: "3rem 1.5rem" }}>
                         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>Vous n'êtes inscrit à aucun événement pour le moment.</p>
                     </div>
                 )}
-                {!loading && registrations.length > 0 && (
+                {!loading && visibleRegistrations.length > 0 && (
                     <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
-                        {registrations.map((item, index) => (
-                            <RegistrationCard key={item.id ?? item.eventId} index={index} item={item} onDetail={setDetailItem}
-                                onUnregister={async (it) => { await handleUnregister(it); if (onReload) onReload(); }}
+                        {visibleRegistrations.map((item, index) => (
+                            <RegistrationCard key={item.id ?? item.eventId} index={index} item={item} onDetail={handleDetailAction}
+                                onUnregister={handleUnregisterClick}
                                 isLoading={loadingIds.has(item.id)} />
                         ))}
                     </div>
                 )}
-                <EventDetailModal item={detailItem} open={!!detailItem} onClose={() => setDetailItem(null)}
-                    onRegister={handleRegister} onUnregister={handleUnregister} onCheckout={handleCheckout}
-                    isRegistered={detailItem ? registeredIds.has(detailItem.id) : false}
-                    isLoading={detailItem ? loadingIds.has(detailItem.id) : false} />
+                
+                <CancelConfirmModal item={cancelItem} open={!!cancelItem} onClose={() => setCancelItem(null)}
+                    onConfirm={handleConfirmCancel} isLoading={cancelItem ? loadingIds.has(cancelItem.id) : false} />
             </>
         );
     }

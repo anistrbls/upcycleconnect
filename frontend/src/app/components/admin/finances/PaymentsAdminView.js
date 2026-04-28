@@ -1,0 +1,173 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+
+export default function PaymentsAdminView() {
+    const [payments, setPayments] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const fetchPayments = async () => {
+        setLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/finances/payments"), {
+                headers: buildAuthHeaders(),
+            });
+            if (!res.ok) throw new Error("Erreur lors de la récupération des paiements");
+            const data = await res.json();
+            setPayments(data.items || []);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchPayments();
+    }, []);
+
+    const formatAmount = (amount) => {
+        return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(amount);
+    };
+
+    const formatDate = (dateStr) => {
+        if (!dateStr) return "N/A";
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return "Date invalide";
+        return d.toLocaleDateString("fr-FR", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    };
+
+    return (
+        <div style={{ padding: "0" }}>
+            <div className="header-section">
+                <div className="title-area">
+                    <span className="activities-label">Administration</span>
+                    <h1>Historique des paiements</h1>
+                </div>
+            </div>
+
+            <div className="panel">
+                {loading ? (
+                    <div style={{ padding: "4rem", textAlign: "center" }}>
+                        <div className="loading-spinner" style={{ margin: "0 auto 1rem" }}></div>
+                        <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>Chargement des transactions sécurisées...</p>
+                    </div>
+                ) : error ? (
+                    <div style={{ padding: "3rem", textAlign: "center" }}>
+                        <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>⚠️</div>
+                        <h3 style={{ marginBottom: "0.5rem" }}>Erreur de chargement</h3>
+                        <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem" }}>{error}</p>
+                        <button className="action-cta task-action-btn" onClick={fetchPayments}>Réessayer</button>
+                    </div>
+                ) : payments.length === 0 ? (
+                    <div style={{ padding: "5rem 2rem", textAlign: "center" }}>
+                        <div style={{ fontSize: "3rem", marginBottom: "1.5rem", opacity: 0.3 }}>💳</div>
+                        <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>
+                            Aucune transaction enregistrée pour le moment.
+                        </p>
+                    </div>
+                ) : (
+                    <div style={{ overflowX: "auto", margin: "0 -1.5rem" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                            <thead>
+                                <tr style={{ textAlign: "left", background: "var(--surface-sunken)" }}>
+                                    <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Transaction</th>
+                                    <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Utilisateur</th>
+                                    <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Type / Source</th>
+                                    <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Montant</th>
+                                    <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Statut</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {payments.map((p, i) => (
+                                    <tr key={i} className="table-row-hover" style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.2s" }}>
+                                        <td style={{ padding: "1.2rem 1.5rem" }}>
+                                            <div style={{ fontWeight: "700", color: "var(--text-main)", marginBottom: "0.2rem" }}>{p.entityName}</div>
+                                            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                                <span>{formatDate(p.date)}</span>
+                                                {p.transactionRef && (
+                                                    <>
+                                                        <span style={{ opacity: 0.3 }}>•</span>
+                                                        <span style={{ fontFamily: "monospace", opacity: 0.8 }} title={p.transactionRef}>Ref. Stripe: {p.transactionRef}</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: "1.2rem 1.5rem" }}>
+                                            <div style={{ fontWeight: "600" }}>{p.userName}</div>
+                                            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>ID #USR-{p.userId}</div>
+                                        </td>
+                                        <td style={{ padding: "1.2rem 1.5rem" }}>
+                                            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                                                <span style={{ 
+                                                    fontSize: "0.7rem", 
+                                                    fontWeight: "700", 
+                                                    padding: "0.2rem 0.6rem", 
+                                                    borderRadius: "6px", 
+                                                    background: "rgba(0,0,0,0.05)",
+                                                    width: "fit-content"
+                                                }}>
+                                                    {p.source}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: "1.2rem 1.5rem" }}>
+                                            <span style={{ fontWeight: "800", fontSize: "1rem", color: "var(--primary-color)" }}>
+                                                {formatAmount(p.amount)}
+                                            </span>
+                                        </td>
+                                        <td style={{ padding: "1.2rem 1.5rem" }}>
+                                            <span style={{ 
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                padding: "0.35rem 0.8rem",
+                                                borderRadius: "999px",
+                                                fontSize: "0.75rem",
+                                                fontWeight: "700",
+                                                background: p.status === "paid" || p.status === "succeeded" || p.status === "success" ? "#ecfdf5" : 
+                                                            p.status === "refunded" ? "#eff6ff" : "#fff1f2",
+                                                color: p.status === "paid" || p.status === "succeeded" || p.status === "success" ? "#059669" : 
+                                                       p.status === "refunded" ? "#2563eb" : "#e11d48",
+                                                border: "1px solid currentColor",
+                                                borderOpacity: 0.1
+                                            }}>
+                                                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor", marginRight: "6px" }}></span>
+                                                {p.status === "succeeded" || p.status === "paid" || p.status === "success" ? "Payé" : 
+                                                 p.status === "refunded" ? "Remboursé" : p.status}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            <style jsx>{`
+                .table-row-hover:hover {
+                    background: var(--surface-hover) !important;
+                }
+                .loading-spinner {
+                    width: 30px;
+                    height: 30px;
+                    border: 3px solid var(--border-color);
+                    border-top-color: var(--primary-color);
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                }
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
+        </div>
+    );
+}

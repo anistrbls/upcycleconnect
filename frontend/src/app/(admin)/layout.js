@@ -134,6 +134,7 @@ export default function AdminLayout({ children }) {
     const particulierEvenementsSubNav = [
         { key: "activites", label: "Activités", shortLabel: "Activités" },
         { key: "mes-inscriptions", label: "Mes inscriptions", shortLabel: "Inscriptions" },
+        { key: "agenda", label: "Agenda", shortLabel: "Agenda" },
     ];
     const visibleSubNav = activeModule.key === "annonces"
         ? (isAdmin ? adminAnnoncesSubNav : (isPro ? proAnnoncesSubNav : activeModule.subNav))

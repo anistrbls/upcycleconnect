@@ -248,6 +248,58 @@ func RetrieveStripeEventSession(secretKey, sessionID string) (string, error) {
 	return session.PaymentStatus, nil
 }
 
+type StripeEventSessionDetails struct {
+	PaymentStatus string
+	EventID       int64
+	UserID        int64
+	PaymentIntent string
+}
+
+func RetrieveStripeEventSessionDetails(secretKey, sessionID string) (*StripeEventSessionDetails, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.stripe.com/v1/checkout/sessions/"+url.PathEscape(sessionID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe retrieve session failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session struct {
+		PaymentStatus string            `json:"payment_status"`
+		PaymentIntent string            `json:"payment_intent"`
+		Metadata      map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+
+	details := &StripeEventSessionDetails{
+		PaymentStatus: session.PaymentStatus,
+		PaymentIntent: session.PaymentIntent,
+	}
+	if raw := strings.TrimSpace(session.Metadata["event_id"]); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			details.EventID = parsed
+		}
+	}
+	if raw := strings.TrimSpace(session.Metadata["user_id"]); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			details.UserID = parsed
+		}
+	}
+
+	return details, nil
+}
+
 // CreateStripeEventCheckoutSessionPublic crée une session Stripe pour un paiement d'événement
 func CreateStripeEventCheckoutSessionPublic(cfg *StripeConfig, eventID, userID int64, title string, amountCents int64) (*StripeCheckoutSessionPublic, error) {
 	if amountCents <= 0 {
@@ -291,4 +343,48 @@ func CreateStripeEventCheckoutSessionPublic(cfg *StripeConfig, eventID, userID i
 		return nil, fmt.Errorf("invalid stripe session response")
 	}
 	return &StripeCheckoutSessionPublic{ID: session.ID, URL: session.URL}, nil
+}
+
+// GetStripePaymentIntentFromSessionPublic retrieves the payment intent ID for a given session
+func GetStripePaymentIntentFromSessionPublic(cfg *StripeConfig, sessionID string) (string, error) {
+	session, err := fetchStripeCheckoutSession(cfg, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if session.PaymentIntent == "" {
+		return "", fmt.Errorf("no payment intent found in session")
+	}
+	return session.PaymentIntent, nil
+}
+
+// RefundStripePaymentIntentPublic issues a full refund for a given payment intent
+func RefundStripePaymentIntentPublic(cfg *StripeConfig, paymentIntentID string) (string, error) {
+	form := url.Values{}
+	form.Set("payment_intent", paymentIntentID)
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/refunds", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("stripe refund failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var refundRes struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &refundRes); err != nil {
+		return "", err
+	}
+	return refundRes.ID, nil
 }

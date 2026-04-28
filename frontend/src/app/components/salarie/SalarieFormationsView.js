@@ -2,8 +2,9 @@
 
 // REDESIGN: formulaire pleine-page style "Déposer une annonce", navigation par subpage
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AdminModal from "../admin/AdminModal";
+import EventDetailView from "../shared/events/EventDetailView";
 import { EVENT_STATUSES, EVENT_TYPES } from "../../lib/constants";
 import { TOKEN_KEY } from "../../lib/api";
 import { toDateTimeInputValue } from "../../lib/formatters";
@@ -144,13 +145,14 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                     Description
                                     <textarea value={formState.description} onChange={set("description")} style={S.textarea} placeholder="Décrivez votre événement…" />
                                 </label>
-                                <label style={S.label}>
-                                    Type
-                                    <select value={formState.type} onChange={set("type")} style={S.select}>
-                                        {EVENT_TYPES.map(t => <option key={t} value={t}>{TYPE_LABELS[t] || t}</option>)}
-                                    </select>
-                                </label>
-
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "1rem" }}>
+                                    <label style={S.label}>
+                                        Type
+                                        <select value={formState.type} onChange={set("type")} style={S.select}>
+                                            {EVENT_TYPES.map(t => <option key={t} value={t}>{TYPE_LABELS[t] || t}</option>)}
+                                        </select>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                         <div style={S.card}>
@@ -295,6 +297,9 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
 
 export default function SalarieFormationsView({ events = [], loading, errorMessage, onCreate, onUpdate, onDelete, categories = [], subpage = "mes-evenements" }) {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const selectedEventId = searchParams.get("id");
+
     const [query, setQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [formOpen, setFormOpen] = useState(false);
@@ -307,6 +312,12 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
     const [participantsEvent, setParticipantsEvent] = useState(null);
     const [participants, setParticipants] = useState([]);
     const [participantsLoading, setParticipantsLoading] = useState(false);
+    const [cancelModalOpen, setCancelModalOpen] = useState(false);
+    const [eventToCancel, setEventToCancel] = useState(null);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [eventToDelete, setEventToDelete] = useState(null);
+    const [publishModalOpen, setPublishModalOpen] = useState(false);
+    const [eventToPublish, setEventToPublish] = useState(null);
 
     const detectConflict = (startDate, endDate, excludeId) =>
         events.find(e => {
@@ -383,14 +394,35 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
         finally { setIsSaving(false); }
     };
 
-    const handleDelete = async (item) => {
-        if (!window.confirm(`Supprimer "${item.name}" ?`)) return;
-        try { await onDelete(item.id); } catch (err) { window.alert(String(err?.message || "Impossible de supprimer.")); }
+    const handleDelete = (item) => {
+        setEventToDelete(item);
+        setDeleteModalOpen(true);
     };
 
-    const handlePublish = async (item) => {
-        if (!window.confirm(`Envoyer "${item.name}" en validation ?`)) return;
+    const confirmDeletion = async () => {
+        if (!eventToDelete) return;
+        setIsSaving(true);
         try {
+            await onDelete(eventToDelete.id);
+            setDeleteModalOpen(false);
+            setEventToDelete(null);
+        } catch (err) {
+            window.alert(String(err?.message || "Impossible de supprimer."));
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handlePublish = (item) => {
+        setEventToPublish(item);
+        setPublishModalOpen(true);
+    };
+
+    const confirmPublish = async () => {
+        if (!eventToPublish) return;
+        setIsSaving(true);
+        try {
+            const item = eventToPublish;
             const payload = {
                 name: item.name,
                 description: item.description || "",
@@ -407,7 +439,13 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                 intervenantId: item.intervenantId ?? null,
             };
             await onUpdate(item.id, payload);
-        } catch (err) { window.alert(String(err?.message || "Impossible d'envoyer en validation.")); }
+            setPublishModalOpen(false);
+            setEventToPublish(null);
+        } catch (err) {
+            window.alert(String(err?.message || "Impossible d'envoyer en validation."));
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleViewParticipants = async (item) => {
@@ -420,6 +458,61 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
             setParticipants(data.items || []);
         } catch { setParticipants([]); } finally { setParticipantsLoading(false); }
     };
+
+    const handleMarkAbsent = async (userId) => {
+        if (!participantsEvent) return;
+        setParticipantsLoading(true);
+        try {
+            const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+            const res = await fetch(`/api/admin/events/${participantsEvent.id}/participants/${userId}/absent`, {
+                method: "POST",
+                headers: { Authorization: "Bearer " + token }
+            });
+            if (!res.ok) throw new Error("Erreur");
+            handleViewParticipants(participantsEvent);
+        } catch (err) {
+            window.alert(err.message || "Erreur lors du marquage de l'absence.");
+            setParticipantsLoading(false);
+        }
+    };
+
+    const handleCancelEvent = (item) => {
+        setEventToCancel(item);
+        setCancelModalOpen(true);
+    };
+
+    const confirmCancellation = async () => {
+        if (!eventToCancel) return;
+        setIsSaving(true);
+        try {
+            const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+            const res = await fetch(`/api/admin/events/${eventToCancel.id}/cancel`, {
+                method: "POST",
+                headers: { Authorization: "Bearer " + token }
+            });
+            if (!res.ok) throw new Error("Erreur lors de l'annulation de l'événement.");
+            setCancelModalOpen(false);
+            setEventToCancel(null);
+            if (typeof window !== "undefined") window.location.reload();
+        } catch (err) {
+            window.alert(err.message || "Erreur lors de l'annulation.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (selectedEventId) {
+        return (
+            <EventDetailView
+                eventId={selectedEventId}
+                onBack={() => {
+                    const params = new URLSearchParams(searchParams);
+                    params.delete("id");
+                    router.push(`${window.location.pathname}?${params.toString()}`);
+                }}
+            />
+        );
+    }
 
     /* Formulaire : subpage creer ou édition via formOpen */
     if (subpage === "creer" || formOpen) {
@@ -469,6 +562,66 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                 {errorMessage && <p style={{ marginTop: "0.75rem", color: "#a23b3b", fontSize: "0.85rem" }}>{errorMessage}</p>}
             </div>
 
+            <AdminModal open={cancelModalOpen} title="Confirmer l'annulation" onClose={() => setCancelModalOpen(false)}>
+                <div style={{ display: "grid", gap: "1.5rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        <p style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, lineHeight: 1.4 }}>
+                            Annuler l'événement <span style={{ color: "var(--black)" }}>"{eventToCancel?.name}"</span> ?
+                        </p>
+                        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                            Cette action est <strong style={{ color: "#DC2626" }}>irréversible</strong>. 
+                            Tous les participants seront désinscrits et ceux ayant payé seront <strong style={{ color: "var(--black)" }}>intégralement remboursés</strong>.
+                        </p>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                        <button type="button" onClick={() => setCancelModalOpen(false)} style={{ ...S.btnSecondary, padding: "0.85rem", fontSize: "0.92rem" }}>Garder l'événement</button>
+                        <button type="button" disabled={isSaving} onClick={confirmCancellation} style={{ ...S.btnPrimary, background: "#DC2626", padding: "0.85rem", fontSize: "0.92rem" }}>
+                            {isSaving ? "Traitement..." : "Confirmer l'annulation"}
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            <AdminModal open={deleteModalOpen} title="Confirmer la suppression" onClose={() => setDeleteModalOpen(false)}>
+                <div style={{ display: "grid", gap: "1.5rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        <p style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, lineHeight: 1.4 }}>
+                            Supprimer l'événement <span style={{ color: "var(--black)" }}>"{eventToDelete?.name}"</span> ?
+                        </p>
+                        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                            Cette action est <strong style={{ color: "#DC2626" }}>irréversible</strong>. 
+                            Toutes les données associées seront définitivement supprimées.
+                        </p>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                        <button type="button" onClick={() => setDeleteModalOpen(false)} style={{ ...S.btnSecondary, padding: "0.85rem", fontSize: "0.92rem" }}>Annuler</button>
+                        <button type="button" disabled={isSaving} onClick={confirmDeletion} style={{ ...S.btnPrimary, background: "#DC2626", padding: "0.85rem", fontSize: "0.92rem" }}>
+                            {isSaving ? "Suppression..." : "Supprimer définitivement"}
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            <AdminModal open={publishModalOpen} title="Envoyer en validation" onClose={() => setPublishModalOpen(false)}>
+                <div style={{ display: "grid", gap: "1.5rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        <p style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, lineHeight: 1.4 }}>
+                            Publier <span style={{ color: "var(--black)" }}>"{eventToPublish?.name}"</span> ?
+                        </p>
+                        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                            Votre événement sera envoyé à l'équipe administrative pour validation. 
+                            Il sera rendu public dès qu'un administrateur l'aura approuvé.
+                        </p>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                        <button type="button" onClick={() => setPublishModalOpen(false)} style={{ ...S.btnSecondary, padding: "0.85rem", fontSize: "0.92rem" }}>Plus tard</button>
+                        <button type="button" disabled={isSaving} onClick={confirmPublish} style={{ ...S.btnPrimary, padding: "0.85rem", fontSize: "0.92rem" }}>
+                            {isSaving ? "Envoi..." : "Envoyer maintenant"}
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
             <AdminModal open={participantsOpen} title={"Participants — " + (participantsEvent ? participantsEvent.name : "")} onClose={() => { setParticipantsOpen(false); setParticipants([]); }}>
                 {participantsLoading ? (
                     <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>
@@ -476,19 +629,50 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                     <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Aucun participant inscrit.</p>
                 ) : (
                     <div style={{ display: "grid", gap: "0.5rem" }}>
-                        <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 0.25rem 0" }}>{participants.length} participant{participants.length > 1 ? "s" : ""}</p>
-                        {participants.map(p => (
-                            <div key={p.userId ?? p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "var(--surface-hover)", borderRadius: "12px", fontSize: "0.82rem", gap: "0.5rem", flexWrap: "wrap" }}>
-                                <span style={{ fontWeight: 600 }}>{p.firstname} {p.lastname}</span>
-                                <span style={{ color: "var(--text-muted)" }}>{p.email}</span>
-                                <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>{new Date(p.registeredAt).toLocaleDateString("fr-FR")}</span>
-                            </div>
-                        ))}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 0.25rem 0" }}>{participants.length} participant{participants.length > 1 ? "s" : ""}</p>
+                            {participantsEvent && participantsEvent.status !== "annule" && (
+                                <button type="button" onClick={() => { setParticipantsOpen(false); handleCancelEvent(participantsEvent); }} style={{ padding: "0.4rem 0.8rem", borderRadius: "10px", border: "1px solid rgba(220,38,38,0.3)", background: "rgba(220,38,38,0.1)", color: "#DC2626", fontSize: "0.80rem", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                                    Tout annuler et rembourser
+                                </button>
+                            )}
+                        </div>
+                        {participants.map((p) => {
+                            const isPaid = p.paymentStatus === "paid";
+                            const isPending = p.paymentStatus === "pending";
+                            const isCancelled = p.status === "annule";
+                            const refunded = p.refundStatus === "refunded";
+                            const refundFailed = p.refundStatus === "failed";
+                            
+                            return (
+                                <div key={p.userId ?? p.id} style={{ display: "flex", flexDirection: "column", padding: "0.75rem", background: isCancelled ? "rgba(255,100,100,0.05)" : "var(--surface-hover)", borderRadius: "12px", gap: "0.5rem" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.82rem", gap: "0.5rem", flexWrap: "wrap" }}>
+                                        <span style={{ fontWeight: 600, textDecoration: isCancelled ? "line-through" : "none" }}>{p.firstname} {p.lastname}</span>
+                                        <span style={{ color: "var(--text-muted)" }}>{p.email}</span>
+                                        <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "99px", background: isPaid ? "#E5FFBC" : isPending ? "#FFF3E0" : "#E6EDEE", color: isPaid ? "#166534" : isPending ? "#A56A2A" : "#555" }}>{isPaid ? "Payé" : isPending ? "En attente" : "Gratuit"}</span>
+                                        
+                                        {isCancelled && <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "99px", background: "rgba(220, 38, 38, 0.15)", color: "#B91C1C", fontWeight: 600 }}>Annulé</span>}
+                                        {refunded && <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "99px", background: "rgba(34, 197, 94, 0.15)", color: "#166534", fontWeight: 600 }}>Remboursé {p.refundAmount ? `(${p.refundAmount}€)` : ""}</span>}
+                                        {refundFailed && <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "99px", background: "rgba(245, 158, 11, 0.15)", color: "#D97706", fontWeight: 600 }} title={p.refundError}>Échec remb.</span>}
+                                        {p.isAbsent && <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "99px", background: "rgba(107, 114, 128, 0.15)", color: "#4B5563", fontWeight: 600 }}>Absent</span>}
+                                        
+                                        <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>{new Date(p.registeredAt).toLocaleDateString("fr-FR")}</span>
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                                        {!isCancelled && !p.isAbsent && (
+                                            <button type="button" onClick={() => handleMarkAbsent(p.id)} style={{ padding: "0.25rem 0.6rem", borderRadius: "8px", border: "1px solid rgba(107, 114, 128, 0.3)", background: "transparent", color: "var(--text-main)", fontSize: "0.75rem", cursor: "pointer" }}>
+                                                Marquer absent
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
             </AdminModal>
 
-            <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+            <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(min(400px, 100%), 1fr))" }}>
                 {loading && <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1/-1" }}>Chargement…</p>}
                 {!loading && filteredEvents.length === 0 && (
                     <div style={{ gridColumn: "1/-1", textAlign: "center", padding: "4rem 2rem", background: "var(--surface-hover)", borderRadius: "28px" }}>
@@ -531,7 +715,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                                 )}
                                 {item.validationStatus && (
                                     <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: vBadge.bg, color: vBadge.color, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: `1px solid ${vBadge.border}`, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                                        {VALIDATION_LABELS[item.validationStatus] || item.validationStatus}
+                                        {item.status === "annule" ? "Annulé" : (VALIDATION_LABELS[item.validationStatus] || item.validationStatus)}
                                     </div>
                                 )}
                             </div>
@@ -548,7 +732,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                                     {!isNaN(start.getTime()) && start.toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                                     {item.lieu && ` · ${item.lieu}`}
                                 </p>
-                                {item.validationStatus === "rejected" && item.rejectionComment && (
+                                {item.validationStatus === "rejected" && item.status !== "annule" && item.rejectionComment && (
                                     <p style={{ fontSize: "0.76rem", color: "#ff8080", margin: 0, lineHeight: 1.5 }}>{item.rejectionComment}</p>
                                 )}
                                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -561,24 +745,40 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                                         </span>
                                     )}
                                 </div>
-                                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                                    <button type="button" onClick={() => handleEdit(item)} title="Modifier" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                    </button>
-                                    <button type="button" onClick={() => handleDelete(item)} title="Supprimer" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(220,60,60,0.35)", background: "rgba(220,60,60,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#ff8080", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                        <IconTrash />
-                                    </button>
-                                    {item.status === "brouillon" && item.validationStatus !== "approved" ? (
-                                        <button type="button" onClick={() => handlePublish(item)} style={{ flex: 1, padding: "0.72rem 1rem", borderRadius: "999px", border: "none", background: "linear-gradient(135deg, #2563EB, #1d4ed8)", color: "white", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem" }}>
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                                            Envoyer en validation
+                                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                                        <button type="button" onClick={() => handleEdit(item)} title="Modifier" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                         </button>
-                                    ) : (
-                                        <button type="button" onClick={() => handleViewParticipants(item)} style={{ flex: 1, padding: "0.72rem 1rem", borderRadius: "999px", border: "none", background: "white", color: "#111", fontFamily: "inherit", fontSize: "0.9rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem" }}>
-                                            <IconUsers /> Participants
+                                        <button type="button" onClick={() => handleDelete(item)} title="Supprimer" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(220,60,60,0.35)", background: "rgba(220,60,60,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#ff8080", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                            <IconTrash />
                                         </button>
-                                    )}
-                                </div>
+                                        {item.status !== "annule" && item.status !== "brouillon" && (
+                                            <button type="button" onClick={() => handleCancelEvent(item)} title="Annuler événement" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#FCD34D", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                                            </button>
+                                        )}
+                                        {item.status === "brouillon" && item.validationStatus !== "approved" ? (
+                                            <button type="button" onClick={() => handlePublish(item)} style={{ flex: 1, padding: "0.72rem 1rem", borderRadius: "999px", border: "none", background: "linear-gradient(135deg, #2563EB, #1d4ed8)", color: "white", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem" }}>
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                                                Envoyer
+                                            </button>
+                                        ) : (
+                                            <button type="button" onClick={() => handleViewParticipants(item)} style={{ flex: 1, padding: "0.72rem 0.6rem", borderRadius: "999px", border: "none", background: "rgba(255,255,255,0.15)", color: "white", fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.3rem", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
+                                                <IconUsers /> Participants
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const params = new URLSearchParams(searchParams);
+                                                params.set("id", item.id);
+                                                router.push(`${window.location.pathname}?${params.toString()}`);
+                                            }}
+                                            style={{ flex: 1, padding: "0.72rem 1rem", borderRadius: "999px", border: "none", background: "white", color: "#111", fontFamily: "inherit", fontSize: "0.9rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                                        >
+                                            Ouvrir
+                                        </button>
+                                    </div>
                             </div>
                         </article>
                     );
