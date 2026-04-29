@@ -33,9 +33,10 @@ const isSameDay = (left, right) => (
 
 export default function EventPlanningView({ events = [], title = "Planning des événements", subtitle = "Événements", onOpenEvent }) {
     const router = useRouter();
-    const [currentMonth, setCurrentMonth] = useState(() => {
+    const [viewMode, setViewMode] = useState("month");
+    const [currentDate, setCurrentDate] = useState(() => {
         const today = new Date();
-        return new Date(today.getFullYear(), today.getMonth(), 1);
+        return new Date(today.getFullYear(), today.getMonth(), today.getDate());
     });
     const [selectedDate, setSelectedDate] = useState(() => {
         const today = new Date();
@@ -66,38 +67,56 @@ export default function EventPlanningView({ events = [], title = "Planning des �
     }, [events]);
 
     const calendarDays = useMemo(() => {
-        const start = getStartOfWeek(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1));
-        const end = getStartOfWeek(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0));
-        end.setDate(end.getDate() + 6);
+        if (viewMode === "month") {
+            const start = getStartOfWeek(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+            const end = getStartOfWeek(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0));
+            end.setDate(end.getDate() + 6);
 
-        const days = [];
-        const cursor = new Date(start);
-        while (cursor <= end) {
-            days.push(new Date(cursor));
-            cursor.setDate(cursor.getDate() + 1);
+            const days = [];
+            const cursor = new Date(start);
+            while (cursor <= end) {
+                days.push(new Date(cursor));
+                cursor.setDate(cursor.getDate() + 1);
+            }
+            return days;
+        } else {
+            const start = getStartOfWeek(new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()));
+            const days = [];
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(start);
+                d.setDate(start.getDate() + i);
+                days.push(d);
+            }
+            return days;
         }
-        return days;
-    }, [currentMonth]);
+    }, [currentDate, viewMode]);
 
     const selectedDayKey = toDayKey(selectedDate);
     const selectedDayEvents = eventsByDay.get(selectedDayKey) || [];
 
-    const monthLabel = currentMonth.toLocaleDateString("fr-FR", {
-        month: "long",
-        year: "numeric",
-    });
+    const monthLabel = viewMode === "month"
+        ? currentDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
+        : `Sem. du ${getStartOfWeek(currentDate).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
 
-    const goToPreviousMonth = () => {
-        setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    const goToPrevious = () => {
+        if (viewMode === "month") {
+            setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+        } else {
+            setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 7));
+        }
     };
 
-    const goToNextMonth = () => {
-        setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    const goToNext = () => {
+        if (viewMode === "month") {
+            setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+        } else {
+            setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 7));
+        }
     };
 
     const goToToday = () => {
         const today = new Date();
-        setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+        setCurrentDate(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
         setSelectedDate(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
     };
 
@@ -114,105 +133,236 @@ export default function EventPlanningView({ events = [], title = "Planning des �
             <div className="panel" style={{ display: "grid", gap: "1rem" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                        <button className="action-cta" type="button" onClick={goToPreviousMonth} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Mois precedent</button>
+                        <button className="action-cta" type="button" onClick={goToPrevious} style={{ background: "#e8ecee", color: "var(--text-main)", minWidth: "120px" }}>{viewMode === "month" ? "Mois précédent" : "Sem. préc."}</button>
                         <button className="action-cta task-action-btn" type="button" onClick={goToToday}>Aujourd'hui</button>
-                        <button className="action-cta" type="button" onClick={goToNextMonth} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Mois suivant</button>
+                        <button className="action-cta" type="button" onClick={goToNext} style={{ background: "#e8ecee", color: "var(--text-main)", minWidth: "120px" }}>{viewMode === "month" ? "Mois suivant" : "Sem. suiv."}</button>
                     </div>
-                    <span className="section-title" style={{ textTransform: "capitalize" }}>{monthLabel}</span>
+                    
+                    <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
+                        <span className="section-title" style={{ textTransform: "capitalize", margin: 0 }}>{monthLabel}</span>
+                        <div style={{ display: "flex", background: "#e8ecee", borderRadius: "999px", padding: "4px" }}>
+                            <button type="button" onClick={() => setViewMode("month")} style={{ padding: "6px 16px", borderRadius: "999px", border: "none", background: viewMode === "month" ? "white" : "transparent", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer", boxShadow: viewMode === "month" ? "0 2px 4px rgba(0,0,0,0.1)" : "none", color: "var(--text-main)", transition: "all 0.2s" }}>Mois</button>
+                            <button type="button" onClick={() => setViewMode("week")} style={{ padding: "6px 16px", borderRadius: "999px", border: "none", background: viewMode === "week" ? "white" : "transparent", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer", boxShadow: viewMode === "week" ? "0 2px 4px rgba(0,0,0,0.1)" : "none", color: "var(--text-main)", transition: "all 0.2s" }}>Semaine</button>
+                        </div>
+                    </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: "0.5rem" }}>
-                    {WEEKDAY_LABELS.map((label) => (
-                        <div key={label} style={{ textAlign: "center", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, padding: "0.35rem 0" }}>
-                            {label}
-                        </div>
-                    ))}
+                {viewMode === "week" ? (() => {
+                    const HOUR_HEIGHT = 50;
+                    const START_HOUR = 7;
+                    const END_HOUR = 22;
+                    const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i + START_HOUR);
 
-                    {calendarDays.map((dayDate) => {
-                        const dayKey = toDayKey(dayDate);
-                        const dayEvents = eventsByDay.get(dayKey) || [];
-                        const inCurrentMonth = dayDate.getMonth() === currentMonth.getMonth();
-                        const isSelected = isSameDay(dayDate, selectedDate);
-                        const isToday = isSameDay(dayDate, new Date());
-
-                        return (
-                            <button
-                                key={dayKey}
-                                type="button"
-                                onClick={() => setSelectedDate(new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate()))}
-                                style={{
-                                    border: isSelected ? "2px solid #749193" : "1px solid #d7e0e1",
-                                    background: inCurrentMonth ? "#F8FBFB" : "#EEF3F3",
-                                    borderRadius: "14px",
-                                    minHeight: "118px",
-                                    padding: "0.55rem",
-                                    textAlign: "left",
-                                    display: "grid",
-                                    alignContent: "start",
-                                    gap: "0.35rem",
-                                    cursor: "pointer",
-                                    opacity: inCurrentMonth ? 1 : 0.62,
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.35rem" }}>
-                                    <span
-                                        style={{
-                                            width: "1.6rem",
-                                            height: "1.6rem",
-                                            borderRadius: "999px",
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            fontSize: "0.77rem",
-                                            fontWeight: 700,
-                                            background: isToday ? "#CFC0BB" : "transparent",
-                                            color: "var(--text-main)",
-                                        }}
-                                    >
-                                        {dayDate.getDate()}
-                                    </span>
-                                    {dayEvents.length > 0 ? <span className="db-badge" style={{ background: "rgb(229, 255, 188)" }}>{dayEvents.length}</span> : null}
-                                </div>
-
-                                <div style={{ display: "grid", gap: "0.25rem" }}>
-                                    {dayEvents.slice(0, 3).map((item) => {
-                                        const start = new Date(item.dateDebut);
-                                        const hourText = Number.isNaN(start.getTime())
-                                            ? "--:--"
-                                            : start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                    return (
+                        <div style={{ display: "flex", flexDirection: "column", border: "1px solid #d7e0e1", borderRadius: "14px", overflow: "hidden", background: "#fff", height: "650px", position: "relative", isolation: "isolate", transform: "translateZ(0)" }}>
+                            {/* Sticky Header Row */}
+                            <div style={{ display: "flex", borderBottom: "1px solid #d7e0e1", background: "#f8fbfb", zIndex: 30, flexShrink: 0, position: "relative" }}>
+                                <div style={{ width: "50px", flexShrink: 0, borderRight: "1px solid #d7e0e1", background: "#f8fbfb" }}></div>
+                                <div style={{ flex: 1, display: "flex" }}>
+                                    {calendarDays.map((dayDate, i) => {
+                                        const isToday = isSameDay(dayDate, new Date());
+                                        const isSelected = isSameDay(dayDate, selectedDate);
                                         return (
-                                            <span
-                                                key={item.id}
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    router.push(`/evenements/${item.id}`);
-                                                }}
-                                                style={{
-                                                    fontSize: "0.7rem",
-                                                    lineHeight: 1.3,
-                                                    borderRadius: "9px",
-                                                    padding: "0.24rem 0.38rem",
-                                                    background: "#E5FFBC",
-                                                    color: "#233B3D",
-                                                    border: "1px solid #d6eaaa",
-                                                    overflow: "hidden",
-                                                    textOverflow: "ellipsis",
-                                                    whiteSpace: "nowrap",
-                                                }}
-                                                title={`${hourText} - ${item.name}`}
-                                            >
-                                                {hourText} {item.name}
-                                            </span>
+                                            <div key={toDayKey(dayDate)} onClick={() => setSelectedDate(new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate()))} style={{ flex: 1, borderRight: i < 6 ? "1px solid #d7e0e1" : "none", minWidth: "100px", height: "45px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: isToday ? "#EEF3F3" : "#fff", cursor: "pointer", borderBottom: isSelected ? "2px solid #749193" : "2px solid transparent" }}>
+                                                <span style={{ fontSize: "0.7rem", color: isToday ? "var(--text-main)" : "var(--text-muted)", fontWeight: 700, textTransform: "uppercase" }}>{WEEKDAY_LABELS[i]}</span>
+                                                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "22px", height: "22px", borderRadius: "999px", background: isToday ? "#CFC0BB" : "transparent", color: isToday ? "var(--text-main)" : "var(--text-main)", fontSize: "0.85rem", fontWeight: 700, marginTop: "2px" }}>
+                                                    {dayDate.getDate()}
+                                                </div>
+                                            </div>
                                         );
                                     })}
-                                    {dayEvents.length > 3 ? (
-                                        <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>+ {dayEvents.length - 3} autres</span>
-                                    ) : null}
                                 </div>
-                            </button>
-                        );
-                    })}
-                </div>
+                            </div>
+
+                            {/* Scrollable Grid Body */}
+                            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", display: "flex", position: "relative" }} className="hide-scrollbar">
+                                {/* Time Axis */}
+                                <div style={{ width: "50px", flexShrink: 0, borderRight: "1px solid #d7e0e1", background: "#f8fbfb", zIndex: 20, position: "relative" }}>
+                                    <div style={{ position: "relative", height: `${(END_HOUR - START_HOUR) * HOUR_HEIGHT}px` }}>
+                                        {HOURS.map(h => (
+                                            <div key={h} style={{ position: "absolute", top: `${(h - START_HOUR) * HOUR_HEIGHT}px`, left: 0, right: 0, height: `${HOUR_HEIGHT}px` }}>
+                                                <span style={{ position: "absolute", top: "-8px", right: "6px", fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600 }}>{h}h</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Days Columns */}
+                                <div style={{ flex: 1, display: "flex" }}>
+                                    {calendarDays.map((dayDate, i) => {
+                                        const dayKey = toDayKey(dayDate);
+                                        const dayEvents = eventsByDay.get(dayKey) || [];
+                                        const isSelected = isSameDay(dayDate, selectedDate);
+                                        
+                                        return (
+                                            <div key={dayKey} onClick={() => setSelectedDate(new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate()))} style={{ flex: 1, borderRight: i < 6 ? "1px solid #d7e0e1" : "none", minWidth: "100px", position: "relative", cursor: "pointer", background: isSelected ? "rgba(116, 145, 147, 0.03)" : "transparent" }}>
+                                                
+                                                {/* Grid Lines & Events */}
+                                                <div style={{ position: "relative", height: `${(END_HOUR - START_HOUR) * HOUR_HEIGHT}px` }}>
+                                                    {/* Grid Lines */}
+                                                    {HOURS.map(h => (
+                                                        <div key={h} style={{ position: "absolute", top: `${(h - START_HOUR) * HOUR_HEIGHT}px`, left: 0, right: 0, height: "1px", background: "#f1f5f9" }}></div>
+                                                    ))}
+
+                                                    {/* Events */}
+                                                    {dayEvents.map(item => {
+                                                        const start = new Date(item.dateDebut);
+                                                        const end = new Date(item.dateFin);
+                                                        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+
+                                                        let startH = start.getHours() + start.getMinutes() / 60;
+                                                        let endH = end.getHours() + end.getMinutes() / 60;
+                                                        
+                                                        if (endH <= START_HOUR || startH >= END_HOUR) return null;
+                                                        if (startH < START_HOUR) startH = START_HOUR;
+                                                        if (endH > END_HOUR) endH = END_HOUR;
+
+                                                        const top = (startH - START_HOUR) * HOUR_HEIGHT;
+                                                        const height = Math.max((endH - startH) * HOUR_HEIGHT, 25);
+
+                                                        const hourText = start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                                                        const endText = end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+                                                        return (
+                                                            <div
+                                                                key={item.id}
+                                                                onClick={(e) => { e.stopPropagation(); if (onOpenEvent) onOpenEvent(item); else router.push(`?id=${item.id}`); }}
+                                                                style={{
+                                                                    position: "absolute",
+                                                                    top: `${top}px`,
+                                                                    left: "4px",
+                                                                    right: "4px",
+                                                                    height: `${height - 2}px`,
+                                                                    background: "#E5FFBC",
+                                                                    border: "1px solid #d6eaaa",
+                                                                    borderRadius: "8px",
+                                                                    padding: height > 35 ? "0.3rem 0.4rem" : "0.15rem 0.3rem",
+                                                                    fontSize: "0.7rem",
+                                                                    lineHeight: 1.2,
+                                                                    color: "#233B3D",
+                                                                    overflow: "hidden",
+                                                                    cursor: "pointer",
+                                                                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                                                                    zIndex: 5,
+                                                                    display: "flex",
+                                                                    flexDirection: "column",
+                                                                    gap: "0.15rem"
+                                                                }}
+                                                                title={`${hourText} - ${endText} | ${item.name}`}
+                                                            >
+                                                                <span style={{ fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{item.name}</span>
+                                                                {height > 35 && <span style={{ opacity: 0.85, fontSize: "0.65rem", fontWeight: 600 }}>{hourText} - {endText}</span>}
+                                                                {height > 55 && item.lieu && <span style={{ opacity: 0.75, fontSize: "0.65rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📍 {item.lieu}</span>}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })() : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: "0.5rem" }}>
+                        {WEEKDAY_LABELS.map((label) => (
+                            <div key={label} style={{ textAlign: "center", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, padding: "0.35rem 0" }}>
+                                {label}
+                            </div>
+                        ))}
+
+                        {calendarDays.map((dayDate) => {
+                            const dayKey = toDayKey(dayDate);
+                            const dayEvents = eventsByDay.get(dayKey) || [];
+                            const inCurrentMonth = dayDate.getMonth() === currentDate.getMonth();
+                            const isSelected = isSameDay(dayDate, selectedDate);
+                            const isToday = isSameDay(dayDate, new Date());
+
+                            return (
+                                <button
+                                    key={dayKey}
+                                    type="button"
+                                    onClick={() => setSelectedDate(new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate()))}
+                                    style={{
+                                        border: isSelected ? "2px solid #749193" : "1px solid #d7e0e1",
+                                        background: inCurrentMonth ? "#F8FBFB" : "#EEF3F3",
+                                        borderRadius: "14px",
+                                        minHeight: "118px",
+                                        padding: "0.55rem",
+                                        textAlign: "left",
+                                        display: "grid",
+                                        alignContent: "start",
+                                        gap: "0.35rem",
+                                        cursor: "pointer",
+                                        opacity: inCurrentMonth ? 1 : 0.62,
+                                    }}
+                                >
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.35rem" }}>
+                                        <span
+                                            style={{
+                                                width: "1.6rem",
+                                                height: "1.6rem",
+                                                borderRadius: "999px",
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                fontSize: "0.77rem",
+                                                fontWeight: 700,
+                                                background: isToday ? "#CFC0BB" : "transparent",
+                                                color: "var(--text-main)",
+                                            }}
+                                        >
+                                            {dayDate.getDate()}
+                                        </span>
+                                        {dayEvents.length > 0 ? <span className="db-badge" style={{ background: "rgb(229, 255, 188)" }}>{dayEvents.length}</span> : null}
+                                    </div>
+
+                                    <div style={{ display: "grid", gap: "0.25rem" }}>
+                                        {dayEvents.slice(0, 3).map((item) => {
+                                            const start = new Date(item.dateDebut);
+                                            const hourText = Number.isNaN(start.getTime())
+                                                ? "--:--"
+                                                : start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+                                            return (
+                                                <span
+                                                    key={item.id}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        if (onOpenEvent) {
+                                                            onOpenEvent(item);
+                                                        } else {
+                                                            router.push(`?id=${item.id}`);
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        fontSize: "0.7rem",
+                                                        lineHeight: 1.3,
+                                                        borderRadius: "9px",
+                                                        padding: "0.24rem 0.38rem",
+                                                        background: "#E5FFBC",
+                                                        color: "#233B3D",
+                                                        border: "1px solid #d6eaaa",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                    title={`${hourText} - ${item.name}`}
+                                                >
+                                                    {hourText} {item.name}
+                                                </span>
+                                            );
+                                        })}
+                                        {dayEvents.length > 3 ? (
+                                            <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>+ {dayEvents.length - 3} autres</span>
+                                        ) : null}
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
 
                 <div style={{ background: "#F8FBFB", borderRadius: "16px", padding: "0.95rem" }}>
                     <div className="section-header" style={{ marginBottom: "0.5rem" }}>
@@ -240,7 +390,13 @@ export default function EventPlanningView({ events = [], title = "Planning des �
                                     <button
                                         key={item.id}
                                         type="button"
-                                        onClick={() => router.push(`/evenements/${item.id}`)}
+                                        onClick={() => {
+                                            if (onOpenEvent) {
+                                                onOpenEvent(item);
+                                            } else {
+                                                router.push(`?id=${item.id}`);
+                                            }
+                                        }}
                                         style={{
                                             border: "1px solid #d8e3e4",
                                             textAlign: "left",
