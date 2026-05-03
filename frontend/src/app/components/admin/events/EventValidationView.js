@@ -155,7 +155,7 @@ export default function EventValidationView({ events = [], loading, errorMessage
 
                                 <div style={{ position: "absolute", top: "16px", right: "16px", zIndex: 2, display: "flex", gap: "0.5rem" }}>
                                     <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(255, 255, 255, 0.12)", color: "#EAF5F4", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255, 255, 255, 0.25)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                                        En attente
+                                        {new Date(event.dateDebut) < new Date() ? "Passé" : "En attente"}
                                     </span>
                                 </div>
 
@@ -203,12 +203,20 @@ export default function EventValidationView({ events = [], loading, errorMessage
                                         <button type="button" title="Supprimer" onClick={(e) => { e.stopPropagation(); openRejectModal(event); }} style={{ padding: "10px", borderRadius: "50%", border: "1px solid rgba(220, 60, 60, 0.35)", background: "rgba(220, 60, 60, 0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "rgb(255, 128, 128)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                                             <IconTrash />
                                         </button>
-                                        <button type="button" onClick={(e) => { e.stopPropagation(); handleValidateClick(event); }} style={{ flex: 1.5, padding: "0.8rem 1rem", borderRadius: "999px", border: "1px solid rgba(255, 255, 255, 0.3)", background: "rgba(255, 255, 255, 0.2)", color: "white", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", transition: "background 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)"} onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}>
-                                            Valider
-                                        </button>
-                                        <button type="button" onClick={(e) => { e.stopPropagation(); openRejectModal(event); }} style={{ flex: 1, padding: "0.8rem 1rem", borderRadius: "999px", border: "1px solid rgba(248, 113, 113, 0.45)", background: "rgba(185, 28, 28, 0.35)", color: "#ffe4e6", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", transition: "background 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.background = "rgba(185, 28, 28, 0.5)"} onMouseLeave={(e) => e.currentTarget.style.background = "rgba(185, 28, 28, 0.35)"}>
-                                            Refuser
-                                        </button>
+                                        {new Date(event.dateDebut) >= new Date() ? (
+                                            <>
+                                                <button type="button" onClick={(e) => { e.stopPropagation(); handleValidateClick(event); }} style={{ flex: 1.5, padding: "0.8rem 1rem", borderRadius: "999px", border: "1px solid rgba(255, 255, 255, 0.3)", background: "rgba(255, 255, 255, 0.2)", color: "white", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", transition: "background 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)"} onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}>
+                                                    Valider
+                                                </button>
+                                                <button type="button" onClick={(e) => { e.stopPropagation(); openRejectModal(event); }} style={{ flex: 1, padding: "0.8rem 1rem", borderRadius: "999px", border: "1px solid rgba(248, 113, 113, 0.45)", background: "rgba(185, 28, 28, 0.35)", color: "#ffe4e6", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", transition: "background 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.background = "rgba(185, 28, 28, 0.5)"} onMouseLeave={(e) => e.currentTarget.style.background = "rgba(185, 28, 28, 0.35)"}>
+                                                    Refuser
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <div style={{ flex: 2.5, padding: "0.8rem 1rem", borderRadius: "999px", border: "1px solid rgba(255, 255, 255, 0.1)", background: "rgba(255, 255, 255, 0.05)", color: "rgba(255,255,255,0.5)", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                                Action impossible (Passé)
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </article>

@@ -35,7 +35,7 @@ export const LEVEL_COLORS = {
 };
 
 export const EVENT_TYPES = ["atelier", "formation", "evenement", "conference"];
-export const EVENT_STATUSES = ["brouillon", "planifie", "valide", "annule", "termine"];
+export const EVENT_STATUSES = ["brouillon", "planifie", "valide", "annule"];
 
 export const NAV_MODULES = [
     {

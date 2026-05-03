@@ -328,7 +328,11 @@ export default function EventAdminView({ events, categories, salaries = [], load
         const q = query.trim().toLowerCase();
         if (q && !item.name.toLowerCase().includes(q) && !item.description.toLowerCase().includes(q)
             && !(item.lieu || "").toLowerCase().includes(q) && !(item.intervenant || "").toLowerCase().includes(q)) return false;
-        if (statusFilter !== "all" && item.status !== statusFilter) return false;
+            
+        const isPassed = new Date(item.dateDebut) < new Date();
+        const displayStatus = (isPassed && item.status !== "annule") ? "passé" : item.status;
+
+        if (statusFilter !== "all" && displayStatus !== statusFilter) return false;
         if (typeFilter !== "all" && item.type !== typeFilter) return false;
         
         // Uniquement les événements validés (pas en attente ni refusés)
@@ -444,7 +448,8 @@ export default function EventAdminView({ events, categories, salaries = [], load
                     <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
                         style={{ padding: "0.65rem 1.1rem", borderRadius: "999px", border: "none", background: "var(--surface-hover)", fontSize: "0.88rem", appearance: "none", cursor: "pointer" }}>
                         <option value="all">Tous les statuts</option>
-                        {EVENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                        {EVENT_STATUSES.map((s) => <option key={s} value={s} style={{textTransform: "capitalize"}}>{s}</option>)}
+                        <option value="passé">Passé</option>
                     </select>
                     <button className="action-cta task-action-btn" type="button" onClick={onReload}>Actualiser</button>
                     <button className="action-cta task-action-btn" type="button" onClick={handleCreate}>+ Créer un événement</button>
@@ -601,7 +606,7 @@ export default function EventAdminView({ events, categories, salaries = [], load
                             )}
                             <div style={{ position: "absolute", top: "14px", left: "14px", zIndex: 2 }}>
                                 <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(255,255,255,0.15)", color: "white", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                                    {item.status}
+                                    {(start < new Date() && item.status !== "annule") ? "Passé" : item.status}
                                 </div>
                             </div>
                             <div style={{ position: "absolute", top: "14px", right: "14px", display: "flex", gap: "0.4rem", zIndex: 2, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -633,7 +638,7 @@ export default function EventAdminView({ events, categories, salaries = [], load
                                     <button type="button" onClick={() => handleEdit(item)} title="Modifier" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><IconPencil /></button>
                                     <button type="button" onClick={() => handleDelete(item)} title="Supprimer" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(220,60,60,0.35)", background: "rgba(220,60,60,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#ff8080", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><IconTrash /></button>
                                     
-                                    {item.status !== "annule" && (
+                                    {item.status !== "annule" && start >= new Date() && (
                                         <button type="button" onClick={() => handleCancelEvent(item)} title="Annuler événement" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#FCD34D", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
                                         </button>

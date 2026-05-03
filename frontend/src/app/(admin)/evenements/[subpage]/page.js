@@ -277,7 +277,11 @@ export default function EventsSubPage({ params }) {
             return;
         }
 
-        router.push(`/evenements/tous-evenements?open=${eventItem.id}`);
+        if (isParticulier) {
+            router.push(`/evenements/mes-inscriptions?id=${eventItem.id}`);
+        } else {
+            router.push(`/evenements/tous-evenements?id=${eventItem.id}`);
+        }
     };
 
     const handleConsumedOpenEvent = () => {
@@ -371,7 +375,7 @@ export default function EventsSubPage({ params }) {
                 ) : (
                     <EventPlanningView
                         events={myRegistrations}
-                        onOpenEvent={() => {}}
+                        onOpenEvent={openEventFromPlanning}
                         title="Mon planning"
                         subtitle="Espace particulier"
                     />

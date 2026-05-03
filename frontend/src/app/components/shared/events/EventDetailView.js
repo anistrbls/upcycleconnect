@@ -271,7 +271,13 @@ export default function EventDetailView({ eventId, onBack }) {
     const startTime = startDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     const endTime = endDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     
+    const isPassed = startDate < new Date();
+    
     const sc = STATUS_CONFIG[event.status] || { label: event.status, color: "var(--text-muted)", bg: "rgba(35,59,61,0.08)" };
+    const displayLabel = (isPassed && event.status !== "annule") ? "Passé" : sc.label;
+    const displayBg = (isPassed && event.status !== "annule") ? "rgba(113, 113, 122, 0.1)" : sc.bg;
+    const displayColor = (isPassed && event.status !== "annule") ? "#71717a" : sc.color;
+
     const isFull = event.capacite > 0 && event.participantCount >= event.capacite;
     const photos = event.imageUrl ? [event.imageUrl] : [];
 
@@ -300,6 +306,8 @@ export default function EventDetailView({ eventId, onBack }) {
         transition: "background-color 0.2s, color 0.2s, border-color 0.2s, transform 0.2s",
         background: type === "primary" ? "var(--forest-deep)" : "transparent",
         color: type === "primary" ? "white" : "var(--text-main)",
+        opacity: type === "disabled" ? 0.5 : 1,
+        pointerEvents: type === "disabled" ? "none" : "auto",
     });
 
     return (
@@ -322,8 +330,8 @@ export default function EventDetailView({ eventId, onBack }) {
                         <span style={{ 
                             display: "inline-flex", alignItems: "center", padding: "5px 11px",
                             borderRadius: "999px", fontSize: "0.72rem", letterSpacing: "0.05em",
-                            fontWeight: "700", background: sc.bg, color: sc.color,
-                        }}>{sc.label}</span>
+                            fontWeight: "700", background: displayBg, color: displayColor,
+                        }}>{displayLabel}</span>
 
 
 
@@ -442,40 +450,46 @@ export default function EventDetailView({ eventId, onBack }) {
                                 {userRole === "admin" ? (
                                     <>
                                         {event.validationStatus === "approved" ? (
-                                            <button
-                                                    onClick={openRejectModal}
-                                                disabled={adminSubmitting !== ""}
-                                                style={{ ...actionBtn("neutral"), background: "transparent", color: "var(--state-critical)", border: "1px solid rgba(214, 78, 40, 0.35)" }}
-                                            >
-                                                    {adminSubmitting === "reject" ? "Mise a jour..." : "Passer le statut en refuse"}
-                                            </button>
+                                            !isPassed && (
+                                                <button
+                                                        onClick={openRejectModal}
+                                                    disabled={adminSubmitting !== ""}
+                                                    style={{ ...actionBtn("neutral"), background: "transparent", color: "var(--state-critical)", border: "1px solid rgba(214, 78, 40, 0.35)" }}
+                                                >
+                                                        {adminSubmitting === "reject" ? "Mise a jour..." : "Passer le statut en refuse"}
+                                                </button>
+                                            )
                                         ) : event.validationStatus === "rejected" ? (
-                                            <button
-                                                onClick={() => runAdminAction("validate")}
-                                                disabled={adminSubmitting !== ""}
-                                                style={actionBtn("primary")}
-                                            >
-                                                {adminSubmitting === "validate" ? "Mise a jour..." : "Passer le statut en valide"}
-                                            </button>
-                                        ) : (
-                                            <>
+                                            !isPassed && (
                                                 <button
                                                     onClick={() => runAdminAction("validate")}
                                                     disabled={adminSubmitting !== ""}
                                                     style={actionBtn("primary")}
                                                 >
-                                                    {adminSubmitting === "validate" ? "Validation..." : "Valider"}
+                                                    {adminSubmitting === "validate" ? "Mise a jour..." : "Passer le statut en valide"}
                                                 </button>
-                                                <button
-                                                    onClick={openRejectModal}
-                                                    disabled={adminSubmitting !== ""}
-                                                    style={{ ...actionBtn("neutral"), background: "transparent", color: "var(--state-critical)", border: "1px solid rgba(214, 78, 40, 0.35)" }}
-                                                >
-                                                    {adminSubmitting === "reject" ? "Refus..." : "Refuser"}
-                                                </button>
-                                            </>
+                                            )
+                                        ) : (
+                                            !isPassed && (
+                                                <>
+                                                    <button
+                                                        onClick={() => runAdminAction("validate")}
+                                                        disabled={adminSubmitting !== ""}
+                                                        style={actionBtn("primary")}
+                                                    >
+                                                        {adminSubmitting === "validate" ? "Validation..." : "Valider"}
+                                                    </button>
+                                                    <button
+                                                        onClick={openRejectModal}
+                                                        disabled={adminSubmitting !== ""}
+                                                        style={{ ...actionBtn("neutral"), background: "transparent", color: "var(--state-critical)", border: "1px solid rgba(214, 78, 40, 0.35)" }}
+                                                    >
+                                                        {adminSubmitting === "reject" ? "Refus..." : "Refuser"}
+                                                    </button>
+                                                </>
+                                            )
                                         )}
-                                        {event.status !== "annule" && (
+                                        {event.status !== "annule" && !isPassed && (
                                             <button
                                                 onClick={openCancelModal}
                                                 disabled={adminSubmitting !== ""}
@@ -507,6 +521,10 @@ export default function EventDetailView({ eventId, onBack }) {
                                         {event.status === "annule" ? (
                                             <div style={{ fontSize: "0.85rem", color: "var(--state-critical)", background: "rgba(214, 78, 40, 0.08)", padding: "0.85rem", borderRadius: "14px", textAlign: "center", fontWeight: "700" }}>
                                                 Cet evenement est annule.
+                                            </div>
+                                        ) : isPassed ? (
+                                            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", background: "rgba(35,59,61,0.06)", padding: "0.85rem", borderRadius: "14px", textAlign: "center", fontWeight: "600" }}>
+                                                Cet événement est terminé.
                                             </div>
                                         ) : (
                                             <div style={{ display: "grid", gap: "0.6rem" }}>

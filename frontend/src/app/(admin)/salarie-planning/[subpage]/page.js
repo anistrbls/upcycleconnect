@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import EventPlanningView from "../../../components/admin/events/EventPlanningView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
@@ -8,6 +9,7 @@ import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 
 export default function SalariePlanningPage({ params }) {
     const { subpage } = use(params);
+    const router = useRouter();
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -41,7 +43,7 @@ export default function SalariePlanningPage({ params }) {
                 </div>
                 {loading
                     ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>
-                    : <EventPlanningView events={events} onOpenEvent={() => {}} />
+                    : <EventPlanningView events={events} onOpenEvent={(item) => router.push(`/evenements/tous-evenements?id=${item.id}`)} />
                 }
             </>
         );

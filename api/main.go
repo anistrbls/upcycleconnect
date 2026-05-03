@@ -223,6 +223,9 @@ func main() {
 	// === Cities Autocomplete (Public) ===
 	mux.HandleFunc("GET /api/cities-search", citiesSearchHandler)
 
+	// === Dashboard Stats (Admin) ===
+	mux.Handle("/api/admin/dashboard/stats", authMiddleware(http.HandlerFunc(dashboardStatsHandler)))
+
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
 	users.RegisterRoutes(mux, db, authMiddleware)
 
@@ -1989,6 +1992,13 @@ func adminEventCancelHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var eDate time.Time
+	err = db.QueryRow("SELECT date_debut FROM events WHERE id = $1", id).Scan(&eDate)
+	if err == nil && eDate.Before(time.Now()) {
+		writeError(w, http.StatusBadRequest, "cet événement est déjà passé")
+		return
+	}
+
 	var ePrice float64
 	var eName string
 	err = db.QueryRow(`
@@ -2119,13 +2129,19 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		var pricingType string
 		var capacite sql.NullInt64
 		var participantCount int64
-		err = db.QueryRow(`SELECT pricing_type, capacite, participant_count FROM events WHERE id = $1 AND validation_status = 'approved'`, id).Scan(&pricingType, &capacite, &participantCount)
+		var eventDate time.Time
+		err = db.QueryRow(`SELECT pricing_type, capacite, participant_count, date_debut FROM events WHERE id = $1 AND validation_status = 'approved'`, id).Scan(&pricingType, &capacite, &participantCount, &eventDate)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "event not found or not approved")
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+
+		if eventDate.Before(time.Now()) {
+			writeError(w, http.StatusBadRequest, "cet événement est déjà passé")
 			return
 		}
 
@@ -2168,6 +2184,11 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		`, id, userID).Scan(&paymentStatus, &sessionID, &currentStatus, &eventStart, &eventPrice)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "registration not found")
+			return
+		}
+
+		if eventStart.Before(time.Now()) {
+			writeError(w, http.StatusBadRequest, "cet événement est déjà passé")
 			return
 		}
 
@@ -2453,6 +2474,13 @@ func eventRejectHandler(w http.ResponseWriter, r *http.Request) {
 	var rejectPayload eventRejectPayload
 	if err := json.NewDecoder(r.Body).Decode(&rejectPayload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	var eDate time.Time
+	err = db.QueryRow("SELECT date_debut FROM events WHERE id = $1", id).Scan(&eDate)
+	if err == nil && eDate.Before(time.Now()) {
+		writeError(w, http.StatusBadRequest, "cet événement est déjà passé")
 		return
 	}
 
@@ -5447,4 +5475,52 @@ func forumReportByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	db.Exec(`UPDATE forum_reports SET status=$1 WHERE id=$2`, p.Status, reportID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var totalUsers int
+	_ = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
+
+	var particuliers int
+	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'particulier'").Scan(&particuliers)
+
+	var pros int
+	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'pro'").Scan(&pros)
+
+	var salaries int
+	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'salarie'").Scan(&salaries)
+
+	var pendingItems int
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE status = 'en attente'").Scan(&pendingItems)
+
+	var itemsInContainers int
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE container_id IS NOT NULL AND status = 'actif'").Scan(&itemsInContainers)
+
+	var donItems int
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE type = 'don' AND status = 'actif'").Scan(&donItems)
+
+	var venteItems int
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE type = 'vente' AND status = 'actif'").Scan(&venteItems)
+
+	var upcyclingProjects int
+	_ = db.QueryRow("SELECT COUNT(*) FROM upcycling_projects").Scan(&upcyclingProjects)
+
+	stats := map[string]interface{}{
+		"totalUsers": totalUsers,
+		"particuliers": particuliers,
+		"pros": pros,
+		"salaries": salaries,
+		"pendingItems": pendingItems,
+		"itemsInContainers": itemsInContainers,
+		"donItems": donItems,
+		"venteItems": venteItems,
+		"upcyclingProjects": upcyclingProjects,
+	}
+
+	writeJSON(w, http.StatusOK, stats)
 }
