@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { 
     Clock, Package, CheckCircle2, ChevronRight, 
     Search, Filter, MapPin, Truck, History, 
@@ -14,16 +14,16 @@ import AdminModal from "../../../components/admin/AdminModal";
 // --- Status Config ---
 
 const STATUS_MAP = {
-    'validated':        { label: 'Sortie Moderation', color: '#6366f1', icon: CheckCircle2, desc: 'En attente de point de dépôt' },
+    'available':        { label: 'En Catalogue', color: '#059669', icon: QrCode, desc: 'Disponible pour les Pros' },
+    'pending_payment':  { label: 'Paiement en attente', color: '#d97706', icon: Clock, desc: 'Vente réservée en attente de paiement' },
+    'reserved':         { label: 'À assigner', color: '#ec4899', icon: User, desc: 'Réservé, en attente de point' },
     'assigned':         { label: 'Point Assigné', color: '#8b5cf6', icon: MapPin, desc: 'Attribuer le code de dépôt' },
     'deposit_code_sent': { label: 'En attente Dépôt', color: '#f59e0b', icon: Clock, desc: 'Particulier notifié' },
-    'deposited':        { label: 'Déposé', color: '#10b981', icon: Package, desc: 'Dans le conteneur' },
-    'available':        { label: 'Disponible', color: '#059669', icon: QrCode, desc: 'Prêt pour les pros' },
-    'pending_payment':  { label: 'Paiement en attente', color: '#d97706', icon: Clock, desc: 'Vente réservée en attente de paiement' },
-    'reserved':         { label: 'Réservé', color: '#ec4899', icon: User, desc: 'En attente de retrait' },
+    'deposited':        { label: 'À récupérer', color: '#10b981', icon: Package, desc: 'Prêt pour retrait Pro' },
     'picked_up':        { label: 'Récupéré', color: '#2563eb', icon: Truck, desc: 'Objet retiré' },
     'deposit_expired':  { label: 'Code Expiré', color: '#ef4444', icon: AlertCircle, desc: 'Dépôt non effectué' },
     'cancelled':        { label: 'Annulé', color: '#94a3b8', icon: XCircle, desc: 'Action annulée' },
+    'validated':        { label: 'En Catalogue', color: '#059669', icon: QrCode, desc: 'Sortie de modération' },
 };
 
 const styles = {
@@ -358,6 +358,16 @@ const styles = {
         borderRadius: "32px",
         border: "2px dashed #e5e7eb",
     },
+    statusInfo: {
+        fontSize: "0.82rem",
+        color: "var(--text-muted)",
+        textAlign: "center",
+        flex: 1,
+        padding: "0.85rem",
+        background: "#f9fafb",
+        borderRadius: "16px",
+        fontWeight: "500",
+    },
 };
 
 export default function LogisticsDashboard() {
@@ -382,6 +392,9 @@ export default function LogisticsDashboard() {
     const [assignment, setAssignment] = useState({ pointId: "", containerId: "" });
 
     const [reserveNameInput, setReserveNameInput] = useState("");
+    const [reserveUserIdInput, setReserveUserIdInput] = useState(null);
+    const [reserveSearchInput, setReserveSearchInput] = useState("");
+    const [professionals, setProfessionals] = useState([]);
     const [cancelReasonInput, setCancelReasonInput] = useState("");
     const [revertToStatusInput, setRevertToStatusInput] = useState("");
 
@@ -400,6 +413,29 @@ export default function LogisticsDashboard() {
     }, [filter]);
 
     useEffect(() => { fetchLogistics(); }, [fetchLogistics]);
+
+    useEffect(() => {
+        if (showReserveModal && professionals.length === 0) {
+            const fetchPros = async () => {
+                try {
+                    const res = await fetch(apiUrl("/admin/users?role=professionnel"), { headers: buildAuthHeaders() });
+                    const data = await res.json();
+                    setProfessionals(data.items || []);
+                } catch (e) { console.error("Failed to fetch professionals", e); }
+            };
+            fetchPros();
+        }
+    }, [showReserveModal, professionals.length]);
+
+    const filteredProfessionals = useMemo(() => {
+        const searchLower = reserveSearchInput.toLowerCase();
+        return professionals.filter(p => {
+            const fullName = `${p.firstname} ${p.lastname}`.toLowerCase();
+            const email = (p.email || "").toLowerCase();
+            const siret = (p.siret || "").toLowerCase();
+            return fullName.includes(searchLower) || email.includes(searchLower) || siret.includes(searchLower);
+        });
+    }, [professionals, reserveSearchInput]);
 
     const handleAssign = async () => {
         if (!assignment.pointId || !assignment.containerId) return;
@@ -464,11 +500,16 @@ export default function LogisticsDashboard() {
             const res = await fetch(apiUrl(`/admin/logistics/${selectedItem.item_id}/reserve`), {
                 method: "POST",
                 headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ reserved_by_name: reserveNameInput })
+                body: JSON.stringify({ 
+                    reserved_by_name: reserveNameInput,
+                    reserved_by_user_id: reserveUserIdInput
+                })
             });
             if (res.ok) {
                 setShowReserveModal(false);
                 setReserveNameInput("");
+                setReserveUserIdInput(null);
+                setReserveSearchInput("");
                 fetchLogistics();
             }
         } catch (e) { console.error(e); }
@@ -638,17 +679,26 @@ export default function LogisticsDashboard() {
             </header>
 
             <div style={styles.statsBar}>
-                {stats && Object.entries(STATUS_MAP).map(([key, cfg]) => (
-                    <div key={key} style={styles.statCard}>
-                        <div style={{ background: cfg.color + '15', padding: '10px', borderRadius: '12px', display: 'flex' }}>
-                            <cfg.icon size={20} color={cfg.color} />
+                {(() => {
+                    const toShow = [
+                        { key: 'available', label: 'En Catalogue', color: '#059669', icon: QrCode, count: (stats?.available || 0) + (stats?.validated || 0) },
+                        { key: 'reserved', label: 'À assigner', color: '#ec4899', icon: User, count: stats?.reserved || 0 },
+                        { key: 'assigned', label: 'Point Assigné', color: '#8b5cf6', icon: MapPin, count: stats?.assigned || 0 },
+                        { key: 'deposit_code_sent', label: 'En attente Dépôt', color: '#f59e0b', icon: Clock, count: stats?.deposit_code_sent || 0 },
+                        { key: 'deposited', label: 'À récupérer', color: '#10b981', icon: Package, count: stats?.deposited || 0 },
+                    ];
+                    return toShow.map(cfg => (
+                        <div key={cfg.key} style={styles.statCard}>
+                            <div style={{ background: cfg.color + '15', padding: '10px', borderRadius: '12px', display: 'flex' }}>
+                                <cfg.icon size={20} color={cfg.color} />
+                            </div>
+                            <div>
+                                <div style={styles.statVal}>{cfg.count}</div>
+                                <div style={styles.statLabel}>{cfg.label}</div>
+                            </div>
                         </div>
-                        <div>
-                            <div style={styles.statVal}>{stats[key] || 0}</div>
-                            <div style={styles.statLabel}>{cfg.label}</div>
-                        </div>
-                    </div>
-                ))}
+                    ));
+                })()}
                 <div style={styles.statCard}>
                     <div style={{ background: 'var(--black)15', padding: '10px', borderRadius: '12px', display: 'flex' }}>
                         <Truck size={20} color="var(--black)" />
@@ -673,7 +723,7 @@ export default function LogisticsDashboard() {
                 
                 <div style={styles.filterTabs}>
                     <button style={styles.tab(filter === "")} onClick={() => setFilter("")}>Tout</button>
-                    {['validated', 'assigned', 'deposit_code_sent', 'deposited', 'available', 'reserved'].map(s => (
+                    {['available', 'reserved', 'assigned', 'deposit_code_sent', 'deposited'].map(s => (
                         <button 
                             key={s} 
                             style={styles.tab(filter === s)} 
@@ -807,27 +857,73 @@ export default function LogisticsDashboard() {
 
             <AdminModal open={showReserveModal} title="Réservation Professionnelle" onClose={() => setShowReserveModal(false)}>
                 <div style={styles.modalBody}>
-                    <div style={{ display: 'flex', gap: '1rem', background: '#f8fafb', padding: '1rem', borderRadius: '20px', marginBottom: '1rem', border: '1px solid #eee' }}>
+                    <div style={{ display: 'flex', gap: '1rem', background: '#f8fafb', padding: '1rem', borderRadius: '20px', marginBottom: '0.5rem', border: '1px solid #eee' }}>
                         <div style={{ background: '#ec489915', padding: '10px', borderRadius: '12px' }}>
                             <User size={24} color="#ec4899" />
                         </div>
                         <div>
-                            <div style={{ fontWeight: '700' }}>Nouvelle réservation</div>
-                            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>L'objet sera réservé pendant 48h.</div>
+                            <div style={{ fontWeight: '700' }}>Réserver pour un pro</div>
+                            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{selectedItem?.item_title}</div>
                         </div>
                     </div>
+                    
                     <div style={styles.formGroup}>
-                        <label style={styles.label}>Nom du professionnel / Entreprise</label>
+                        <label style={styles.label}>Rechercher un professionnel</label>
                         <input 
-                            placeholder="Ex: Atelier Upcycle Paris" 
+                            placeholder="Nom, Email ou SIRET..." 
                             style={styles.input} 
-                            value={reserveNameInput}
-                            onChange={e => setReserveNameInput(e.target.value)}
+                            value={reserveSearchInput}
+                            onChange={e => setReserveSearchInput(e.target.value)}
                         />
+                        
+                        <div style={{ 
+                            maxHeight: '250px', 
+                            overflowY: 'auto', 
+                            border: '1px solid #e2e8f0', 
+                            borderRadius: '16px', 
+                            marginTop: '0.5rem',
+                            background: '#fff'
+                        }}>
+                            {filteredProfessionals.length > 0 ? filteredProfessionals.map(p => (
+                                <div 
+                                    key={p.id} 
+                                    style={{ 
+                                        padding: '0.85rem 1rem', 
+                                        cursor: 'pointer', 
+                                        borderBottom: '1px solid #f1f5f9',
+                                        background: reserveUserIdInput === p.id ? 'var(--forest-light)' : 'transparent',
+                                        transition: 'all 0.2s'
+                                    }}
+                                    onClick={() => {
+                                        setReserveUserIdInput(p.id);
+                                        setReserveNameInput(`${p.firstname} ${p.lastname}`);
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>{p.firstname} {p.lastname}</div>
+                                        {p.role === 'professionnel' && <div style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--black)', color: '#fff', borderRadius: '4px' }}>PRO</div>}
+                                    </div>
+                                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                        {p.email} • {p.siret ? `SIRET: ${p.siret}` : 'Pas de SIRET'}
+                                    </div>
+                                </div>
+                            )) : (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                    {professionals.length === 0 ? "Chargement des pros..." : "Aucun professionnel trouvé."}
+                                </div>
+                            )}
+                        </div>
                     </div>
+
+                    {reserveUserIdInput && (
+                        <div style={{ padding: '0.75rem', background: 'var(--forest-light)', borderRadius: '12px', fontSize: '0.85rem', color: 'var(--forest-deep)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <CheckCircle2 size={16} /> Sélectionné : {reserveNameInput}
+                        </div>
+                    )}
+
                     <div style={styles.modalActions}>
                         <button style={styles.btnSec} onClick={() => setShowReserveModal(false)}>Annuler</button>
-                        <button style={styles.btnPri} disabled={!reserveNameInput} onClick={handleReserve}>Confirmer la réservation</button>
+                        <button style={styles.btnPri} disabled={!reserveUserIdInput} onClick={handleReserve}>Confirmer la réservation</button>
                     </div>
                 </div>
             </AdminModal>
@@ -1002,7 +1098,7 @@ function LogisticsCard({ item, actions, onClickCard }) {
                     </div>
                 )}
                 
-                {item.workflow_status === 'reserved' && (
+                {(item.workflow_status === 'deposited' || (item.workflow_status === 'reserved' && item.deposited_at)) && item.pickup_code && (
                     <div style={styles.codeBox}>
                         <div style={styles.codeLabel}>Code Récupération ({item.reserved_by_name})</div>
                         <div style={styles.codeVal}>{item.pickup_code}</div>
@@ -1018,7 +1114,7 @@ function LogisticsCard({ item, actions, onClickCard }) {
             </div>
 
             <div style={styles.cardFooter} onClick={(e) => e.stopPropagation()}>
-                <WorkflowButtons status={item.workflow_status} actions={actions} />
+                <WorkflowButtons status={item.workflow_status} actions={actions} item={item} />
                 <button 
                     style={{ ...styles.actionSec, border: 'none', background: '#f3f4f6' }} 
                     onClick={actions.cancel}
@@ -1038,23 +1134,34 @@ function LogisticsCard({ item, actions, onClickCard }) {
     );
 }
 
-function WorkflowButtons({ status, actions }) {
+function WorkflowButtons({ status, actions, item }) {
     switch (status) {
+        case 'available':
         case 'validated':
+            if (item && item.item_type === 'don') {
+                return <button style={styles.actionMain} onClick={actions.reserve}><User size={16} /> Réserver pour pro</button>;
+            }
+            return <div style={styles.statusInfo}>En attente de réservation pro</div>;
+        case 'pending_payment':
+            return <div style={styles.statusInfo}>En attente de paiement</div>;
+        case 'reserved':
+            if (item && item.deposited_at) {
+                return <button style={styles.actionMain} onClick={actions.pickup}><Truck size={16} /> Valider collecte</button>;
+            }
             return <button style={styles.actionMain} onClick={actions.assign}><MapPin size={16} /> Assigner point</button>;
         case 'assigned':
             return <button style={styles.actionMain} onClick={actions.generate}><QrCode size={16} /> Générer code dépôt</button>;
         case 'deposit_code_sent':
             return <button style={styles.actionMain} onClick={actions.deposit}><CheckCircle2 size={16} /> Confirmer dépôt</button>;
         case 'deposited':
-            return <button style={styles.actionMain} onClick={actions.available}><ArrowRight size={16} /> Mise à disposition</button>;
-        case 'available':
-            return <button style={styles.actionMain} onClick={actions.reserve}><User size={16} /> Réserver pour pro</button>;
-        case 'reserved':
             return <button style={styles.actionMain} onClick={actions.pickup}><Truck size={16} /> Valider collecte</button>;
         case 'deposit_expired':
-            return <button style={styles.actionMain} onClick={actions.assign}><History size={16} /> Régénérer code</button>;
+            return <button style={styles.actionMain} onClick={actions.assign}><History size={16} /> Ré-assigner</button>;
+        case 'picked_up':
+            return <div style={styles.statusInfo}>Objet récupéré</div>;
+        case 'cancelled':
+            return <div style={styles.statusInfo}>Flux annulé</div>;
         default:
-            return <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center', flex: 1, padding: '0.85rem', background: '#f9fafb', borderRadius: '16px', fontWeight: '500' }}>Flux terminé</div>;
+            return <div style={styles.statusInfo}>Flux terminé</div>;
     }
 }

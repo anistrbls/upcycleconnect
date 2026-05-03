@@ -111,15 +111,9 @@ func RegisterLogisticsRoutes(mux *http.ServeMux, repo *Repository, authMiddlewar
 		writeJSON(w, http.StatusOK, l)
 	}))
 
-	// POST /api/admin/logistics/{item_id}/make-available — Make item available
+	// POST /api/admin/logistics/{item_id}/make-available — Make item available (Obsolete)
 	mux.Handle("POST /api/admin/logistics/{item_id}/make-available", adminOnly(func(w http.ResponseWriter, r *http.Request) {
-		itemID, _ := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
-		if err := repo.MakeAvailable(r.Context(), itemID); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		l, _ := repo.GetLogisticsByItemID(r.Context(), itemID)
-		writeJSON(w, http.StatusOK, l)
+		writeError(w, http.StatusGone, "endpoint removed: items are now available automatically")
 	}))
 
 	// POST /api/admin/logistics/{item_id}/reserve — Reserve item for a pro

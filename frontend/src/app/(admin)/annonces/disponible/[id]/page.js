@@ -71,12 +71,18 @@ function formatDate(value) {
 }
 
 function getDepositLocation(item) {
-    const point = item.depositPointName || "Point de depot";
+    if (!item.depositPointName) {
+        return `Ville : ${item.city || item.ItemCity || "Non renseignée"}`;
+    }
+    const point = item.depositPointName;
     const container = item.containerName || "Box non assignee";
     return `${point} · ${container}`;
 }
 
 function getDepositAddress(item) {
+    if (!item.depositPointName) {
+        return "Le point de retrait exact vous sera communiqué une fois l'objet déposé par le particulier.";
+    }
     const address = item.depositPointAddress || item.deposit_point_address || "";
     const zip = item.depositPointZipCode || item.deposit_point_zip_code || "";
     const city = item.depositPointCity || item.deposit_point_city || "";
@@ -172,7 +178,7 @@ export default function ProfessionalAvailableDetailPage() {
                 window.location.assign(checkoutData.checkout_url);
                 return;
             } else {
-                window.alert(`Code de récupération: ${reserveData.pickup_code}`);
+                window.alert("L'objet a été réservé ! Le code de récupération vous sera fourni une fois l'objet déposé par le particulier.");
             }
             router.push("/annonces/mes-recuperations");
         } catch (err) {
@@ -399,8 +405,8 @@ export default function ProfessionalAvailableDetailPage() {
                                     <Box size={18} />
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text-main)" }}>{item.depositPointName || "Point UC"}</div>
-                                    <div style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{item.containerName || "Box non assignee"}</div>
+                                    <div style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text-main)" }}>{item.depositPointName ? item.depositPointName : `Ville : ${item.city || "Non renseignée"}`}</div>
+                                    <div style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{item.containerName || "Point à assigner après réservation"}</div>
                                     <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.18rem", lineHeight: "1.45" }}>{depositAddress}</div>
                                 </div>
                             </div>
@@ -431,8 +437,8 @@ export default function ProfessionalAvailableDetailPage() {
                                 { label: "Matière", val: item.material || "N/A", icon: <Package size={13} /> },
                                 { label: "Poids estime", val: estimatedWeight, icon: <Package size={13} /> },
                                 { label: "Publiée le", val: displayDate, icon: <Calendar size={13} /> },
-                                { label: "Point de dépôt", val: item.depositPointName || "Point UC", icon: <Box size={13} /> },
-                                { label: "Conteneur", val: item.containerName || "Box non assignée", icon: <Box size={13} /> },
+                                { label: "Point de dépôt", val: item.depositPointName || "À assigner", icon: <Box size={13} /> },
+                                { label: "Conteneur", val: item.containerName || "À assigner", icon: <Box size={13} /> },
                             ].map(({ label, val, icon }) => (
                                 <div key={label} style={{ paddingBottom: "0.85rem", borderBottom: "1px solid rgba(35,59,61,0.08)" }}>
                                     <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.38rem" }}>{label}</div>

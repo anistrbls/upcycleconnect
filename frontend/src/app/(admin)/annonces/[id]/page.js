@@ -747,14 +747,12 @@ function AnnonceDetailContent() {
             (wf === "cancelled" && "Suivi interrompu") ||
             (wf === "deposit_expired" && "Code de dépôt expiré") ||
             "Suivi en cours";
-        const shouldShowCode = wf === "deposit_code_sent" || wf === "reserved";
-        const codeLabel = wf === "reserved" ? "Code de retrait" : "Code de dépôt";
-        const codeValue = wf === "reserved" ? annonce.pickupCode : annonce.depositCode;
-        const codeExpires = wf === "reserved" ? annonce.pickupCodeExpiresAt : annonce.depositCodeExpiresAt;
-        const codeColor = wf === "reserved" ? "#f59e0b" : color;
-        const codeHelpText = wf === "reserved"
-            ? "À présenter lors du retrait de l'objet."
-            : "À conserver et présenter au point de dépôt lors de la remise.";
+        const shouldShowCode = wf === "deposit_code_sent";
+        const codeLabel = "Code de dépôt";
+        const codeValue = annonce.depositCode;
+        const codeExpires = annonce.depositCodeExpiresAt;
+        const codeColor = color;
+        const codeHelpText = "À conserver et présenter au point de dépôt lors de la remise.";
 
         return (
             <div style={{

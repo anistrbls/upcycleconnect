@@ -149,8 +149,36 @@ export default function MonComptePage() {
         setTimeout(() => setToast(null), 3000);
     };
 
+    const validateProfile = () => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const phoneRegex = /^(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}$/; // Format français
+        const nameRegex = /^[a-zA-ZÀ-ÿ\s'-]+$/;
+        
+        if (!userData.firstname?.trim() || userData.firstname.length < 2) return "Le prénom doit contenir au moins 2 caractères.";
+        if (!nameRegex.test(userData.firstname)) return "Le prénom contient des caractères non valides.";
+        
+        if (!userData.lastname?.trim() || userData.lastname.length < 2) return "Le nom doit contenir au moins 2 caractères.";
+        if (!nameRegex.test(userData.lastname)) return "Le nom contient des caractères non valides.";
+        
+        if (!userData.email?.trim() || !emailRegex.test(userData.email)) return "Veuillez entrer une adresse email valide.";
+        
+        if (userData.phone && !phoneRegex.test(userData.phone)) return "Veuillez entrer un numéro de téléphone valide (ex: 06 12 34 56 78).";
+        
+        if (!userData.city?.trim() || userData.city.length < 2) return "La ville doit contenir au moins 2 caractères.";
+        if (!nameRegex.test(userData.city)) return "La ville contient des caractères non valides.";
+        
+        return null;
+    };
+
     const handleUpdateProfile = async (e) => {
         e.preventDefault();
+        
+        const error = validateProfile();
+        if (error) {
+            showToast(error, "error");
+            return;
+        }
+
         setSavingProfile(true);
         try {
             const resp = await fetch(apiUrl("/profile"), {
@@ -253,6 +281,8 @@ export default function MonComptePage() {
                                         style={styles.input} 
                                         value={userData.firstname}
                                         onChange={e => setUserData({...userData, firstname: e.target.value})}
+                                        required
+                                        minLength={2}
                                     />
                                 </div>
                             </div>
@@ -263,6 +293,8 @@ export default function MonComptePage() {
                                         style={styles.input} 
                                         value={userData.lastname}
                                         onChange={e => setUserData({...userData, lastname: e.target.value})}
+                                        required
+                                        minLength={2}
                                     />
                                 </div>
                             </div>
@@ -277,6 +309,7 @@ export default function MonComptePage() {
                                     type="email"
                                     value={userData.email}
                                     onChange={e => setUserData({...userData, email: e.target.value})}
+                                    required
                                 />
                             </div>
                         </div>
@@ -287,6 +320,7 @@ export default function MonComptePage() {
                                 <Phone size={16} color="#94a3b8" />
                                 <input 
                                     style={styles.input} 
+                                    type="tel"
                                     value={userData.phone}
                                     onChange={e => setUserData({...userData, phone: e.target.value})}
                                 />
@@ -301,6 +335,8 @@ export default function MonComptePage() {
                                     style={styles.input} 
                                     value={userData.city}
                                     onChange={e => setUserData({...userData, city: e.target.value})}
+                                    required
+                                    minLength={2}
                                 />
                             </div>
                         </div>

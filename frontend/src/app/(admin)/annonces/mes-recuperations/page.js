@@ -227,14 +227,22 @@ const styles = {
 
 const STATUS_LABEL = {
     pending_payment: "En attente de paiement",
-    reserved: "Prêt à récupérer",
-    picked_up: "Recupere",
+    reserved: "En attente du vendeur",
+    assigned: "En attente du vendeur",
+    deposit_code_sent: "En attente du vendeur",
+    deposited: "Prêt à récupérer",
+    picked_up: "Récupéré",
+    cancelled: "Annulé",
 };
 
 const STATUS_STYLE = {
     pending_payment: { bg: "rgba(217,119,6,0.15)", color: "#b45309" },
-    reserved: { bg: "rgba(16,185,129,0.16)", color: "#047857" },
+    reserved: { bg: "rgba(99,102,241,0.12)", color: "#4f46e5" },
+    assigned: { bg: "rgba(99,102,241,0.12)", color: "#4f46e5" },
+    deposit_code_sent: { bg: "rgba(99,102,241,0.12)", color: "#4f46e5" },
+    deposited: { bg: "rgba(16,185,129,0.16)", color: "#047857" },
     picked_up: { bg: "rgba(35,59,61,0.14)", color: "#233B3D" },
+    cancelled: { bg: "rgba(239,68,68,0.12)", color: "#ef4444" },
 };
 
 function formatDepositLocation(item) {
@@ -389,10 +397,21 @@ export default function MyRecoveriesPage() {
     }, [stripeState, stripeSessionId, router]);
 
     const grouped = useMemo(() => {
-        const groups = { pending_payment: [], reserved: [], picked_up: [] };
+        const groups = { pending_payment: [], in_progress: [], ready: [], picked_up: [], cancelled: [] };
         for (const item of items) {
-            if (groups[item.workflowStatus]) {
-                groups[item.workflowStatus].push(item);
+            const s = item.workflowStatus;
+            const isDeposited = item.depositedAt || item.deposited_at || s === 'deposited';
+            
+            if (s === 'pending_payment') {
+                groups.pending_payment.push(item);
+            } else if (s === 'picked_up') {
+                groups.picked_up.push(item);
+            } else if (s === 'cancelled') {
+                groups.cancelled.push(item);
+            } else if (isDeposited) {
+                groups.ready.push(item);
+            } else {
+                groups.in_progress.push(item);
             }
         }
         return groups;
@@ -435,8 +454,9 @@ export default function MyRecoveriesPage() {
     const renderCard = (item) => {
         const cardImage = item.image || (Array.isArray(item.photos) && item.photos[0]) || "/img/recyclage-materiau.jpg";
         const pickupSpotPhoto = getPickupSpotPhoto(item);
-        const pickupSpotName = item.depositPointName || "Point UC";
+        const pickupSpotName = item.depositPointName || "Point à assigner";
         const pickupSpotAddress = formatDepositAddress(item);
+        const isDeposited = item.depositedAt || item.deposited_at || item.workflowStatus === 'deposited';
 
         return (
         <article key={item.id} style={styles.card}>
@@ -485,7 +505,7 @@ export default function MyRecoveriesPage() {
                     <span style={styles.priceValue}>Don</span>
                 )}
             </p>
-            {item.workflowStatus === "reserved" && (
+            {isDeposited && item.workflowStatus !== "picked_up" && (
                 <>
                     <p style={styles.pickupCode}><PackageCheck size={15} /> Code de récupération: {item.pickupCode || "-"}</p>
                     <div style={styles.pickupSpotCard}>
@@ -517,6 +537,12 @@ export default function MyRecoveriesPage() {
                 >
                     <CreditCard size={14} /> {busyId === item.id ? "Paiement..." : "Payer avec Stripe"}
                 </button>
+            )}
+            {item.workflowStatus === "cancelled" && item.cancelReason && (
+                <div style={{ marginTop: '0.4rem', padding: '0.6rem', borderRadius: '12px', background: '#fef2f2', border: '1px solid #fee2e2' }}>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: '#991b1b', fontWeight: 700 }}>Motif d'annulation :</p>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#b91c1c' }}>{item.cancelReason}</p>
+                </div>
             )}
         </article>
     );
@@ -570,11 +596,20 @@ export default function MyRecoveriesPage() {
                 </section>
                 <section style={styles.section}>
                     <div className="section-header" style={styles.sectionHeader}>
-                        <span className="section-title">Prêtes à récupérer</span>
-                        <span style={styles.sectionCount}>{grouped.reserved.length} item(s)</span>
+                        <span className="section-title">En attente de dépôt par le vendeur</span>
+                        <span style={styles.sectionCount}>{grouped.in_progress.length} item(s)</span>
                     </div>
                     <div style={styles.list}>
-                        {grouped.reserved.length ? grouped.reserved.map(renderCard) : renderEmpty("Aucun objet prêt à récupérer pour le moment.")}
+                        {grouped.in_progress.length ? grouped.in_progress.map(renderCard) : renderEmpty("Aucun objet en attente de dépôt.")}
+                    </div>
+                </section>
+                <section style={styles.section}>
+                    <div className="section-header" style={styles.sectionHeader}>
+                        <span className="section-title">Prêtes à récupérer</span>
+                        <span style={styles.sectionCount}>{grouped.ready.length} item(s)</span>
+                    </div>
+                    <div style={styles.list}>
+                        {grouped.ready.length ? grouped.ready.map(renderCard) : renderEmpty("Aucun objet prêt à récupérer pour le moment.")}
                     </div>
                 </section>
                 <section style={styles.section}>
@@ -584,6 +619,15 @@ export default function MyRecoveriesPage() {
                     </div>
                     <div style={styles.list}>
                         {grouped.picked_up.length ? grouped.picked_up.map(renderCard) : renderEmpty("Aucun historique de récupération pour l'instant.")}
+                    </div>
+                </section>
+                <section style={styles.section}>
+                    <div className="section-header" style={styles.sectionHeader}>
+                        <span className="section-title" style={{ color: '#ef4444' }}>Annulées</span>
+                        <span style={styles.sectionCount}>{grouped.cancelled.length} item(s)</span>
+                    </div>
+                    <div style={styles.list}>
+                        {grouped.cancelled.length ? grouped.cancelled.map(renderCard) : null}
                     </div>
                 </section>
             </div>

@@ -89,6 +89,7 @@ type ItemLogistics struct {
 	ItemImage            string     `json:"item_image,omitempty"`
 	ItemCity             string     `json:"item_city,omitempty"`
 	ItemCategory         string     `json:"item_category,omitempty"`
+	ItemType             string     `json:"item_type,omitempty"`
 	OwnerName            string     `json:"owner_name,omitempty"`
 	DepositPointName     string     `json:"deposit_point_name,omitempty"`
 	ContainerName        string     `json:"container_name,omitempty"`
@@ -356,9 +357,11 @@ type ProfessionalItem struct {
 	AvailableAt        *time.Time `json:"availableAt,omitempty"`
 	StripePaymentStatus string `json:"stripePaymentStatus,omitempty"`
 	ReservedAt         *time.Time `json:"reservedAt,omitempty"`
-	ReservationExpiresAt *time.Time `json:"reservationExpiresAt,omitempty"`
-	PickupCode         string  `json:"pickupCode,omitempty"`
-	PaymentValidatedAt *time.Time `json:"paymentValidatedAt,omitempty"`
+	ReservationExpiresAt *time.Time `json:"reservation_expires_at,omitempty"`
+	PickupCode           string     `json:"pickupCode,omitempty"`
+	PaymentValidatedAt   *time.Time `json:"paymentValidatedAt,omitempty"`
+	DepositedAt          *time.Time `json:"depositedAt,omitempty"`
+	CancelReason         string     `json:"cancelReason,omitempty"`
 }
 
 func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]ProfessionalItem, error) {
@@ -375,7 +378,7 @@ func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]Prof
 		 JOIN items i ON i.id = l.item_id
 		 LEFT JOIN deposit_points dp ON dp.id = l.deposit_point_id
 		 LEFT JOIN containers ct ON ct.id = l.container_id
-		 WHERE l.workflow_status = 'available'
+		 WHERE l.workflow_status IN ('available', 'validated')
 		 ORDER BY l.updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -428,7 +431,7 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
 		        COALESCE(dp.address, ''), COALESCE(dp.zip_code, ''), COALESCE(dp.city, ''), COALESCE(dp.country, ''),
 		        COALESCE(ct.name, ''), l.updated_at, COALESCE(l.stripe_payment_status, ''),
-		        l.reserved_by_user_id, l.reserved_at, l.reservation_expires_at, l.pickup_code, l.payment_validated_at
+		        l.reserved_by_user_id, l.reserved_at, l.reservation_expires_at, l.pickup_code, l.payment_validated_at, l.deposited_at
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 LEFT JOIN deposit_points dp ON dp.id = l.deposit_point_id
@@ -443,7 +446,7 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 		&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
 		&it.DepositPointAddress, &it.DepositPointZipCode, &it.DepositPointCity, &it.DepositPointCountry,
 		&it.ContainerName, &it.AvailableAt, &it.StripePaymentStatus,
-		&reservedByUserID, &it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &it.PaymentValidatedAt,
+		&reservedByUserID, &it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &it.PaymentValidatedAt, &it.DepositedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -484,12 +487,12 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
 		        COALESCE(dp.address, ''), COALESCE(dp.zip_code, ''), COALESCE(dp.city, ''), COALESCE(dp.country, ''),
 		        COALESCE(ct.name, ''), l.updated_at, COALESCE(l.stripe_payment_status, ''),
-		        l.reserved_at, l.reservation_expires_at, l.pickup_code, l.payment_validated_at
+		        l.reserved_at, l.reservation_expires_at, l.pickup_code, l.payment_validated_at, l.deposited_at, COALESCE(l.cancel_reason, '')
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 LEFT JOIN deposit_points dp ON dp.id = l.deposit_point_id
 		 LEFT JOIN containers ct ON ct.id = l.container_id
-		 WHERE l.workflow_status IN ('pending_payment', 'reserved', 'picked_up')
+		 WHERE l.workflow_status IN ('pending_payment', 'reserved', 'assigned', 'deposit_code_sent', 'deposited', 'picked_up', 'ready_for_pickup', 'cancelled')
 		   AND (
 		        l.reserved_by_user_id = $1
 		        OR (
@@ -522,7 +525,7 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 			&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
 			&it.DepositPointAddress, &it.DepositPointZipCode, &it.DepositPointCity, &it.DepositPointCountry,
 			&it.ContainerName, &it.AvailableAt, &it.StripePaymentStatus,
-			&it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &it.PaymentValidatedAt,
+			&it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &it.PaymentValidatedAt, &it.DepositedAt, &it.CancelReason,
 		); err != nil {
 			return nil, err
 		}
@@ -604,8 +607,8 @@ func (r *Repository) CreateLogistics(ctx context.Context, itemID int64) (*ItemLo
 	var l ItemLogistics
 	err := r.db.QueryRowContext(ctx,
 		`INSERT INTO item_logistics (item_id, workflow_status)
-		 VALUES ($1, 'validated')
-		 ON CONFLICT (item_id) DO UPDATE SET workflow_status = 'validated', updated_at = NOW()
+		 VALUES ($1, 'available')
+		 ON CONFLICT (item_id) DO UPDATE SET workflow_status = 'available', updated_at = NOW()
 		 RETURNING id, item_id, workflow_status, created_at, updated_at`,
 		itemID,
 	).Scan(&l.ID, &l.ItemID, &l.WorkflowStatus, &l.CreatedAt, &l.UpdatedAt)
@@ -625,7 +628,7 @@ func (r *Repository) GetLogisticsByItemID(ctx context.Context, itemID int64) (*I
 				l.picked_up_at,
 				l.cancelled_at, l.cancel_reason,
 				l.created_at, l.updated_at,
-				i.title, i.image, i.city, i.category,
+				i.title, i.image, i.city, i.category, i.type,
 				(u.firstname || ' ' || u.lastname),
 				COALESCE(dp.name, ''),
 				COALESCE(ct.name, '')
@@ -647,7 +650,7 @@ func (r *Repository) GetLogisticsByItemID(ctx context.Context, itemID int64) (*I
 		&l.PickedUpAt,
 		&l.CancelledAt, &l.CancelReason,
 		&l.CreatedAt, &l.UpdatedAt,
-		&l.ItemTitle, &l.ItemImage, &l.ItemCity, &l.ItemCategory,
+		&l.ItemTitle, &l.ItemImage, &l.ItemCity, &l.ItemCategory, &l.ItemType,
 		&l.OwnerName, &l.DepositPointName, &l.ContainerName,
 	)
 	if err != nil {
@@ -696,7 +699,7 @@ func (r *Repository) ListLogistics(ctx context.Context, statusFilter string) ([]
 				l.picked_up_at,
 				l.cancelled_at, l.cancel_reason,
 				l.created_at, l.updated_at,
-				i.title, i.image, i.city, i.category,
+				i.title, i.image, i.city, i.category, i.type,
 				(u.firstname || ' ' || u.lastname),
 				COALESCE(dp.name, ''),
 				COALESCE(ct.name, '')
@@ -705,7 +708,7 @@ func (r *Repository) ListLogistics(ctx context.Context, statusFilter string) ([]
 		 JOIN users u ON u.id = i.user_id
 		 LEFT JOIN deposit_points dp ON dp.id = l.deposit_point_id
 		 LEFT JOIN containers ct ON ct.id = l.container_id
-		 WHERE ($1 = '' OR l.workflow_status = $1)
+		 WHERE ($1 = '' OR l.workflow_status = $1 OR ($1 = 'available' AND l.workflow_status = 'validated'))
 		 ORDER BY l.updated_at DESC`
 
 	rows, err := r.db.QueryContext(ctx, query, statusFilter)
@@ -728,7 +731,7 @@ func (r *Repository) ListLogistics(ctx context.Context, statusFilter string) ([]
 			&l.PickedUpAt,
 			&l.CancelledAt, &l.CancelReason,
 			&l.CreatedAt, &l.UpdatedAt,
-			&l.ItemTitle, &l.ItemImage, &l.ItemCity, &l.ItemCategory,
+			&l.ItemTitle, &l.ItemImage, &l.ItemCity, &l.ItemCategory, &l.ItemType,
 			&l.OwnerName, &l.DepositPointName, &l.ContainerName,
 		); err != nil {
 			return nil, err
@@ -765,7 +768,7 @@ func (r *Repository) AssignLogistics(ctx context.Context, itemID int64, p Assign
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
-	if status != WFValidated && status != WFAssigned && status != WFDepositExpired {
+	if status != WFReserved && status != WFAssigned && status != WFDepositExpired {
 		return fmt.Errorf("cannot assign from status %q", status)
 	}
 
@@ -842,11 +845,12 @@ func (r *Repository) GenerateDepositCode(ctx context.Context, itemID int64) (str
 
 func (r *Repository) ConfirmDeposit(ctx context.Context, itemID int64, adminID int64) error {
 	var status string
+	var existingPickupCode string
 
 	err := r.db.QueryRowContext(ctx,
-		`SELECT workflow_status FROM item_logistics WHERE item_id = $1`,
+		`SELECT workflow_status, pickup_code FROM item_logistics WHERE item_id = $1`,
 		itemID,
-	).Scan(&status)
+	).Scan(&status, &existingPickupCode)
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
@@ -855,14 +859,26 @@ func (r *Repository) ConfirmDeposit(ctx context.Context, itemID int64, adminID i
 	}
 
 	now := time.Now()
+	
+	pickupCodeStr := existingPickupCode
+	var expiresAt *time.Time
+	if pickupCodeStr == "" {
+		config, _ := r.GetCodeConfig(ctx)
+		if config.Length < 4 { config.Length = 8 }
+		pickupCodeStr = generateCode(config)
+		expires := now.Add(PickupCodeTTL)
+		expiresAt = &expires
+	}
 
 	// Update logistics
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE item_logistics SET
 			workflow_status = 'deposited',
-			deposited_at = $1, deposited_confirmed_by = $2, updated_at = $1
-		 WHERE item_id = $3`,
-		now, adminID, itemID,
+			deposited_at = $1, deposited_confirmed_by = $2, updated_at = $1,
+			pickup_code = COALESCE(NULLIF($3, ''), pickup_code),
+			pickup_code_expires_at = COALESCE($4, pickup_code_expires_at)
+		 WHERE item_id = $5`,
+		now, adminID, pickupCodeStr, expiresAt, itemID,
 	)
 	if err != nil {
 		return err
@@ -932,7 +948,7 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 	if err != nil {
 		return "", fmt.Errorf("item not in logistics: %w", err)
 	}
-	if status != WFAvailable {
+	if status != WFAvailable && status != WFValidated {
 		if p.ReservedByUserID != nil && reservedByUserID != nil && *p.ReservedByUserID == *reservedByUserID {
 			if status == WFPendingPayment || status == WFReserved {
 				return existingPickupCode, nil
@@ -957,12 +973,6 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 	if requiresPayment(itemType, price) {
 		workflowTarget = WFPendingPayment
 		stripePaymentStatus = "pending"
-	} else {
-		config, _ := r.GetCodeConfig(ctx)
-		if config.Length < 4 { config.Length = 8 }
-		pickupCode = generateCode(config)
-		expires := now.Add(PickupCodeTTL)
-		pickupExpires = &expires
 	}
 
 	res, err := r.db.ExecContext(ctx,
@@ -971,6 +981,15 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 			reserved_by_name = $2, reserved_by_user_id = $3, transaction_ref = $4, reserved_at = $5, reservation_expires_at = $6,
 			pickup_code = $7, pickup_code_expires_at = $8,
 			payment_validated_at = NULL,
+			deposit_point_id = NULL,
+			container_id = NULL,
+			assigned_at = NULL,
+			assigned_by = NULL,
+			deposit_code = '',
+			deposit_code_expires_at = NULL,
+			deposit_code_sent_at = NULL,
+			deposited_at = NULL,
+			deposited_confirmed_by = NULL,
 			stripe_checkout_session_id = '',
 			stripe_payment_intent_id = '',
 			stripe_payment_status = $9,
@@ -980,7 +999,7 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 			stripe_paid_at = NULL,
 			picked_up_at = NULL,
 			updated_at = $5
-		 WHERE item_id = $11 AND workflow_status = 'available'`,
+		 WHERE item_id = $11 AND (workflow_status = 'available' OR workflow_status = 'validated')`,
 		workflowTarget, p.ReservedByName, p.ReservedByUserID, transactionRef, now, reservationExpires, pickupCode, pickupExpires,
 		stripePaymentStatus, amountCents, itemID,
 	)
@@ -1201,18 +1220,19 @@ func (r *Repository) ConfirmPickup(ctx context.Context, itemID int64, code strin
 	var containerID *int64
 	var itemType string
 	var paymentValidatedAt *time.Time
+	var depositedAt *time.Time
 
 	err := r.db.QueryRowContext(ctx,
-		`SELECT l.workflow_status, l.pickup_code, l.pickup_code_expires_at, l.container_id, i.type, l.payment_validated_at
+		`SELECT l.workflow_status, l.pickup_code, l.pickup_code_expires_at, l.container_id, i.type, l.payment_validated_at, l.deposited_at
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 WHERE l.item_id = $1`,
 		itemID,
-	).Scan(&status, &storedCode, &expiresAt, &containerID, &itemType, &paymentValidatedAt)
+	).Scan(&status, &storedCode, &expiresAt, &containerID, &itemType, &paymentValidatedAt, &depositedAt)
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
-	if status != WFReserved {
+	if status != WFDeposited && !(status == WFReserved && depositedAt != nil) {
 		return fmt.Errorf("cannot confirm pickup from status %q", status)
 	}
 	if itemType == TypeVente && paymentValidatedAt == nil {
@@ -1304,22 +1324,37 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 
 	if revertTo != "" {
 		isPostDeposit := (status == WFDeposited || status == WFAvailable || status == WFPendingPayment || status == WFReserved)
-		targetIsPreDeposit := (revertTo == WFValidated || revertTo == WFAssigned || revertTo == WFDepositCodeSent || revertTo == WFDepositExpired)
+		targetIsPreDeposit := (revertTo == WFValidated || revertTo == WFAssigned || revertTo == WFDepositCodeSent || revertTo == WFDepositExpired || revertTo == WFReserved || revertTo == WFPendingPayment)
 
-		_, err = r.db.ExecContext(ctx, `
+		extraReset := ""
+		if revertTo == WFValidated {
+			extraReset = `, 
+				deposit_point_id = NULL, container_id = NULL, assigned_at = NULL, assigned_by = NULL,
+				deposit_code = '', deposit_code_expires_at = NULL, deposit_code_sent_at = NULL,
+				deposited_at = NULL, deposited_confirmed_by = NULL,
+				reserved_by_name = '', reserved_by_user_id = NULL, reserved_at = NULL, reservation_expires_at = NULL,
+				pickup_code = '', pickup_code_expires_at = NULL, payment_validated_at = NULL`
+		}
+
+		query := `
 			UPDATE item_logistics
 			SET workflow_status = $1,
 				previous_workflow_status = '',
 				cancelled_at = NULL,
 				cancel_reason = '',
 				cancelled_by_user = false,
-				updated_at = NOW()
-			WHERE item_id = $2
-		`, revertTo, itemID)
+				updated_at = NOW() ` + extraReset + `
+			WHERE item_id = $2`
+		_, err = r.db.ExecContext(ctx, query, revertTo, itemID)
 		
 		if isPostDeposit && targetIsPreDeposit && wasDeposited && containerID != nil {
 			r.db.ExecContext(ctx, `UPDATE containers SET current_count = GREATEST(current_count - 1, 0) WHERE id = $1`, *containerID)
-			r.db.ExecContext(ctx, `UPDATE item_logistics SET deposited_at = NULL, deposit_confirmed_by = NULL WHERE item_id = $1`, itemID)
+			r.db.ExecContext(ctx, `UPDATE item_logistics SET 
+				deposited_at = NULL, 
+				deposited_confirmed_by = NULL,
+				pickup_code = '',
+				pickup_code_expires_at = NULL 
+				WHERE item_id = $1`, itemID)
 			r.UpdateContainerCounts(ctx, *containerID)
 		}
 		return err
