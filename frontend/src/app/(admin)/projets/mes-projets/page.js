@@ -116,27 +116,30 @@ const styles = {
         background: "linear-gradient(to top, rgba(5,10,5,0.92) 0%, rgba(5,10,5,0.55) 35%, rgba(5,10,5,0.08) 60%, transparent 75%)",
         pointerEvents: "none",
     },
-    statusBadge: (status, moderationStatus) => ({
-        position: "absolute",
-        top: "14px",
-        right: "14px",
-        padding: "4px 12px",
-        borderRadius: "20px",
-        fontSize: "0.72rem",
-        fontWeight: "700",
-        background: moderationStatus === "rejected"
-            ? "rgba(255, 170, 170, 0.95)"
-            : moderationStatus === "pending"
-            ? "#E5FFBC"
-            : status === "publie"
-            ? "rgba(155, 200, 184, 0.95)"
-            : "#E5FFBC",
-        color: moderationStatus === "rejected" ? "#7A1F1F" : "var(--forest-deep)",
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
-        letterSpacing: "0.04em",
-        zIndex: 2,
-    }),
+    statusBadge: (status, moderationStatus) => {
+        const rejected = moderationStatus === "rejected";
+        return {
+            position: "absolute",
+            top: "14px",
+            right: "14px",
+            padding: "4px 12px",
+            borderRadius: "20px",
+            fontSize: "0.72rem",
+            fontWeight: "700",
+            background: rejected ? "rgba(255, 170, 170, 0.95)" : "rgb(229, 255, 188)",
+            color: rejected ? "#7A1F1F" : "var(--text-main)",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            letterSpacing: "0.04em",
+            zIndex: 15,
+            whiteSpace: "nowrap",
+            maxWidth: "min(168px, calc(100% - 28px))",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            boxShadow: rejected ? "none" : "0 2px 12px rgba(0, 0, 0, 0.22)",
+            border: rejected ? "none" : "1px solid rgba(43, 69, 72, 0.08)",
+        };
+    },
     cardOverlay: {
         position: "absolute",
         bottom: 0,

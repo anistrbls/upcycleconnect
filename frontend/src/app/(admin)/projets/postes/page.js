@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Leaf, Box, BarChart3, Heart, Bookmark } from "lucide-react";
-import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import { apiUrl, buildAuthHeaders, getRoleFromToken } from "../../../lib/api";
 
 const styles = {
     container: {
@@ -322,6 +322,7 @@ const styles = {
 
 function ProjetsPostesContent() {
     const router = useRouter();
+    const spaceLabel = getRoleFromToken() === "professionnel" ? "Espace Professionnel" : "Espace Particulier";
     const [projects, setProjects] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
 
@@ -354,7 +355,7 @@ function ProjetsPostesContent() {
     return (
         <div style={styles.container}>
             <header style={styles.header}>
-                <p className="activities-label">Espace Particulier</p>
+                <p className="activities-label">{spaceLabel}</p>
                 <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.45rem 0", letterSpacing: "-0.02em" }}>Projets postés</h1>
                 <p style={{ color: "var(--text-muted)", fontSize: "1.05rem" }}>Découvrez les projets upcycling validés et publiés par les professionnels.</p>
             </header>
@@ -428,7 +429,7 @@ function ProjetsPostesContent() {
                     <article
                         key={project.id}
                         style={styles.card}
-                        onClick={() => router.push(`/projets/voir/${project.id}`)}
+                        onClick={() => router.push(`/projets/voir/${project.id}?from=postes`)}
                     >
                         {/* Social Buttons */}
                         <div style={{ position: "absolute", top: "1.2rem", right: "1.2rem", zIndex: 10, display: "flex", gap: "0.6rem" }}>

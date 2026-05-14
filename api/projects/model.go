@@ -70,6 +70,13 @@ type ProSummary struct {
 	JoinedAt                time.Time `json:"joinedAt"`
 }
 
+// ProjectLiker décrit un utilisateur ayant aimé un projet (vue propriétaire).
+type ProjectLiker struct {
+	UserID      int64  `json:"userId"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+}
+
 // CreatePayload est le corps de requête pour créer un projet.
 type CreatePayload struct {
 	Title       string `json:"title"`

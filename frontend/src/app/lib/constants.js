@@ -139,7 +139,6 @@ export const NAV_MODULES = [
         subNav: [
             { key: "conteneurs", label: "Conteneurs", shortLabel: "Conteneurs" },
             { key: "validations", label: "Validation", shortLabel: "Validation" },
-            { key: "notifications", label: "Notifications", shortLabel: "Notif." },
             { key: "documents", label: "Documents", shortLabel: "Docs" },
         ],
     },
@@ -179,6 +178,15 @@ export const NAV_MODULES = [
 
 export const PRO_MODULES = [
     {
+        key: "vue-globale",
+        label: "Vue globale",
+        shortLabel: "Vue",
+        icon: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+        subNav: [
+            { key: "vue-generale", label: "Vue générale", shortLabel: "Générale" },
+        ],
+    },
+    {
         key: "annonces",
         label: "Annonces",
         shortLabel: "Annonces",
@@ -196,6 +204,20 @@ export const PRO_MODULES = [
         subNav: [
             { key: "mes-projets", label: "Mes projets", shortLabel: "Mes projets" },
             { key: "nouveau", label: "Nouveau projet", shortLabel: "Nouveau" },
+            { key: "postes", label: "Projets postés", shortLabel: "Postés" },
+            { key: "participes", label: "My Upcycle", shortLabel: "Participés" },
+            { key: "favoris", label: "Projets favoris", shortLabel: "Favoris" },
+        ],
+    },
+    {
+        key: "evenements",
+        label: "Événements",
+        shortLabel: "Événements",
+        icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2",
+        subNav: [
+            { key: "activites", label: "Activités", shortLabel: "Activités" },
+            { key: "mes-inscriptions", label: "Mes inscriptions", shortLabel: "Inscriptions" },
+            { key: "agenda", label: "Agenda", shortLabel: "Agenda" },
         ],
     },
     {
@@ -206,6 +228,13 @@ export const PRO_MODULES = [
         subNav: [
             { key: "sujets", label: "Forum", shortLabel: "Forum" },
         ],
+    },
+    {
+        key: "finances",
+        label: "Finances",
+        shortLabel: "Finances",
+        icon: "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
+        subNav: [{ key: "paiements", label: "Mes paiements", shortLabel: "Paiements" }],
     },
     {
         key: "mon-compte",
@@ -352,6 +381,13 @@ export const PARTICULIER_MODULES = [
         subNav: [
             { key: "sujets", label: "Forum", shortLabel: "Forum" },
         ],
+    },
+    {
+        key: "finances",
+        label: "Finances",
+        shortLabel: "Finances",
+        icon: "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
+        subNav: [{ key: "paiements", label: "Mes paiements", shortLabel: "Paiements" }],
     },
     {
         key: "mon-compte",

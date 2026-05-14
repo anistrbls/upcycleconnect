@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { Search, XCircle, Clock3, ShieldAlert, Check, X, Eye } from "lucide-react";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
+import { formatBuyerCardPrice } from "../../../lib/salePrice";
 
 const styles = {
     container: {
@@ -452,7 +453,7 @@ function ModerationContent() {
                             <div style={styles.titlePriceRow}>
                                 <h3 style={styles.cardTitle}>{annonce.title}</h3>
                                 <div style={styles.pricePill}>
-                                    {annonce.type === "don" ? "GRATUIT" : `${annonce.price || 0} €`}
+                                    {annonce.type === "don" ? "GRATUIT" : formatBuyerCardPrice(annonce)}
                                 </div>
                             </div>
                             <p style={styles.description}>{annonce.city || "Ville non définie"} · Publiée le {annonce.date || "date inconnue"}</p>

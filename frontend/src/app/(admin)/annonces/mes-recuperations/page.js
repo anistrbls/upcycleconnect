@@ -3,19 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
-import { CreditCard, MapPin, PackageCheck, CheckCircle2, CalendarClock, AlertCircle } from "lucide-react";
+import { formatBuyerCardPrice } from "../../../lib/salePrice";
+import DepositCodeQrPanel from "../../../components/DepositCodeQrPanel";
+import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
+import {
+    CreditCard,
+    MapPin,
+    CheckCircle2,
+    CalendarClock,
+    AlertCircle,
+    ChevronDown,
+    ChevronUp,
+    Star,
+} from "lucide-react";
 
 const styles = {
     wrapper: {
         width: "100%",
         padding: "0 0 3rem 0",
         animation: "fadeIn 0.45s ease-out",
-    },
-    subtitle: {
-        margin: "0.1rem 0 0.2rem",
-        color: "var(--text-muted)",
-        fontSize: "0.9rem",
-        maxWidth: "66ch",
     },
     message: {
         borderRadius: "14px",
@@ -27,181 +33,286 @@ const styles = {
         alignItems: "center",
         gap: "0.45rem",
     },
-    section: {
-        marginBottom: "1.4rem",
-        paddingTop: "0.15rem",
+    toolbar: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "0.65rem 1rem",
+        alignItems: "center",
+        marginBottom: "1rem",
     },
-    sectionHeader: { marginBottom: "0.7rem" },
-    sectionCount: {
-        fontSize: "0.75rem",
+    searchWrap: {
+        position: "relative",
+        flex: "1 1 0%",
+        minWidth: "min(100%, 160px)",
+        width: "auto",
+    },
+    searchInput: {
+        width: "100%",
+        border: "none",
+        borderRadius: "999px",
+        background: "rgb(229, 255, 188)",
+        color: "var(--text-main)",
+        padding: "0.6rem 1.2rem",
+        fontSize: "0.9rem",
+        fontFamily: "inherit",
+        outline: "none",
+    },
+    filterBar: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "0.45rem",
+        alignItems: "center",
+        flex: "0 1 auto",
+        minWidth: 0,
+    },
+    filterChip: (active) => ({
+        border: active ? "1px solid #233B3D" : "1px solid rgba(35,59,61,0.14)",
+        borderRadius: "999px",
+        padding: "0.45rem 0.85rem",
+        fontSize: "0.82rem",
+        fontWeight: 700,
+        fontFamily: "inherit",
+        cursor: "pointer",
+        background: active ? "rgba(35,59,61,0.1)" : "#fff",
+        color: active ? "#1a2d2f" : "var(--text-main)",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.35rem",
+        transition: "background 0.15s ease, border-color 0.15s ease",
+    }),
+    filterChipCount: {
+        fontSize: "0.74rem",
+        fontWeight: 800,
+        color: "var(--text-muted)",
+        minWidth: "1.1em",
+        textAlign: "center",
+    },
+    listPanel: {
+        borderRadius: "14px",
+        border: "1px solid rgba(35,59,61,0.08)",
+        background: "#fafcfc",
+        overflow: "hidden",
+    },
+    listHeading: {
+        margin: "0 0 0.65rem",
+        fontSize: "0.88rem",
         fontWeight: 700,
         color: "var(--text-muted)",
-        letterSpacing: "0.05em",
-        textTransform: "uppercase",
     },
-    list: {
+    row: {
         display: "grid",
-        gap: "0.9rem",
+        gridTemplateColumns: "52px minmax(0, 1fr) auto auto",
+        gap: "0.65rem",
+        alignItems: "center",
+        padding: "0.65rem 0.75rem",
+        borderBottom: "1px solid rgba(35,59,61,0.06)",
+        background: "#fff",
+        cursor: "pointer",
+        textAlign: "left",
+        width: "100%",
+        fontFamily: "inherit",
+        borderLeft: "none",
+        borderRight: "none",
+        borderTop: "none",
     },
-    card: {
-        borderRadius: "18px",
-        padding: "0.95rem 1rem",
-        background: "white",
-        border: "1px solid rgba(35,59,61,0.09)",
-        display: "grid",
-        gap: "0.72rem",
+    rowLast: {
+        borderBottom: "none",
     },
-    cardMain: {
-        display: "grid",
-        gridTemplateColumns: "62px minmax(0, 1fr)",
-        gap: "0.8rem",
-        alignItems: "start",
-    },
-    cardImageWrap: {
-        width: "62px",
-        height: "62px",
-        borderRadius: "12px",
+    rowImgWrap: {
+        width: "52px",
+        height: "52px",
+        borderRadius: "10px",
         overflow: "hidden",
         border: "1px solid rgba(35,59,61,0.09)",
         background: "#EDF1F0",
         flexShrink: 0,
     },
-    cardImage: {
+    rowImg: {
         width: "100%",
         height: "100%",
         objectFit: "cover",
         display: "block",
     },
-    row: {
-        display: "flex",
-        justifyContent: "space-between",
-        gap: "0.7rem",
-        flexWrap: "wrap",
-        alignItems: "center",
-    },
-    titleRow: {
+    rowTitle: {
         margin: 0,
-        fontSize: "1.02rem",
+        fontSize: "0.92rem",
         fontWeight: 700,
         color: "var(--text-main)",
+        lineHeight: 1.25,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical",
+    },
+    rowMeta: {
+        margin: "0.2rem 0 0",
+        fontSize: "0.78rem",
+        color: "var(--text-muted)",
+        display: "flex",
+        alignItems: "center",
+        gap: "0.35rem",
+        flexWrap: "wrap",
     },
     badge: {
         borderRadius: "999px",
-        padding: "5px 12px",
-        fontSize: "0.73rem",
-        fontWeight: 700,
-        letterSpacing: "0.04em",
-        textTransform: "uppercase",
-    },
-    line: {
-        margin: 0,
-        color: "var(--text-muted)",
-        fontSize: "0.88rem",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.4rem",
-    },
-    priceRow: (isSale) => ({
-        margin: 0,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.55rem",
-        width: "fit-content",
-        padding: "0.18rem 0",
-        color: "var(--text-muted)",
-        fontSize: "0.86rem",
-        fontWeight: 700,
-    }),
-    priceDot: (isSale) => ({
-        width: "9px",
-        height: "9px",
-        borderRadius: "999px",
-        background: isSale ? "#233B3D" : "transparent",
-        border: "1.5px solid rgba(35,59,61,0.55)",
-        boxShadow: "0 0 0 5px rgba(35,59,61,0.08)",
-        flexShrink: 0,
-    }),
-    priceValue: {
-        color: "var(--text-main)",
-        fontWeight: 800,
-    },
-    transactionLine: {
-        margin: 0,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.45rem",
-        fontSize: "0.8rem",
-        color: "#2b4548",
-        fontWeight: 700,
-    },
-    transactionTag: {
-        background: "rgba(43,69,72,0.12)",
-        color: "#1f3436",
-        borderRadius: "999px",
-        padding: "3px 8px",
+        padding: "4px 10px",
         fontSize: "0.68rem",
-        letterSpacing: "0.05em",
-        textTransform: "uppercase",
-        fontWeight: 800,
-    },
-    pickupCode: {
-        margin: "0.12rem 0 0",
         fontWeight: 700,
+        letterSpacing: "0.03em",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+        maxWidth: "140px",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+    },
+    rowRight: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        gap: "0.35rem",
+        flexShrink: 0,
+    },
+    pricePill: {
+        fontSize: "0.82rem",
+        fontWeight: 800,
         color: "var(--text-main)",
-        fontSize: "0.93rem",
+    },
+    expandHint: {
+        fontSize: "0.7rem",
+        fontWeight: 600,
+        color: "var(--text-muted)",
         display: "inline-flex",
         alignItems: "center",
+        gap: "0.2rem",
+    },
+    detailPanel: {
+        padding: "1rem 1rem 1.15rem",
+        background: "#f3f7f6",
+        borderBottom: "1px solid rgba(35,59,61,0.08)",
+    },
+    detailStack: {
+        display: "grid",
+        gap: "0.85rem",
+    },
+    detailCard: {
+        background: "#fff",
+        borderRadius: "12px",
+        border: "1px solid rgba(35,59,61,0.1)",
+        padding: "0.9rem 1rem",
+    },
+    detailLabel: {
+        margin: "0 0 0.5rem",
+        fontSize: "0.7rem",
+        fontWeight: 800,
+        letterSpacing: "0.07em",
+        textTransform: "uppercase",
+        color: "var(--text-muted)",
+    },
+    /** Ligne icône + colonne texte (cartes détail) */
+    detailRow: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: "0.5rem",
+    },
+    detailIcon: {
+        flexShrink: 0,
+        color: "#2b4548",
+        marginTop: "0.1rem",
+    },
+    /** Titre / valeur principale sous l’icône */
+    detailPrimary: {
+        margin: 0,
+        fontSize: "0.95rem",
+        fontWeight: 700,
+        color: "var(--text-main)",
+        lineHeight: 1.45,
+    },
+    /** Texte secondaire sous la valeur (p ou span) — unique spec pour tout le panneau */
+    detailMuted: {
+        margin: "0.35rem 0 0",
+        padding: 0,
+        fontSize: "0.8125rem",
+        fontWeight: 500,
+        color: "var(--text-muted)",
+        lineHeight: 1.45,
+    },
+    detailMutedEm: {
+        fontWeight: 700,
+        color: "var(--text-main)",
+    },
+    detailMutedFlush: {
+        marginTop: 0,
+    },
+    /** Même typo que detailMuted, en ligne avec icône (adresse) */
+    detailMutedRow: {
+        margin: "0.25rem 0 0",
+        padding: 0,
+        fontSize: "0.8125rem",
+        fontWeight: 500,
+        color: "var(--text-muted)",
+        lineHeight: 1.45,
+        display: "flex",
+        alignItems: "flex-start",
         gap: "0.4rem",
+    },
+    detailMono: {
+        margin: 0,
+        fontSize: "0.875rem",
+        fontWeight: 700,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        letterSpacing: "0.02em",
+        color: "#1f3436",
+        wordBreak: "break-all",
+        lineHeight: 1.45,
+    },
+    detailErrorText: {
+        margin: 0,
+        fontSize: "0.875rem",
+        fontWeight: 500,
+        color: "#b91c1c",
+        lineHeight: 1.45,
+    },
+    priceHighlight: {
+        margin: "0.35rem 0 0",
+        fontSize: "1.15rem",
+        fontWeight: 800,
+        color: "var(--text-main)",
+        letterSpacing: "-0.02em",
+        lineHeight: 1.25,
+    },
+    priceHighlightDon: {
+        margin: "0.35rem 0 0",
+        fontSize: "1.02rem",
+        fontWeight: 800,
+        color: "var(--text-main)",
+        lineHeight: 1.25,
     },
     pickupSpotCard: {
-        marginTop: "0.2rem",
-        borderRadius: "16px",
+        marginTop: "0.55rem",
+        borderRadius: "14px",
         background: "linear-gradient(160deg, rgba(16,185,129,0.12), rgba(35,59,61,0.03))",
-        padding: "0.75rem",
+        padding: "0.65rem",
     },
     pickupSpotLayout: {
         display: "grid",
-        gridTemplateColumns: "118px minmax(0, 1fr)",
-        gap: "0.75rem",
+        gridTemplateColumns: "minmax(0, 100px) minmax(0, 1fr)",
+        gap: "0.65rem",
         alignItems: "stretch",
     },
     pickupSpotImage: {
         width: "100%",
         height: "100%",
-        minHeight: "118px",
+        minHeight: "96px",
         objectFit: "cover",
         display: "block",
         background: "#EDF1F0",
-        borderRadius: "12px",
+        borderRadius: "10px",
     },
     pickupSpotBody: {
         display: "grid",
-        gap: "0.45rem",
+        gap: "0.35rem",
         alignContent: "center",
-    },
-    pickupSpotEyebrow: {
-        margin: 0,
-        fontSize: "0.72rem",
-        fontWeight: 800,
-        letterSpacing: "0.08em",
-        textTransform: "uppercase",
-        color: "#047857",
-    },
-    pickupSpotTitle: {
-        margin: 0,
-        fontSize: "1.15rem",
-        fontWeight: 800,
-        color: "var(--text-main)",
-        lineHeight: 1.25,
-    },
-    pickupSpotAddress: {
-        margin: 0,
-        color: "var(--text-muted)",
-        fontSize: "0.93rem",
-        lineHeight: 1.45,
-        display: "inline-flex",
-        alignItems: "flex-start",
-        gap: "0.45rem",
     },
     button: {
         border: "none",
@@ -218,7 +329,7 @@ const styles = {
     emptyCard: {
         borderRadius: "14px",
         border: "1px dashed rgba(35,59,61,0.2)",
-        padding: "0.8rem 0.9rem",
+        padding: "0.85rem 1rem",
         color: "var(--text-muted)",
         fontSize: "0.88rem",
         background: "rgba(255,255,255,0.7)",
@@ -231,6 +342,7 @@ const STATUS_LABEL = {
     assigned: "En attente du vendeur",
     deposit_code_sent: "En attente du vendeur",
     deposited: "Prêt à récupérer",
+    ready_for_pickup: "Prêt à récupérer",
     picked_up: "Récupéré",
     cancelled: "Annulé",
 };
@@ -241,14 +353,31 @@ const STATUS_STYLE = {
     assigned: { bg: "rgba(99,102,241,0.12)", color: "#4f46e5" },
     deposit_code_sent: { bg: "rgba(99,102,241,0.12)", color: "#4f46e5" },
     deposited: { bg: "rgba(16,185,129,0.16)", color: "#047857" },
-    picked_up: { bg: "rgba(35,59,61,0.14)", color: "#233B3D" },
+    ready_for_pickup: { bg: "rgba(16,185,129,0.16)", color: "#047857" },
+    picked_up: { bg: "rgb(229, 255, 188)", color: "var(--text-main)" },
     cancelled: { bg: "rgba(239,68,68,0.12)", color: "#ef4444" },
 };
 
-function formatDepositLocation(item) {
-    const point = item.depositPointName || "Point UC";
-    const container = item.containerName || "Box non assignee";
-    return `${point} · ${container}`;
+const STATUS_FILTER_TABS = [
+    { value: "all", label: "Tous" },
+    { value: "pending_payment", label: "Paiement" },
+    { value: "in_progress", label: "Chez le vendeur" },
+    { value: "ready", label: "À récupérer" },
+    { value: "picked_up", label: "Récupérées" },
+    { value: "cancelled", label: "Annulées" },
+];
+
+const BUCKET_SORT_ORDER = { pending_payment: 0, in_progress: 1, ready: 2, picked_up: 3, cancelled: 4 };
+
+function sortItemsForDisplay(list) {
+    return [...list].sort((a, b) => {
+        const da = BUCKET_SORT_ORDER[itemBucket(a)] ?? 9;
+        const db = BUCKET_SORT_ORDER[itemBucket(b)] ?? 9;
+        if (da !== db) return da - db;
+        const ta = new Date(a.reservedAt || a.reserved_at || 0).getTime();
+        const tb = new Date(b.reservedAt || b.reserved_at || 0).getTime();
+        return tb - ta;
+    });
 }
 
 function formatDepositAddress(item) {
@@ -272,14 +401,136 @@ function getPickupSpotPhoto(item) {
 }
 
 function formatDate(value) {
-    if (!value) return "Date non renseignee";
+    if (!value) return "—";
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "Date non renseignee";
+    if (Number.isNaN(date.getTime())) return "—";
     return date.toLocaleDateString("fr-FR", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
     });
+}
+
+function itemBucket(item) {
+    const s = item.workflowStatus;
+    const isDeposited = item.depositedAt || item.deposited_at || s === "deposited" || s === "ready_for_pickup";
+
+    if (s === "pending_payment") return "pending_payment";
+    if (s === "picked_up") return "picked_up";
+    if (s === "cancelled") return "cancelled";
+    if (isDeposited) return "ready";
+    return "in_progress";
+}
+
+function matchesSearch(item, q) {
+    if (!q.trim()) return true;
+    const n = q.toLowerCase().trim();
+    const hay = [
+        item.title,
+        item.transactionRef,
+        item.depositPointName,
+        item.containerName,
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+    return hay.includes(n);
+}
+
+function SellerRatingBlock({ item, busy, onSubmit }) {
+    const [hover, setHover] = useState(0);
+    const my = item.mySellerRating;
+    const [draft, setDraft] = useState(() => my || 0);
+
+    useEffect(() => {
+        setDraft(my || 0);
+        setHover(0);
+    }, [item.id, my]);
+
+    const avg = item.sellerRatingAvg;
+    const cnt = Number(item.sellerRatingCount) || 0;
+    const sellerLabel = (item.sellerName || "").trim() || "Vendeur";
+
+    const displayAvg =
+        avg != null && !Number.isNaN(Number(avg))
+            ? Number(avg).toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+            : null;
+
+    const effective = hover || draft || 0;
+    const unchanged = my != null && my > 0 && draft === my;
+
+    return (
+        <div style={styles.detailCard}>
+            <p style={styles.detailLabel}>Évaluation du vendeur</p>
+            <p style={styles.detailMuted}>
+                <span style={styles.detailMutedEm}>{sellerLabel}</span>
+                {displayAvg != null ? (
+                    <>
+                        {" "}
+                        — note moyenne sur les avis des professionnels :{" "}
+                        <strong style={{ color: "var(--text-main)" }}>{displayAvg} / 5</strong>
+                        {cnt > 0 ? ` (${cnt} avis)` : ""}
+                    </>
+                ) : (
+                    <> — pas encore d&apos;avis cumulés sur ce vendeur.</>
+                )}
+            </p>
+            <div
+                style={{ display: "flex", gap: "0.08rem", marginTop: "0.65rem", flexWrap: "wrap" }}
+                role="group"
+                aria-label="Attribuer une note sur 5"
+                onMouseLeave={() => setHover(0)}
+            >
+                {[1, 2, 3, 4, 5].map((n) => {
+                    const on = effective >= n;
+                    return (
+                        <button
+                            key={n}
+                            type="button"
+                            disabled={busy}
+                            onMouseEnter={() => setHover(n)}
+                            onClick={() => setDraft(n)}
+                            aria-pressed={draft === n}
+                            aria-label={`${n} étoile${n > 1 ? "s" : ""} sur 5`}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                padding: "0.2rem",
+                                cursor: busy ? "wait" : "pointer",
+                                lineHeight: 0,
+                                opacity: busy ? 0.55 : 1,
+                            }}
+                        >
+                            <Star
+                                size={26}
+                                aria-hidden
+                                fill={on ? "#ca8a04" : "none"}
+                                color={on ? "#ca8a04" : "rgba(35,59,61,0.28)"}
+                                strokeWidth={on ? 0 : 1.65}
+                            />
+                        </button>
+                    );
+                })}
+            </div>
+            <button
+                type="button"
+                disabled={busy || draft < 1 || unchanged}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (draft >= 1 && !unchanged) onSubmit(draft);
+                }}
+                style={{
+                    ...styles.button,
+                    marginTop: "0.75rem",
+                    background: "#2b4548",
+                    color: "#fff",
+                    opacity: busy || draft < 1 || unchanged ? 0.55 : 1,
+                }}
+            >
+                {busy ? "Envoi…" : my != null && my > 0 ? "Mettre à jour la note" : "Envoyer la note"}
+            </button>
+        </div>
+    );
 }
 
 export default function MyRecoveriesPage() {
@@ -293,6 +544,10 @@ export default function MyRecoveriesPage() {
     const [busyId, setBusyId] = useState(0);
     const [accessChecked, setAccessChecked] = useState(false);
     const [forbidden, setForbidden] = useState(false);
+    const [expandedId, setExpandedId] = useState(null);
+    const [listSearch, setListSearch] = useState("");
+    const [statusFilter, setStatusFilter] = useState("all");
+    const [sellerRatingBusyId, setSellerRatingBusyId] = useState(0);
 
     useEffect(() => {
         try {
@@ -320,8 +575,8 @@ export default function MyRecoveriesPage() {
         }
     }, [router, stripeState, stripeSessionId]);
 
-    const fetchReservations = async () => {
-        setLoading(true);
+    const fetchReservations = async (silent = false) => {
+        if (!silent) setLoading(true);
         setError("");
         try {
             const res = await fetch(apiUrl("/pro/my-reservations"), { headers: buildAuthHeaders() });
@@ -333,7 +588,7 @@ export default function MyRecoveriesPage() {
         } catch (err) {
             setError(err.message || "Erreur inattendue");
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     };
 
@@ -350,8 +605,6 @@ export default function MyRecoveriesPage() {
         const confirmStripeSession = async () => {
             if (stripeState !== "success" || !stripeSessionId) return;
 
-            // Si la session Stripe correspond a un paiement d'evenement,
-            // on redirige tout de suite vers la page evenement particulier.
             try {
                 const eventRes = await fetch(apiUrl(`/events/confirm-payment?session_id=${encodeURIComponent(stripeSessionId)}`), {
                     method: "GET",
@@ -385,7 +638,7 @@ export default function MyRecoveriesPage() {
             }
 
             if (!cancelled) {
-                fetchReservations();
+                fetchReservations(true);
             }
         };
 
@@ -396,37 +649,60 @@ export default function MyRecoveriesPage() {
         };
     }, [stripeState, stripeSessionId, router]);
 
+    const filteredItems = useMemo(() => {
+        return items.filter((it) => matchesSearch(it, listSearch));
+    }, [items, listSearch]);
+
     const grouped = useMemo(() => {
         const groups = { pending_payment: [], in_progress: [], ready: [], picked_up: [], cancelled: [] };
-        for (const item of items) {
-            const s = item.workflowStatus;
-            const isDeposited = item.depositedAt || item.deposited_at || s === 'deposited';
-            
-            if (s === 'pending_payment') {
-                groups.pending_payment.push(item);
-            } else if (s === 'picked_up') {
-                groups.picked_up.push(item);
-            } else if (s === 'cancelled') {
-                groups.cancelled.push(item);
-            } else if (isDeposited) {
-                groups.ready.push(item);
-            } else {
-                groups.in_progress.push(item);
-            }
+        for (const item of filteredItems) {
+            const b = itemBucket(item);
+            if (b === "pending_payment") groups.pending_payment.push(item);
+            else if (b === "picked_up") groups.picked_up.push(item);
+            else if (b === "cancelled") groups.cancelled.push(item);
+            else if (b === "ready") groups.ready.push(item);
+            else groups.in_progress.push(item);
         }
         return groups;
-    }, [items]);
+    }, [filteredItems]);
 
-    if (!accessChecked || forbidden) {
-        return <div style={{ padding: "2rem 0", color: "var(--text-muted)", fontSize: "0.9rem" }}>Redirection...</div>;
-    }
+    const displayedItems = useMemo(() => {
+        if (statusFilter === "all") return sortItemsForDisplay(filteredItems);
+        const slice = grouped[statusFilter] || [];
+        return sortItemsForDisplay(slice);
+    }, [filteredItems, grouped, statusFilter]);
 
-    const paymentNotice =
-        stripeState === "success"
-            ? { text: "Paiement confirmé. Vérification en cours du statut de réservation.", tone: "success" }
-            : stripeState === "cancel"
-                ? { text: "Paiement annulé. Vous pouvez relancer le checkout quand vous voulez.", tone: "warning" }
-                : null;
+    const tabCounts = useMemo(() => {
+        return {
+            all: filteredItems.length,
+            pending_payment: grouped.pending_payment.length,
+            in_progress: grouped.in_progress.length,
+            ready: grouped.ready.length,
+            picked_up: grouped.picked_up.length,
+            cancelled: grouped.cancelled.length,
+        };
+    }, [filteredItems, grouped]);
+
+    const submitSellerRating = async (itemId, stars) => {
+        setSellerRatingBusyId(itemId);
+        setError("");
+        try {
+            const res = await fetch(apiUrl(`/pro/items/${itemId}/rate-seller`), {
+                method: "POST",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ stars }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || "Impossible d'enregistrer la note");
+            }
+            await fetchReservations(true);
+        } catch (err) {
+            setError(err.message || "Erreur inattendue");
+        } finally {
+            setSellerRatingBusyId(0);
+        }
+    };
 
     const payNow = async (itemId) => {
         setBusyId(itemId);
@@ -449,121 +725,314 @@ export default function MyRecoveriesPage() {
         }
     };
 
+    const toggleExpand = (id) => {
+        setExpandedId((prev) => (prev === id ? null : id));
+    };
+
     const renderEmpty = (text) => <div style={styles.emptyCard}>{text}</div>;
 
-    const renderCard = (item) => {
-        const cardImage = item.image || (Array.isArray(item.photos) && item.photos[0]) || "/img/recyclage-materiau.jpg";
+    const renderDetailBlock = (item) => {
         const pickupSpotPhoto = getPickupSpotPhoto(item);
         const pickupSpotName = item.depositPointName || "Point à assigner";
         const pickupSpotAddress = formatDepositAddress(item);
-        const isDeposited = item.depositedAt || item.deposited_at || item.workflowStatus === 'deposited';
+        const isDeposited =
+            item.depositedAt || item.deposited_at || item.workflowStatus === "deposited" || item.workflowStatus === "ready_for_pickup";
+        const pointName = (item.depositPointName || "").trim() || "À confirmer";
+        const boxName = (item.containerName || "").trim() || "Non assignée";
 
         return (
-        <article key={item.id} style={styles.card}>
-            <div style={styles.cardMain}>
-                <div style={styles.cardImageWrap}>
-                    <img
-                        src={cardImage}
-                        alt={item.title || "Objet réservé"}
-                        style={styles.cardImage}
-                        onError={(e) => {
-                            e.currentTarget.src = "/img/recyclage-materiau.jpg";
-                        }}
-                    />
-                </div>
-                <div>
-                    <div style={styles.row}>
-                        <h3 style={styles.titleRow}>{item.title}</h3>
-                        <span
+            <div style={styles.detailPanel}>
+                <div style={styles.detailStack}>
+                    <div style={styles.detailCard}>
+                        <p style={styles.detailLabel}>Lieu de retrait prévu</p>
+                        <div style={styles.detailRow}>
+                            <MapPin size={18} style={styles.detailIcon} aria-hidden />
+                            <div style={{ minWidth: 0 }}>
+                                <p style={styles.detailPrimary}>{pointName}</p>
+                                <p style={styles.detailMuted}>
+                                    Conteneur / box : <span style={styles.detailMutedEm}>{boxName}</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={styles.detailCard}>
+                        <p style={styles.detailLabel}>Réservation</p>
+                        <div style={styles.detailRow}>
+                            <CalendarClock size={18} style={styles.detailIcon} aria-hidden />
+                            <div style={{ minWidth: 0 }}>
+                                <p style={styles.detailPrimary}>{formatDate(item.reservedAt || item.reserved_at)}</p>
+                                <p style={styles.detailMuted}>Date à laquelle vous avez réservé cet objet.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {item.transactionRef ? (
+                        <div style={styles.detailCard}>
+                            <p style={styles.detailLabel}>Référence de transaction</p>
+                            <p style={styles.detailMono}>{item.transactionRef}</p>
+                            <p style={styles.detailMuted}>À conserver pour vos échanges avec le support ou le point de dépôt.</p>
+                        </div>
+                    ) : null}
+
+                    <div style={styles.detailCard}>
+                        <p style={styles.detailLabel}>Montant</p>
+                        {item.type === "vente" ? (
+                            <>
+                                <p style={styles.priceHighlight}>{formatBuyerCardPrice(item)}</p>
+                                <p style={styles.detailMuted}>Commission plateforme incluse.</p>
+                            </>
+                        ) : (
+                            <>
+                                <p style={styles.priceHighlightDon}>Don</p>
+                                <p style={styles.detailMuted}>Aucun paiement pour cet objet.</p>
+                            </>
+                        )}
+                    </div>
+
+                    {item.workflowStatus === "picked_up" ? (
+                        <SellerRatingBlock
+                            item={item}
+                            busy={sellerRatingBusyId === item.id}
+                            onSubmit={(stars) => submitSellerRating(item.id, stars)}
+                        />
+                    ) : null}
+
+                    {isDeposited && item.workflowStatus !== "picked_up" && (
+                        <div style={styles.detailCard}>
+                            <p style={styles.detailLabel}>Code de récupération</p>
+                            {item.pickupCode ? (
+                                <DepositCodeQrPanel
+                                    code={item.pickupCode}
+                                    purpose="pickup"
+                                    variant="light"
+                                    qrSize={176}
+                                    expiresText={(() => {
+                                        const raw = item.pickupCodeExpiresAt || item.pickup_code_expires_at;
+                                        if (!raw) return undefined;
+                                        const d = formatDate(raw);
+                                        return d === "—" ? undefined : `Expire le : ${d}`;
+                                    })()}
+                                />
+                            ) : (
+                                <p style={{ ...styles.detailPrimary, marginTop: "0.05rem" }}>—</p>
+                            )}
+                            <p style={{ ...styles.detailMuted, marginTop: "0.65rem" }}>À communiquer ou à présenter au moment du retrait.</p>
+                            <div style={{ ...styles.pickupSpotCard, marginTop: "0.75rem" }}>
+                                <div style={styles.pickupSpotLayout}>
+                                    <img
+                                        src={pickupSpotPhoto}
+                                        alt={`Lieu de récupération : ${pickupSpotName}`}
+                                        style={styles.pickupSpotImage}
+                                        onError={(e) => {
+                                            e.currentTarget.src = "/img/recyclage-materiau.jpg";
+                                        }}
+                                    />
+                                    <div style={styles.pickupSpotBody}>
+                                        <p style={{ ...styles.detailLabel, color: "#047857", margin: "0 0 0.35rem 0" }}>Adresse du point</p>
+                                        <p style={styles.detailPrimary}>{pickupSpotName}</p>
+                                        <p style={styles.detailMutedRow}>
+                                            <MapPin size={14} style={{ ...styles.detailIcon, marginTop: "0.05rem" }} aria-hidden />
+                                            <span>{pickupSpotAddress}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {item.workflowStatus === "pending_payment" && (
+                        <div style={{ ...styles.detailCard, borderStyle: "dashed", background: "rgba(43,69,72,0.04)" }}>
+                            <p style={styles.detailLabel}>Paiement</p>
+                            <p style={{ ...styles.detailMuted, ...styles.detailMutedFlush }}>
+                                Finalisez le paiement pour que le vendeur puisse préparer le dépôt.
+                            </p>
+                            <button
+                                type="button"
+                                disabled={busyId === item.id}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    payNow(item.id);
+                                }}
+                                style={{ ...styles.button, marginTop: "0.75rem", background: "#2b4548", color: "#fff", opacity: busyId === item.id ? 0.7 : 1 }}
+                                className="pay-btn"
+                            >
+                                <CreditCard size={14} /> {busyId === item.id ? "Paiement..." : "Payer avec Stripe"}
+                            </button>
+                        </div>
+                    )}
+
+                    {item.workflowStatus === "cancelled" && item.cancelReason && (
+                        <div
                             style={{
-                                ...styles.badge,
-                                background: STATUS_STYLE[item.workflowStatus]?.bg || "rgba(35,59,61,0.12)",
-                                color: STATUS_STYLE[item.workflowStatus]?.color || "#233B3D",
+                                ...styles.detailCard,
+                                background: "#fef2f2",
+                                borderColor: "#fecaca",
                             }}
                         >
-                            {STATUS_LABEL[item.workflowStatus] || item.workflowStatus}
-                        </span>
-                    </div>
-                    <p style={styles.line}><MapPin size={14} /> {formatDepositLocation(item)}</p>
+                            <p style={{ ...styles.detailLabel, color: "#991b1b" }}>Annulation</p>
+                            <p style={styles.detailErrorText}>{item.cancelReason}</p>
+                        </div>
+                    )}
                 </div>
             </div>
-            <p style={styles.line}><CalendarClock size={14} /> Reserve le {formatDate(item.reservedAt || item.reserved_at)}</p>
-            {item.transactionRef && (
-                <p style={styles.transactionLine}>
-                    <span style={styles.transactionTag}>Transaction</span>
-                    <span>{item.transactionRef}</span>
-                </p>
-            )}
-            <p style={styles.priceRow(item.type === "vente")}>
-                <span style={styles.priceDot(item.type === "vente")} />
-                {item.type === "vente" ? (
-                    <>
-                        <span>Vente</span>
-                        <span style={styles.priceValue}>{Number(item.price || 0).toFixed(2)} EUR</span>
-                    </>
-                ) : (
-                    <span style={styles.priceValue}>Don</span>
-                )}
-            </p>
-            {isDeposited && item.workflowStatus !== "picked_up" && (
-                <>
-                    <p style={styles.pickupCode}><PackageCheck size={15} /> Code de récupération: {item.pickupCode || "-"}</p>
-                    <div style={styles.pickupSpotCard}>
-                        <div style={styles.pickupSpotLayout}>
+        );
+    };
+
+    const renderRecoveryRow = (item, index, total) => {
+        const cardImage = item.image || (Array.isArray(item.photos) && item.photos[0]) || "/img/recyclage-materiau.jpg";
+        const expanded = expandedId === item.id;
+        const st = STATUS_STYLE[item.workflowStatus] || { bg: "rgba(35,59,61,0.12)", color: "#233B3D" };
+        return (
+            <div key={item.id}>
+                <button
+                    type="button"
+                    style={{
+                        ...styles.row,
+                        ...(index === total - 1 && !expanded ? styles.rowLast : {}),
+                    }}
+                    onClick={() => toggleExpand(item.id)}
+                    aria-expanded={expanded}
+                >
+                    <div style={styles.rowImgWrap}>
+                        {previewLooksLikeVideo(cardImage) ? (
+                            <video
+                                src={cardImage}
+                                muted
+                                playsInline
+                                preload="metadata"
+                                style={styles.rowImg}
+                                aria-hidden
+                            />
+                        ) : (
                             <img
-                                src={pickupSpotPhoto}
-                                alt={`Lieu de récupération: ${pickupSpotName}`}
-                                style={styles.pickupSpotImage}
+                                src={cardImage}
+                                alt=""
+                                style={styles.rowImg}
                                 onError={(e) => {
                                     e.currentTarget.src = "/img/recyclage-materiau.jpg";
                                 }}
                             />
-                            <div style={styles.pickupSpotBody}>
-                                <p style={styles.pickupSpotEyebrow}>Lieu de récupération</p>
-                                <p style={styles.pickupSpotTitle}>{formatDepositLocation(item)}</p>
-                                <p style={styles.pickupSpotAddress}><MapPin size={15} /> {pickupSpotAddress}</p>
-                            </div>
-                        </div>
+                        )}
                     </div>
-                </>
-            )}
-            {item.workflowStatus === "pending_payment" && (
-                <button
-                    type="button"
-                    disabled={busyId === item.id}
-                    onClick={() => payNow(item.id)}
-                    style={{ ...styles.button, background: "#2b4548", color: "#fff", opacity: busyId === item.id ? 0.7 : 1 }}
-                    className="pay-btn"
-                >
-                    <CreditCard size={14} /> {busyId === item.id ? "Paiement..." : "Payer avec Stripe"}
+                    <div style={{ minWidth: 0 }}>
+                        <h3 style={styles.rowTitle}>{item.title || "Sans titre"}</h3>
+                        <p style={styles.rowMeta}>
+                            <CalendarClock size={12} />
+                            {formatDate(item.reservedAt || item.reserved_at)}
+                            {item.transactionRef ? (
+                                <>
+                                    <span aria-hidden>·</span>
+                                    <span style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>{item.transactionRef}</span>
+                                </>
+                            ) : null}
+                        </p>
+                    </div>
+                    <span style={{ ...styles.badge, background: st.bg, color: st.color }} title={STATUS_LABEL[item.workflowStatus] || item.workflowStatus}>
+                        {(STATUS_LABEL[item.workflowStatus] || item.workflowStatus).replace(/^En attente du vendeur$/, "Chez vendeur")}
+                    </span>
+                    <div style={styles.rowRight}>
+                        <span style={styles.pricePill}>{item.type === "vente" ? formatBuyerCardPrice(item) : "Don"}</span>
+                        <span style={styles.expandHint}>
+                            {expanded ? (
+                                <>
+                                    Masquer <ChevronUp size={14} />
+                                </>
+                            ) : (
+                                <>
+                                    Détails <ChevronDown size={14} />
+                                </>
+                            )}
+                        </span>
+                    </div>
                 </button>
-            )}
-            {item.workflowStatus === "cancelled" && item.cancelReason && (
-                <div style={{ marginTop: '0.4rem', padding: '0.6rem', borderRadius: '12px', background: '#fef2f2', border: '1px solid #fee2e2' }}>
-                    <p style={{ margin: 0, fontSize: '0.8rem', color: '#991b1b', fontWeight: 700 }}>Motif d'annulation :</p>
-                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#b91c1c' }}>{item.cancelReason}</p>
-                </div>
-            )}
-        </article>
-    );
+                {expanded ? renderDetailBlock(item) : null}
+            </div>
+        );
     };
+
+    const emptyMessageForFilter = () => {
+        if (items.length === 0) return "Vous n'avez aucune réservation pour le moment.";
+        if (filteredItems.length === 0) return "Aucun résultat pour cette recherche.";
+        const tab = STATUS_FILTER_TABS.find((t) => t.value === statusFilter);
+        return `Aucune réservation dans « ${tab?.label || statusFilter} » pour cette recherche.`;
+    };
+
+    if (!accessChecked || forbidden) {
+        return <div style={{ padding: "2rem 0", color: "var(--text-muted)", fontSize: "0.9rem" }}>Redirection...</div>;
+    }
+
+    const paymentNotice =
+        stripeState === "success"
+            ? { text: "Paiement confirmé. Vérification en cours du statut de réservation.", tone: "success" }
+            : stripeState === "cancel"
+              ? { text: "Paiement annulé. Vous pouvez relancer le checkout quand vous voulez.", tone: "warning" }
+              : null;
 
     if (loading) return <div style={styles.wrapper}>Chargement...</div>;
 
+    const listTitle =
+        statusFilter === "all"
+            ? "Toutes les réservations"
+            : (STATUS_FILTER_TABS.find((t) => t.value === statusFilter)?.label ?? "Liste");
+
     return (
         <div style={styles.wrapper}>
-            <div className="header-section" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+            <div className="header-section" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", position: "static" }}>
                 <div className="title-area">
                     <span className="activities-label">Administration</span>
                     <h1>Mes récupérations</h1>
-                    <p style={styles.subtitle}>Suivez vos réservations, paiements et codes de récupération.</p>
                 </div>
             </div>
 
             <div className="panel">
-                <div className="section-header" style={{ marginBottom: "1.1rem" }}>
+                <div className="section-header" style={{ marginBottom: "1rem" }}>
                     <span className="section-title">Suivi professionnel</span>
-                    <span className="db-badge">{items.length} récupération{items.length > 1 ? "s" : ""}</span>
+                    <span
+                        className="db-badge"
+                        style={{
+                            background: "rgb(229, 255, 188)",
+                            color: "var(--text-main)",
+                        }}
+                    >
+                        {items.length} réservation{items.length > 1 ? "s" : ""}
+                        {listSearch.trim() ? ` · ${filteredItems.length} affichée(s)` : ""}
+                    </span>
+                </div>
+
+                <div style={styles.toolbar}>
+                    <div style={styles.searchWrap}>
+                        <input
+                            type="text"
+                            placeholder="Rechercher (titre, transaction, point…)"
+                            value={listSearch}
+                            onChange={(e) => setListSearch(e.target.value)}
+                            style={styles.searchInput}
+                            aria-label="Filtrer la liste"
+                        />
+                    </div>
+                    <div style={styles.filterBar} role="tablist" aria-label="Filtrer par statut">
+                        {STATUS_FILTER_TABS.map((tab) => {
+                            const active = statusFilter === tab.value;
+                            const count = tabCounts[tab.value] ?? 0;
+                            return (
+                                <button
+                                    key={tab.value}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={active}
+                                    onClick={() => {
+                                        setStatusFilter(tab.value);
+                                        setExpandedId(null);
+                                    }}
+                                    style={styles.filterChip(active)}
+                                >
+                                    {tab.label}
+                                    <span style={styles.filterChipCount}>({count})</span>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
 
                 {paymentNotice && (
@@ -585,51 +1054,17 @@ export default function MyRecoveriesPage() {
                     </div>
                 )}
 
-                <section style={styles.section}>
-                    <div className="section-header" style={styles.sectionHeader}>
-                        <span className="section-title">En attente de paiement</span>
-                        <span style={styles.sectionCount}>{grouped.pending_payment.length} item(s)</span>
+                <p style={styles.listHeading}>
+                    {listTitle} — {displayedItems.length} affichée{displayedItems.length > 1 ? "s" : ""}
+                </p>
+
+                {displayedItems.length === 0 ? (
+                    renderEmpty(emptyMessageForFilter())
+                ) : (
+                    <div style={styles.listPanel}>
+                        {displayedItems.map((item, idx) => renderRecoveryRow(item, idx, displayedItems.length))}
                     </div>
-                    <div style={styles.list}>
-                        {grouped.pending_payment.length ? grouped.pending_payment.map(renderCard) : renderEmpty("Aucun paiement en attente.")}
-                    </div>
-                </section>
-                <section style={styles.section}>
-                    <div className="section-header" style={styles.sectionHeader}>
-                        <span className="section-title">En attente de dépôt par le vendeur</span>
-                        <span style={styles.sectionCount}>{grouped.in_progress.length} item(s)</span>
-                    </div>
-                    <div style={styles.list}>
-                        {grouped.in_progress.length ? grouped.in_progress.map(renderCard) : renderEmpty("Aucun objet en attente de dépôt.")}
-                    </div>
-                </section>
-                <section style={styles.section}>
-                    <div className="section-header" style={styles.sectionHeader}>
-                        <span className="section-title">Prêtes à récupérer</span>
-                        <span style={styles.sectionCount}>{grouped.ready.length} item(s)</span>
-                    </div>
-                    <div style={styles.list}>
-                        {grouped.ready.length ? grouped.ready.map(renderCard) : renderEmpty("Aucun objet prêt à récupérer pour le moment.")}
-                    </div>
-                </section>
-                <section style={styles.section}>
-                    <div className="section-header" style={styles.sectionHeader}>
-                        <span className="section-title">Récupérées</span>
-                        <span style={styles.sectionCount}>{grouped.picked_up.length} item(s)</span>
-                    </div>
-                    <div style={styles.list}>
-                        {grouped.picked_up.length ? grouped.picked_up.map(renderCard) : renderEmpty("Aucun historique de récupération pour l'instant.")}
-                    </div>
-                </section>
-                <section style={styles.section}>
-                    <div className="section-header" style={styles.sectionHeader}>
-                        <span className="section-title" style={{ color: '#ef4444' }}>Annulées</span>
-                        <span style={styles.sectionCount}>{grouped.cancelled.length} item(s)</span>
-                    </div>
-                    <div style={styles.list}>
-                        {grouped.cancelled.length ? grouped.cancelled.map(renderCard) : null}
-                    </div>
-                </section>
+                )}
             </div>
 
             <style jsx>{`
@@ -637,8 +1072,14 @@ export default function MyRecoveriesPage() {
                     background: #35585b !important;
                 }
                 @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(8px); }
-                    to { opacity: 1; transform: translateY(0); }
+                    from {
+                        opacity: 0;
+                        transform: translateY(8px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
                 }
             `}</style>
         </div>

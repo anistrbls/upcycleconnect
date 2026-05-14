@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"upcycleconnect/api/projects"
 )
 
 // Handler regroupe les handlers HTTP du module users.
@@ -351,6 +352,26 @@ func (h *Handler) GetProfileHandler(w http.ResponseWriter, userID int64) {
 		}
 		writeError(w, http.StatusInternalServerError, "could not fetch profile")
 		return
+	}
+	if u.Role == RoleProfessionnel {
+		prepo := projects.NewRepository(h.repo.DB())
+		score, err := prepo.GetProUCConnectScore(userID)
+		if err != nil {
+			log.Printf("GetProUCConnectScore: %v", err)
+			z := 0.0
+			u.UpcycleConnectScore = &z
+		} else {
+			u.UpcycleConnectScore = &score
+		}
+	}
+	if u.Role == RoleParticulier || u.Role == RoleProfessionnel {
+		avg, cnt, err := h.repo.GetSellerRatingAggregate(userID)
+		if err != nil {
+			log.Printf("GetSellerRatingAggregate: %v", err)
+		} else {
+			u.SellerRatingAvg = avg
+			u.SellerRatingCount = cnt
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"user": u})
 }

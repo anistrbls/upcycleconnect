@@ -50,16 +50,17 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		}))
 	}
 
-	// Middleware particulier uniquement
-	particulierOnly := func(next http.HandlerFunc) http.Handler {
+	// Catalogue public des projets publiés : particuliers et professionnels (likes, favoris, etc.)
+	particulierOrPro := func(next http.HandlerFunc) http.Handler {
 		return authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
 			if !ok {
 				writeError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-			if claims["role"] != "particulier" {
-				writeError(w, http.StatusForbidden, "accès réservé aux particuliers")
+			role, _ := claims["role"].(string)
+			if role != "particulier" && role != "professionnel" {
+				writeError(w, http.StatusForbidden, "accès réservé aux particuliers et professionnels")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -116,6 +117,12 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 
+		// GET /api/pro/projects/{id}/likes
+		if strings.HasSuffix(path, "/likes") && r.Method == http.MethodGet {
+			h.ListProjectLikersHandler(w, r)
+			return
+		}
+
 		// GET /api/pro/projects/{id}
 		// PUT /api/pro/projects/{id}
 		// DELETE /api/pro/projects/{id}
@@ -144,16 +151,16 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	}))
 
 	// GET /api/part/projects — liste des projets publiés et validés
-	mux.Handle("GET /api/part/projects", particulierOnly(h.ParticulierListPostedHandler))
+	mux.Handle("GET /api/part/projects", particulierOrPro(h.ParticulierListPostedHandler))
 
 	// GET /api/part/projects/favorites — liste des projets favoris
-	mux.Handle("GET /api/part/projects/favorites", particulierOnly(h.FavoritesHandler))
+	mux.Handle("GET /api/part/projects/favorites", particulierOrPro(h.FavoritesHandler))
 
 	// GET /api/mes-projets — projets auxquels l'utilisateur a participé
-	mux.Handle("GET /api/mes-projets", particulierOnly(h.ParticulierListParticipatedHandler))
+	mux.Handle("GET /api/mes-projets", particulierOrPro(h.ParticulierListParticipatedHandler))
 
-	// Routes avec ID de projet pour Particulier
-	mux.Handle("/api/part/projects/", particulierOnly(func(w http.ResponseWriter, r *http.Request) {
+	// Routes avec ID de projet pour Particulier / Pro (détail, like, bookmark)
+	mux.Handle("/api/part/projects/", particulierOrPro(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
 		// POST /api/part/projects/{id}/like

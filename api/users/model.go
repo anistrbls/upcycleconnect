@@ -70,6 +70,13 @@ type User struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 	LastLoginAt *time.Time `json:"lastLoginAt"`
+
+	// Score UC Connect (professionnel) : objets récupérés utilisés dans des projets publiés et validés
+	UpcycleConnectScore *float64 `json:"upcycleConnectScore,omitempty"`
+
+	// Note moyenne reçue en tant que vendeur (déposant), agrégée sur les avis des professionnels (pro_seller_ratings).
+	SellerRatingAvg   *float64 `json:"sellerRatingAvg,omitempty"`
+	SellerRatingCount int64    `json:"sellerRatingCount"`
 }
 
 // CreatePayload contient les champs acceptés lors de la création d'un utilisateur par l'admin.

@@ -38,7 +38,7 @@ var jwtExpiration time.Duration
 
 func main() {
 	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable client_encoding=UTF8",
 		getEnv("POSTGRES_HOST", "localhost"),
 		getEnv("POSTGRES_PORT", "5432"),
 		getEnv("POSTGRES_USER", "admin"),
@@ -133,6 +133,10 @@ func main() {
 		serviceByIDHandler(w, r)
 	})))
 	mux.Handle("/api/admin/finances/payments", authMiddleware(http.HandlerFunc(adminFinancesPaymentsHandler)))
+	mux.Handle("/api/finances/my-payments", authMiddleware(http.HandlerFunc(myFinancesPaymentsHandler)))
+	mux.Handle("/api/admin/event-refund-requests", authMiddleware(http.HandlerFunc(adminEventRefundRequestsHandler)))
+	mux.Handle("/api/admin/event-registrations/", authMiddleware(http.HandlerFunc(adminEventRegistrationRefundRoutes)))
+	mux.Handle("/api/admin/finances/sale-commission", authMiddleware(http.HandlerFunc(adminSaleCommissionHandler)))
 	mux.Handle("/api/admin/offers/overview", authMiddleware(http.HandlerFunc(offersOverviewHandler)))
 	mux.Handle("/api/admin/events", authMiddleware(http.HandlerFunc(eventsHandler)))
 	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -408,6 +412,36 @@ func initAuth() error {
 	return nil
 }
 
+// utf8ContentTypeWriter ajoute charset=utf-8 aux réponses JSON/texte pour que navigateurs
+// et intermédiaires interprètent correctement accents et emojis.
+type utf8ContentTypeWriter struct {
+	http.ResponseWriter
+}
+
+func (w *utf8ContentTypeWriter) normalizeContentType() {
+	ct := w.Header().Get("Content-Type")
+	if ct == "" {
+		return
+	}
+	base := strings.TrimSpace(strings.Split(strings.ToLower(ct), ";")[0])
+	switch base {
+	case "application/json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	case "text/plain":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
+}
+
+func (w *utf8ContentTypeWriter) WriteHeader(code int) {
+	w.normalizeContentType()
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *utf8ContentTypeWriter) Write(b []byte) (int, error) {
+	w.normalizeContentType()
+	return w.ResponseWriter.Write(b)
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -419,7 +453,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(&utf8ContentTypeWriter{ResponseWriter: w}, r)
 	})
 }
 
@@ -1256,6 +1290,7 @@ func ensureEventsSchema() error {
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS cancelled_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS refund_request_reason TEXT NOT NULL DEFAULT ''`,
 		`DO $$ BEGIN
 			IF NOT EXISTS (
 				SELECT 1 FROM pg_constraint WHERE conname = 'events_validation_status_check'
@@ -1460,13 +1495,15 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 		row := db.QueryRow(`
 			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at,
-			       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref
+			       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref,
+			       er.payment_status AS reg_payment_status
 			FROM events e
 			LEFT JOIN event_registrations er ON e.id = er.event_id AND er.user_id = $2
 			WHERE e.id = $1
 		`, id, userID)
 
 		var transactionRef sql.NullString
+		var regPaymentStatus sql.NullString
 		var idVal int64
 		var name, description, typeName, lieu, status, intervenant, validationStatus, rejectionComment, imageUrl, pricingType string
 		var dateDebut, dateFin, createdAt, updatedAt time.Time
@@ -1475,7 +1512,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		var price float64
 		var participantCount int64
 
-		err := row.Scan(&idVal, &name, &description, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt, &transactionRef)
+		err := row.Scan(&idVal, &name, &description, &typeName, &dateDebut, &dateFin, &lieu, &capacite, &status, &intervenant, &intervenantID, &validationStatus, &rejectionComment, &imageUrl, &pricingType, &price, &participantCount, &createdAt, &updatedAt, &transactionRef, &regPaymentStatus)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "event not found")
@@ -1510,6 +1547,9 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if transactionRef.Valid {
 			item["transactionRef"] = transactionRef.String
+		}
+		if regPaymentStatus.Valid {
+			item["paymentStatus"] = regPaymentStatus.String
 		}
 		if capacite.Valid {
 			item["capacite"] = capacite.Int64
@@ -2040,26 +2080,27 @@ func adminEventCancelHandler(w http.ResponseWriter, r *http.Request) {
 	cfg, _ := items.GetStripeConfigPublic()
 
 	refundsCount := 0
-	for _, r := range regs {
-		db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'admin' WHERE event_id = $1 AND user_id = $2`, id, r.UserID)
+	for _, reg := range regs {
+		db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'admin' WHERE event_id = $1 AND user_id = $2`, id, reg.UserID)
 
-		if r.PStatus == "paid" && r.SessionID != "" && cfg != nil {
-			pi, err := items.GetStripePaymentIntentFromSessionPublic(cfg, r.SessionID)
+		if reg.PStatus == "paid" && reg.SessionID != "" && cfg != nil {
+			pi, err := items.GetStripePaymentIntentFromSessionPublic(cfg, reg.SessionID)
 			if err == nil && pi != "" {
-				refundID, refundErr := items.RefundStripePaymentIntentPublic(cfg, pi)
+				refundOpts, recordEUR := items.NewEventRefundStripeParams("admin-cancel", id, reg.UserID, pi, ePrice, nil)
+				refundID, refundErr := items.RefundStripePaymentIntentPublic(r.Context(), cfg, pi, refundOpts)
 				if refundErr == nil {
-					db.Exec(`UPDATE event_registrations SET refund_status = 'refunded', stripe_refund_id = $1, refund_amount = $2 WHERE event_id = $3 AND user_id = $4`, refundID, ePrice, id, r.UserID)
+					db.Exec(`UPDATE event_registrations SET refund_status = 'refunded', stripe_refund_id = $1, refund_amount = $2 WHERE event_id = $3 AND user_id = $4`, refundID, recordEUR, id, reg.UserID)
 					refundsCount++
 				} else {
-					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, refundErr.Error(), id, r.UserID)
+					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, refundErr.Error(), id, reg.UserID)
 				}
 			} else {
 				if err != nil {
-					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, err.Error(), id, r.UserID)
+					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, err.Error(), id, reg.UserID)
 				}
 			}
-		} else if r.PStatus == "paid" {
-			db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = 'missing stripe configuration or session id' WHERE event_id = $1 AND user_id = $2`, id, r.UserID)
+		} else if reg.PStatus == "paid" {
+			db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = 'missing stripe configuration or session id' WHERE event_id = $1 AND user_id = $2`, id, reg.UserID)
 		}
 	}
 
@@ -2172,27 +2213,42 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"registered": true})
 
 	case http.MethodDelete:
-		var paymentStatus, sessionID string
+		var paymentStatus, sessionID, currentStatus, refundStatus string
 		var eventStart time.Time
+		var eventEnd sql.NullTime
 		var eventPrice float64
-		var currentStatus string
 		err = db.QueryRow(`
-			SELECT er.payment_status, er.stripe_session_id, er.status, e.date_debut, e.price
+			SELECT er.payment_status, er.stripe_session_id, er.status, er.refund_status, e.date_debut, e.date_fin, e.price
 			FROM event_registrations er
 			JOIN events e ON e.id = er.event_id
 			WHERE er.event_id = $1 AND er.user_id = $2
-		`, id, userID).Scan(&paymentStatus, &sessionID, &currentStatus, &eventStart, &eventPrice)
+		`, id, userID).Scan(&paymentStatus, &sessionID, &currentStatus, &refundStatus, &eventStart, &eventEnd, &eventPrice)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "registration not found")
 			return
 		}
 
-		if eventStart.Before(time.Now()) {
-			writeError(w, http.StatusBadRequest, "cet événement est déjà passé")
+		now := time.Now()
+		eventEndTime := eventStart
+		if eventEnd.Valid {
+			eventEndTime = eventEnd.Time
+		}
+		eventPassed := now.After(eventEndTime)
+
+		regActive := strings.EqualFold(strings.TrimSpace(currentStatus), "active")
+		refundRequested := strings.TrimSpace(refundStatus) == "requested"
+
+		// Demande déjà enregistrée (réponse idempotente : double clic, rafraîchissement, course entre requêtes)
+		if paymentStatus == "paid" && eventPassed && refundRequested {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"unregistered":     true,
+				"refundRequested":  true,
+				"alreadySubmitted": true,
+			})
 			return
 		}
 
-		if currentStatus != "active" {
+		if !regActive {
 			writeError(w, http.StatusBadRequest, "registration is already cancelled")
 			return
 		}
@@ -2204,8 +2260,60 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		now := time.Now().UTC()
-		diff := eventStart.Sub(now)
+		if paymentStatus == "paid" && eventPassed {
+			type refundReasonBody struct {
+				Reason string `json:"reason"`
+			}
+			var body refundReasonBody
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			reason := strings.TrimSpace(body.Reason)
+			if reason == "" {
+				writeError(w, http.StatusBadRequest, "le motif du remboursement est obligatoire")
+				return
+			}
+			if len(reason) > 4000 {
+				reason = reason[:4000]
+			}
+			resExec, err := db.Exec(`
+				UPDATE event_registrations SET
+					status = 'cancelled',
+					cancelled_at = NOW(),
+					cancelled_by = 'user',
+					refund_status = 'requested',
+					refund_request_reason = $1
+				WHERE event_id = $2 AND user_id = $3 AND LOWER(TRIM(status)) = 'active'
+			`, reason, id, userID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "database error")
+				return
+			}
+			n, _ := resExec.RowsAffected()
+			if n == 0 {
+				var rs string
+				_ = db.QueryRow(`SELECT refund_status FROM event_registrations WHERE event_id = $1 AND user_id = $2`, id, userID).Scan(&rs)
+				if strings.TrimSpace(rs) == "requested" {
+					writeJSON(w, http.StatusOK, map[string]interface{}{
+						"unregistered":     true,
+						"refundRequested":  true,
+						"alreadySubmitted": true,
+					})
+					return
+				}
+				writeError(w, http.StatusBadRequest, "registration is already cancelled")
+				return
+			}
+			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refundRequested": true})
+			return
+		}
+
+		if paymentStatus != "paid" {
+			writeError(w, http.StatusBadRequest, "désinscription impossible pour ce statut de paiement")
+			return
+		}
+
+		nowUTC := time.Now().UTC()
+		diff := eventStart.Sub(nowUTC)
 
 		if diff.Hours() < 24 {
 			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'non_refundable' WHERE event_id = $1 AND user_id = $2`, id, userID)
@@ -2224,8 +2332,11 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 		paymentIntentID, err := items.GetStripePaymentIntentFromSessionPublic(cfg, sessionID)
 		var refundID string
+		var recordEUR float64
 		if err == nil && paymentIntentID != "" {
-			refundID, err = items.RefundStripePaymentIntentPublic(cfg, paymentIntentID)
+			refundOpts, rec := items.NewEventRefundStripeParams("user-unregister", id, userID, paymentIntentID, eventPrice, nil)
+			recordEUR = rec
+			refundID, err = items.RefundStripePaymentIntentPublic(r.Context(), cfg, paymentIntentID, refundOpts)
 		}
 
 		if err != nil {
@@ -2238,11 +2349,11 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		db.Exec(`
 			UPDATE event_registrations 
 			SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'refunded', stripe_refund_id = $1, refund_amount = $2 
-			WHERE event_id = $3 AND user_id = $4`, refundID, eventPrice, id, userID)
+			WHERE event_id = $3 AND user_id = $4`, refundID, recordEUR, id, userID)
 
 		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refunded": true, "refundAmount": eventPrice})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refunded": true, "refundAmount": recordEUR})
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -2707,15 +2818,26 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		lastname = ""
 	}
 
+	role, _ := claims["role"].(string)
+	userPayload := map[string]any{
+		"id":        id,
+		"email":     claims["email"],
+		"role":      role,
+		"firstname": firstname,
+		"lastname":  lastname,
+	}
+	if role == "professionnel" && id > 0 {
+		prepo := projects.NewRepository(db)
+		if sc, err := prepo.GetProUCConnectScore(id); err == nil {
+			userPayload["upcycleConnectScore"] = sc
+		} else {
+			userPayload["upcycleConnectScore"] = 0.0
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
-		"user": map[string]any{
-			"id":        id,
-			"email":     claims["email"],
-			"role":      claims["role"],
-			"firstname": firstname,
-			"lastname":  lastname,
-		},
+		"user":          userPayload,
 	})
 }
 
@@ -4842,16 +4964,268 @@ func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func adminEventRegistrationRefundRoutes(w http.ResponseWriter, r *http.Request) {
+	prefix := "/api/admin/event-registrations/"
+	if !strings.HasPrefix(r.URL.Path, prefix) {
+		http.NotFound(w, r)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 2 || parts[1] != "refund-decision" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	regID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || regID < 1 {
+		writeError(w, http.StatusBadRequest, "invalid registration id")
+		return
+	}
+	adminEventRegistrationRefundDecisionHandler(w, r, regID)
+}
+
+func adminEventRegistrationRefundDecisionHandler(w http.ResponseWriter, r *http.Request, registrationID int64) {
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	role, _ := claims["role"].(string)
+	if role != "admin" && role != "salarie" {
+		writeError(w, http.StatusForbidden, "not authorized")
+		return
+	}
+
+	var body struct {
+		Decision    string `json:"decision"`
+		AmountCents *int64 `json:"amountCents"`
+		Note        string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	decision := strings.ToLower(strings.TrimSpace(body.Decision))
+	if decision != "approve" && decision != "reject" {
+		writeError(w, http.StatusBadRequest, "decision must be approve or reject")
+		return
+	}
+
+	if decision == "reject" {
+		note := strings.TrimSpace(body.Note)
+		if len(note) > 2000 {
+			note = note[:2000]
+		}
+		msg := note
+		if msg == "" {
+			msg = "Demande de remboursement refusée"
+		}
+		res, err := db.Exec(`
+			UPDATE event_registrations
+			SET refund_status = 'non_refundable', refund_error = $1
+			WHERE id = $2 AND refund_status = 'requested' AND payment_status = 'paid'
+		`, msg, registrationID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		naff, _ := res.RowsAffected()
+		if naff == 0 {
+			writeError(w, http.StatusConflict, "demande introuvable ou déjà traitée")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "rejected": true})
+		return
+	}
+
+	var eventID, userID int64
+	var eventPrice float64
+	var refundSt, paySt, piDB, sessionID string
+	err := db.QueryRow(`
+		SELECT er.event_id, er.user_id, e.price, er.refund_status, er.payment_status,
+		       COALESCE(TRIM(er.stripe_payment_intent_id),''), COALESCE(TRIM(er.stripe_session_id),'')
+		FROM event_registrations er
+		JOIN events e ON e.id = er.event_id
+		WHERE er.id = $1
+	`, registrationID).Scan(&eventID, &userID, &eventPrice, &refundSt, &paySt, &piDB, &sessionID)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "inscription introuvable")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if strings.TrimSpace(refundSt) != "requested" || strings.TrimSpace(paySt) != "paid" {
+		writeError(w, http.StatusConflict, "cette inscription n'est pas en attente de remboursement")
+		return
+	}
+
+	maxCents := items.RefundEURToAmountCents(eventPrice)
+	if maxCents < 1 {
+		writeError(w, http.StatusBadRequest, "montant d'événement invalide pour un remboursement")
+		return
+	}
+
+	var reqCents int64
+	if body.AmountCents != nil && *body.AmountCents > 0 {
+		reqCents = *body.AmountCents
+	} else {
+		reqCents = maxCents
+	}
+	if reqCents < 1 {
+		writeError(w, http.StatusBadRequest, "montant de remboursement invalide")
+		return
+	}
+	if reqCents > maxCents {
+		writeError(w, http.StatusBadRequest, "montant supérieur au prix du billet")
+		return
+	}
+
+	cfg, err := items.GetStripeConfigPublic()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "stripe non configuré")
+		return
+	}
+
+	pi := strings.TrimSpace(piDB)
+	if pi == "" && strings.TrimSpace(sessionID) != "" {
+		var ferr error
+		pi, ferr = items.GetStripePaymentIntentFromSessionPublic(cfg, strings.TrimSpace(sessionID))
+		if ferr != nil {
+			writeError(w, http.StatusBadGateway, "impossible de résoudre le paiement Stripe: "+ferr.Error())
+			return
+		}
+	}
+	if pi == "" {
+		writeError(w, http.StatusBadRequest, "aucun paiement Stripe associé")
+		return
+	}
+
+	var partial *int64
+	if reqCents < maxCents {
+		c := reqCents
+		partial = &c
+	}
+	opts, recordEUR := items.NewEventRefundStripeParams("admin-ops-refund", eventID, userID, pi, eventPrice, partial)
+
+	refundID, rerr := items.RefundStripePaymentIntentPublic(r.Context(), cfg, pi, opts)
+	if rerr != nil {
+		_, _ = db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE id = $2`, rerr.Error(), registrationID)
+		writeError(w, http.StatusBadGateway, "remboursement Stripe: "+rerr.Error())
+		return
+	}
+
+	res, err := db.Exec(`
+		UPDATE event_registrations
+		SET refund_status = 'refunded',
+		    stripe_refund_id = $1,
+		    refund_amount = $2,
+		    refund_error = ''
+		WHERE id = $3 AND refund_status = 'requested' AND payment_status = 'paid'
+	`, refundID, recordEUR, registrationID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeError(w, http.StatusConflict, "impossible de mettre à jour l'inscription (état changé)")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":             true,
+		"refunded":       true,
+		"refundAmount":   recordEUR,
+		"stripeRefundId": refundID,
+	})
+}
+
 type PaymentTransaction struct {
-	Source         string    `json:"source"`
-	SourceID       int64     `json:"sourceId"`
-	UserID         int64     `json:"userId"`
-	UserName       string    `json:"userName"`
-	EntityName     string    `json:"entityName"`
-	Date           time.Time `json:"date"`
-	Amount         float64   `json:"amount"`
-	Status         string    `json:"status"`
-	TransactionRef string    `json:"transactionRef"`
+	Source           string    `json:"source"`
+	SourceID         int64     `json:"sourceId"`
+	EventID          int64     `json:"eventId,omitempty"`
+	UserID           int64     `json:"userId"`
+	UserName         string    `json:"userName"`
+	EntityName       string    `json:"entityName"`
+	Date             time.Time `json:"date"`
+	Amount           float64   `json:"amount"`
+	Status           string    `json:"status"`
+	TransactionRef   string    `json:"transactionRef"`
+	RefundAmount       float64   `json:"refundAmount"`
+	StripeRefundID     string    `json:"stripeRefundId"`
+	RefundError        string    `json:"refundError"`
+}
+
+func adminEventRefundRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	role, _ := claims["role"].(string)
+	if role != "admin" && role != "salarie" {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT er.id, e.id, e.name, e.date_debut, e.date_fin, e.lieu, e.price,
+		       u.id,
+		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name,
+		       u.email,
+		       er.created_at, er.cancelled_at, er.refund_request_reason,
+		       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS tx_ref,
+		       er.refund_status, er.payment_status
+		FROM event_registrations er
+		JOIN events e ON e.id = er.event_id
+		JOIN users u ON u.id = er.user_id
+		WHERE er.refund_status = 'requested'
+		ORDER BY er.cancelled_at DESC NULLS LAST, er.id DESC
+	`)
+	if err != nil {
+		log.Printf("[Admin] event refund requests: %v", err)
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer rows.Close()
+
+	type rowItem struct {
+		RegistrationID int64     `json:"registrationId"`
+		EventID          int64     `json:"eventId"`
+		EventName        string    `json:"eventName"`
+		DateDebut        string    `json:"dateDebut"`
+		DateFin          string    `json:"dateFin"`
+		Lieu             string    `json:"lieu"`
+		Price            float64   `json:"price"`
+		UserID           int64     `json:"userId"`
+		UserName         string    `json:"userName"`
+		UserEmail        string    `json:"userEmail"`
+		RegisteredAt     string    `json:"registeredAt"`
+		CancelledAt      string    `json:"cancelledAt"`
+		Reason           string    `json:"reason"`
+		TransactionRef   string    `json:"transactionRef"`
+		RefundStatus     string    `json:"refundStatus"`
+		PaymentStatus    string    `json:"paymentStatus"`
+	}
+	items := []rowItem{}
+	for rows.Next() {
+		var it rowItem
+		var dateDebut, dateFin, createdAt time.Time
+		var cancelledAt sql.NullTime
+		if err := rows.Scan(&it.RegistrationID, &it.EventID, &it.EventName, &dateDebut, &dateFin, &it.Lieu, &it.Price,
+			&it.UserID, &it.UserName, &it.UserEmail, &createdAt, &cancelledAt, &it.Reason, &it.TransactionRef, &it.RefundStatus, &it.PaymentStatus); err != nil {
+			log.Printf("[Admin] scan refund request: %v", err)
+			continue
+		}
+		it.DateDebut = dateDebut.UTC().Format(time.RFC3339)
+		it.DateFin = dateFin.UTC().Format(time.RFC3339)
+		it.RegisteredAt = createdAt.UTC().Format(time.RFC3339)
+		if cancelledAt.Valid {
+			it.CancelledAt = cancelledAt.Time.UTC().Format(time.RFC3339)
+		}
+		items = append(items, it)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 }
 
 func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
@@ -4868,10 +5242,20 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		SELECT 'Inscription événement' AS source, er.id AS source_id, u.id AS user_id, 
+		SELECT 'Inscription événement' AS source, er.id AS source_id, e.id AS event_id, u.id AS user_id, 
 		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name, 
 		       e.name AS entity_name, er.created_at AS date, e.price AS amount, 
-		       er.payment_status AS status, COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref
+		       CASE
+		           WHEN er.refund_status = 'requested' THEN 'refund_requested'
+		           WHEN er.refund_status = 'refunded' THEN 'refunded'
+		           WHEN er.refund_status = 'non_refundable' THEN 'non_refundable'
+		           WHEN er.refund_status = 'failed' THEN 'refund_failed'
+		           ELSE er.payment_status
+		       END AS status,
+		       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref,
+		       COALESCE(er.refund_amount, 0)::double precision AS refund_amount,
+		       COALESCE(TRIM(er.stripe_refund_id), '') AS stripe_refund_id,
+		       COALESCE(TRIM(er.refund_error), '') AS refund_error
 		FROM event_registrations er
 		JOIN events e ON er.event_id = e.id
 		JOIN users u ON er.user_id = u.id
@@ -4879,17 +5263,20 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		
 		UNION ALL
 		
-		SELECT 'Vente annonce' AS source, i.id AS source_id, COALESCE(u.id, i.user_id) AS user_id, 
+		SELECT 'Vente annonce' AS source, i.id AS source_id, CAST(0 AS BIGINT) AS event_id, COALESCE(u.id, i.user_id) AS user_id, 
 		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email, 'Client') AS user_name, 
 		       i.title AS entity_name, COALESCE(il.stripe_paid_at, il.updated_at, i.updated_at) AS date, 
-		       i.price AS amount, 
+		       (COALESCE(NULLIF(il.stripe_amount_cents, 0), CAST(ROUND(i.price * 100) AS BIGINT))::double precision / 100.0) AS amount, 
 		       CASE 
 		           WHEN il.stripe_payment_status IN ('paid', 'succeeded') THEN 'paid'
 		           WHEN il.stripe_payment_status = 'refunded' THEN 'refunded'
 		           WHEN i.status IN ('vendu', 'vendue') THEN 'paid'
 		           ELSE COALESCE(NULLIF(il.stripe_payment_status, ''), 'pending')
 		       END AS status, 
-		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref
+		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref,
+		       0::double precision AS refund_amount,
+		       '' AS stripe_refund_id,
+		       '' AS refund_error
 		FROM items i
 		LEFT JOIN item_logistics il ON il.item_id = i.id
 		LEFT JOIN users u ON il.reserved_by_user_id = u.id
@@ -4897,10 +5284,13 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		
 		UNION ALL
 		
-		SELECT 'Réservation service' AS source, sb.id AS source_id, u.id AS user_id, 
+		SELECT 'Réservation service' AS source, sb.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id, 
 		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name, 
 		       s.name AS entity_name, sb.created_at AS date, sb.amount AS amount, 
-		       sb.payment_status AS status, '' AS transaction_ref
+		       sb.payment_status AS status, '' AS transaction_ref,
+		       0::double precision AS refund_amount,
+		       '' AS stripe_refund_id,
+		       '' AS refund_error
 		FROM service_bookings sb
 		JOIN services s ON sb.service_id = s.id
 		JOIN users u ON sb.user_id = u.id
@@ -4921,7 +5311,7 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t PaymentTransaction
 		var date sql.NullTime
-		if err := rows.Scan(&t.Source, &t.SourceID, &t.UserID, &t.UserName, &t.EntityName, &date, &t.Amount, &t.Status, &t.TransactionRef); err != nil {
+		if err := rows.Scan(&t.Source, &t.SourceID, &t.EventID, &t.UserID, &t.UserName, &t.EntityName, &date, &t.Amount, &t.Status, &t.TransactionRef, &t.RefundAmount, &t.StripeRefundID, &t.RefundError); err != nil {
 			log.Printf("[Finances] Error scanning payment row: %v", err)
 			continue
 		}
@@ -4933,7 +5323,191 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": transactions})
 }
-func (t *PaymentTransaction) placeholder() {} // avoid unused struct warning if needed, but not here
+
+// myFinancesPaymentsHandler — GET /api/finances/my-payments — historique des paiements pour l’utilisateur connecté (particulier, pro, salarié, admin).
+func myFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	userIDVal, ok := claims["userId"].(float64)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID := int64(userIDVal)
+
+	query := `
+		SELECT 'Inscription événement' AS source, er.id AS source_id, e.id AS event_id, er.user_id AS user_id,
+		       COALESCE(NULLIF(TRIM(e.intervenant), ''), '—') AS user_name,
+		       e.name AS entity_name, er.created_at AS date, e.price AS amount,
+		       CASE
+		           WHEN er.refund_status = 'requested' THEN 'refund_requested'
+		           WHEN er.refund_status = 'refunded' THEN 'refunded'
+		           WHEN er.refund_status = 'non_refundable' THEN 'non_refundable'
+		           WHEN er.refund_status = 'failed' THEN 'refund_failed'
+		           ELSE er.payment_status
+		       END AS status,
+		       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref,
+		       COALESCE(er.refund_amount, 0)::double precision AS refund_amount,
+		       COALESCE(TRIM(er.stripe_refund_id), '') AS stripe_refund_id,
+		       COALESCE(TRIM(er.refund_error), '') AS refund_error
+		FROM event_registrations er
+		JOIN events e ON er.event_id = e.id
+		WHERE er.user_id = $1
+		  AND er.payment_status <> 'pending'
+		  AND (e.price > 0 OR er.payment_status IN ('paid', 'gratuit'))
+
+		UNION ALL
+
+		SELECT 'Achat annonce' AS source, i.id AS source_id, CAST(0 AS BIGINT) AS event_id, COALESCE(u.id, il.reserved_by_user_id) AS user_id,
+		       COALESCE(NULLIF(TRIM(COALESCE(sel.firstname, '') || ' ' || COALESCE(sel.lastname, '')), ''), sel.email, 'Vendeur') AS user_name,
+		       i.title AS entity_name, COALESCE(il.stripe_paid_at, il.updated_at, i.updated_at) AS date,
+		       (COALESCE(NULLIF(il.stripe_amount_cents, 0), CAST(ROUND(i.price * 100) AS BIGINT))::double precision / 100.0) AS amount,
+		       CASE
+		           WHEN il.stripe_payment_status IN ('paid', 'succeeded') THEN 'paid'
+		           WHEN il.stripe_payment_status = 'refunded' THEN 'refunded'
+		           WHEN i.status IN ('vendu', 'vendue') THEN 'paid'
+		           ELSE COALESCE(NULLIF(il.stripe_payment_status, ''), 'pending')
+		       END AS status,
+		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref,
+		       0::double precision AS refund_amount,
+		       '' AS stripe_refund_id,
+		       '' AS refund_error
+		FROM items i
+		JOIN item_logistics il ON il.item_id = i.id
+		LEFT JOIN users u ON u.id = il.reserved_by_user_id
+		JOIN users sel ON sel.id = i.user_id
+		WHERE il.reserved_by_user_id = $1
+		  AND (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded', 'pending', 'processing'))
+
+		UNION ALL
+
+		SELECT 'Vente annonce' AS source, i.id AS source_id, CAST(0 AS BIGINT) AS event_id, i.user_id AS user_id,
+		       COALESCE(NULLIF(TRIM(COALESCE(buy.firstname, '') || ' ' || COALESCE(buy.lastname, '')), ''), buy.email, 'Acheteur') AS user_name,
+		       i.title AS entity_name, COALESCE(il.stripe_paid_at, il.updated_at, i.updated_at) AS date,
+		       (COALESCE(NULLIF(il.stripe_amount_cents, 0), CAST(ROUND(i.price * 100) AS BIGINT))::double precision / 100.0) AS amount,
+		       CASE
+		           WHEN il.stripe_payment_status IN ('paid', 'succeeded') THEN 'paid'
+		           WHEN il.stripe_payment_status = 'refunded' THEN 'refunded'
+		           WHEN i.status IN ('vendu', 'vendue') THEN 'paid'
+		           ELSE COALESCE(NULLIF(il.stripe_payment_status, ''), 'pending')
+		       END AS status,
+		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref,
+		       0::double precision AS refund_amount,
+		       '' AS stripe_refund_id,
+		       '' AS refund_error
+		FROM items i
+		JOIN item_logistics il ON il.item_id = i.id
+		LEFT JOIN users buy ON buy.id = il.reserved_by_user_id
+		WHERE i.user_id = $1
+		  AND il.reserved_by_user_id IS NOT NULL
+		  AND il.reserved_by_user_id <> i.user_id
+		  AND (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded', 'pending', 'processing'))
+
+		UNION ALL
+
+		SELECT 'Réservation service' AS source, sb.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id,
+		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name,
+		       s.name AS entity_name, sb.created_at AS date, sb.amount AS amount,
+		       sb.payment_status AS status, '' AS transaction_ref,
+		       0::double precision AS refund_amount,
+		       '' AS stripe_refund_id,
+		       '' AS refund_error
+		FROM service_bookings sb
+		JOIN services s ON sb.service_id = s.id
+		JOIN users u ON sb.user_id = u.id
+		WHERE sb.user_id = $1 AND sb.amount > 0
+
+		ORDER BY date DESC
+	`
+
+	rows, err := db.Query(query, userID)
+	if err != nil {
+		log.Printf("[Finances] my-payments: %v", err)
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer rows.Close()
+
+	transactions := []PaymentTransaction{}
+	for rows.Next() {
+		var t PaymentTransaction
+		var date sql.NullTime
+		if err := rows.Scan(&t.Source, &t.SourceID, &t.EventID, &t.UserID, &t.UserName, &t.EntityName, &date, &t.Amount, &t.Status, &t.TransactionRef, &t.RefundAmount, &t.StripeRefundID, &t.RefundError); err != nil {
+			log.Printf("[Finances] my-payments scan: %v", err)
+			continue
+		}
+		if date.Valid {
+			t.Date = date.Time
+		}
+		transactions = append(transactions, t)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": transactions})
+}
+
+func adminSaleCommissionHandler(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	role, _ := claims["role"].(string)
+	if role != "admin" {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		var mode sql.NullString
+		var pct sql.NullFloat64
+		err := db.QueryRow(`SELECT mode, percent FROM sale_commission_config WHERE id = 1`).Scan(&mode, &pct)
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusOK, map[string]any{"percent": 0.0, "mode": "deducted"})
+			return
+		}
+		if err != nil {
+			log.Printf("[Finances] sale-commission get: %v", err)
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		m := strings.TrimSpace(strings.ToLower(mode.String))
+		if m != "added" {
+			m = "deducted"
+		}
+		v := 0.0
+		if pct.Valid {
+			v = pct.Float64
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"percent": v, "mode": m})
+	case http.MethodPut, http.MethodPatch:
+		var body struct {
+			Percent float64 `json:"percent"`
+			Mode    string  `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		if body.Percent < 0 || body.Percent > 100 {
+			writeError(w, http.StatusBadRequest, "percent must be between 0 and 100")
+			return
+		}
+		m := strings.TrimSpace(strings.ToLower(body.Mode))
+		if m != "added" {
+			m = "deducted"
+		}
+		if _, err := db.Exec(
+			`INSERT INTO sale_commission_config (id, percent, mode) VALUES (1, $1, $2) ON CONFLICT (id) DO UPDATE SET percent = EXCLUDED.percent, mode = EXCLUDED.mode`,
+			body.Percent, m,
+		); err != nil {
+			log.Printf("[Finances] sale-commission put: %v", err)
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"percent": body.Percent, "mode": m})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
 
 // ─── FORUM ────────────────────────────────────────────────────────────────────
 

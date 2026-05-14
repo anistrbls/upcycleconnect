@@ -116,12 +116,17 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			return
 		}
 
+		feeLine := int64(0)
+		if checkoutData.CommissionMode == SaleCommissionModeAdded && checkoutData.PlatformFeeCents > 0 {
+			feeLine = checkoutData.PlatformFeeCents
+		}
 		session, err := createStripeCheckoutSession(
 			cfg,
 			checkoutData.ItemID,
 			userID,
 			checkoutData.ItemTitle,
-			checkoutData.AmountCents,
+			checkoutData.BaseCents,
+			feeLine,
 			checkoutData.Currency,
 		)
 		if err != nil {
@@ -226,6 +231,43 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	}))
+
+	mux.Handle("POST /api/pro/items/{item_id}/rate-seller", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+		userID, displayName, companyName, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		var body struct {
+			Stars int `json:"stars"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		if err := repo.UpsertProfessionalSellerRating(r.Context(), itemID, userID, body.Stars, displayName, companyName); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "cannot rate: reservation not eligible")
+				return
+			}
+			if strings.Contains(err.Error(), "cannot rate own listing") {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if strings.Contains(err.Error(), "stars must be") {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not save rating")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}))
 
 	mux.Handle("GET /api/pro/watchlist", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -342,47 +384,79 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 }
 
 func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEvent) (bool, error) {
-	var session stripeWebhookCheckoutSession
-	if err := json.Unmarshal(event.Data.Object, &session); err != nil {
-		return false, err
-	}
-
-	itemIDStr := strings.TrimSpace(session.Metadata["item_id"])
-	userIDStr := strings.TrimSpace(session.Metadata["user_id"])
-	if itemIDStr == "" || userIDStr == "" {
-		return false, nil
-	}
-
-	itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
-	if err != nil {
-		return false, err
-	}
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		return false, err
-	}
-
-	paymentIntentID := strings.TrimSpace(session.PaymentIntent)
+	ctx := r.Context()
 
 	switch event.Type {
-	case "checkout.session.completed":
-		if _, err := repo.ValidateStripePaymentByProfessional(r.Context(), itemID, userID, paymentIntentID, session.ID); err != nil {
-			if err == sql.ErrNoRows {
-				return false, nil
-			}
+	case "refund.created", "refund.updated":
+		var obj stripeWebhookRefund
+		if err := json.Unmarshal(event.Data.Object, &obj); err != nil {
+			return false, err
+		}
+		pi := ParseStripeWebhookPaymentIntentField(obj.PaymentIntent)
+		if pi == "" {
+			return true, nil
+		}
+		if err := repo.SyncRefundFromStripeWebhook(ctx, pi, obj.ID, obj.Amount, obj.Status); err != nil {
 			return false, err
 		}
 		return true, nil
-	case "checkout.session.expired", "checkout.session.async_payment_failed":
-		reason := "Paiement Stripe echoue ou session expiree"
-		if err := repo.FailStripePaymentByProfessional(r.Context(), itemID, userID, reason, paymentIntentID, session.ID); err != nil {
-			// If reservation has already been completed or released, do not fail webhook delivery.
-			if strings.Contains(err.Error(), "cannot fail payment") {
-				return false, nil
-			}
+	case "charge.refunded":
+		var ch stripeWebhookCharge
+		if err := json.Unmarshal(event.Data.Object, &ch); err != nil {
+			return false, err
+		}
+		pi := ParseStripeWebhookPaymentIntentField(ch.PaymentIntent)
+		if pi == "" {
+			return true, nil
+		}
+		if err := repo.SyncRefundFromStripeWebhook(ctx, pi, "", ch.AmountRefunded, "succeeded"); err != nil {
 			return false, err
 		}
 		return true, nil
+	case "checkout.session.completed", "checkout.session.expired", "checkout.session.async_payment_failed":
+		var session stripeWebhookCheckoutSession
+		if err := json.Unmarshal(event.Data.Object, &session); err != nil {
+			return false, err
+		}
+
+		itemIDStr := strings.TrimSpace(session.Metadata["item_id"])
+		userIDStr := strings.TrimSpace(session.Metadata["user_id"])
+		if itemIDStr == "" || userIDStr == "" {
+			return false, nil
+		}
+
+		itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+		if err != nil {
+			return false, err
+		}
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		if err != nil {
+			return false, err
+		}
+
+		paymentIntentID := strings.TrimSpace(session.PaymentIntent)
+
+		switch event.Type {
+		case "checkout.session.completed":
+			if _, err := repo.ValidateStripePaymentByProfessional(ctx, itemID, userID, paymentIntentID, session.ID); err != nil {
+				if err == sql.ErrNoRows {
+					return false, nil
+				}
+				return false, err
+			}
+			return true, nil
+		case "checkout.session.expired", "checkout.session.async_payment_failed":
+			reason := "Paiement Stripe echoue ou session expiree"
+			if err := repo.FailStripePaymentByProfessional(ctx, itemID, userID, reason, paymentIntentID, session.ID); err != nil {
+				if strings.Contains(err.Error(), "cannot fail payment") {
+					return false, nil
+				}
+				return false, err
+			}
+			return true, nil
+		default:
+			return false, nil
+		}
 	default:
 		return false, nil
 	}

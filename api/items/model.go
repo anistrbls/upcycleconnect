@@ -55,6 +55,14 @@ type Item struct {
 	ModeratedAt          string    `json:"moderatedAt,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+	// Renseigné sur GET /api/items/{id} : affichage prix TTC pro (mode commission « added »).
+	SaleCommissionMode    string  `json:"saleCommissionMode,omitempty"`
+	SaleCommissionPercent float64 `json:"saleCommissionPercent,omitempty"`
+	// Agrégats vendeur (avis pros sur ce déposant) — GET /api/items/{id}
+	SellerRatingAvg   *float64 `json:"sellerRatingAvg,omitempty"`
+	SellerRatingCount int64    `json:"sellerRatingCount"`
+	SellerItemsCount  int64    `json:"sellerItemsCount"`
+	SellerCity        string   `json:"sellerCity,omitempty"`
 }
 
 type CreatePayload struct {

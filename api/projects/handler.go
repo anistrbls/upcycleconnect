@@ -117,6 +117,31 @@ func (h *Handler) DetailHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListProjectLikersHandler gère GET /api/pro/projects/{id}/likes (propriétaire du projet).
+func (h *Handler) ListProjectLikersHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := strings.TrimSuffix(r.URL.Path, "/likes")
+	projectID, ok := parseID(path, "/api/pro/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if _, err := h.repo.GetByID(projectID, proUserID); err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	likers, err := h.repo.ListProjectLikers(projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "impossible de charger les j'aime")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"likers": likers})
+}
+
 // UpdateHandler gère PUT /api/pro/projects/{id} — mise à jour d'un projet.
 func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	proUserID, ok := h.getProUserID(r)
@@ -399,8 +424,9 @@ func (h *Handler) ParticulierDetailHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// ParticulierListParticipatedHandler gère GET /api/part/projects/participated.
-// Retourne la liste des projets publiés qui utilisent des objets donnés/vendus par l'utilisateur.
+// ParticulierListParticipatedHandler gère GET /api/mes-projets.
+// Particulier : projets où ses objets donnés/vendus ont été utilisés + score / poids personnel.
+// Professionnel : ses projets publiés et validés (même format que le catalogue) + score / poids UpCycle Connect (objets récupérés).
 func (h *Handler) ParticulierListParticipatedHandler(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
 	if !ok {
@@ -414,14 +440,27 @@ func (h *Handler) ParticulierListParticipatedHandler(w http.ResponseWriter, r *h
 	}
 	userID := int64(userIDVal)
 
-	projects, err := h.repo.ParticulierListParticipated(userID)
+	role, _ := claims["role"].(string)
+	var projects []Project
+	var err error
+	if role == "professionnel" {
+		projects, err = h.repo.ProPublishedProjectsForMyUpcycle(userID, userID)
+	} else {
+		projects, err = h.repo.ParticulierListParticipated(userID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not fetch participated projects")
 		return
 	}
 
-	myScore, _ := h.repo.GetUserPersonalScore(userID)
-	myWeight, _ := h.repo.GetUserPersonalWeight(userID)
+	var myScore, myWeight float64
+	if role == "professionnel" {
+		myScore, _ = h.repo.GetProUCConnectScore(userID)
+		myWeight, _ = h.repo.GetProUCConnectWeight(userID)
+	} else {
+		myScore, _ = h.repo.GetUserPersonalScore(userID)
+		myWeight, _ = h.repo.GetUserPersonalWeight(userID)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects": projects,

@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
+import { formatBuyerCardPrice } from "../../../lib/salePrice";
 import {
     Tag,
     Gift,
@@ -428,7 +429,7 @@ function BrouillonsContent() {
                                 <div style={styles.titlePriceRow}>
                                     <h3 style={styles.cardTitle}>{annonce.title}</h3>
                                     <div style={styles.pricePill}>
-                                        {annonce.type === "don" ? "GRATUIT" : `${annonce.price} €`}
+                                        {annonce.type === "don" ? "GRATUIT" : formatBuyerCardPrice(annonce)}
                                     </div>
                                 </div>
                                 <p style={styles.description}>

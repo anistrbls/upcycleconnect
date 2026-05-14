@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
-import { Filter, MapPin, Star } from "lucide-react";
+import { formatBuyerCardPrice } from "../../../lib/salePrice";
+import { Filter, Star } from "lucide-react";
 import AdminModal from "../../../components/admin/AdminModal";
+import DepositCodeQrPanel from "../../../components/DepositCodeQrPanel";
+import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
 
 const SELECT_ARROW_BG = "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='292.4' height='292.4'%3E%3Cpath fill='%232b4548' d='M287 69.4a17.6 17.6 0 0 0-13-5.4H18.4c-5 0-9.3 1.8-12.9 5.4A17.6 17.6 0 0 0 0 82.2c0 5 1.8 9.3 5.4 12.9l128 127.9c3.6 3.6 7.8 5.4 12.8 5.4s9.2-1.8 12.8-5.4L287 95c3.5-3.5 5.4-7.8 5.4-12.8 0-5-1.9-9.2-5.5-12.8z'/%3E%3C/svg%3E\")";
 
@@ -280,12 +283,6 @@ function formatPublishDate(item) {
     });
 }
 
-function formatDepositLocation(item) {
-    const point = item.depositPointName || "Point de depot";
-    const container = item.containerName || "Box non assignee";
-    return `${point} · ${container}`;
-}
-
 export default function ProfessionalAvailablePage() {
     const router = useRouter();
     const [items, setItems] = useState([]);
@@ -383,7 +380,6 @@ export default function ProfessionalAvailablePage() {
                 item.category,
                 item.material,
                 item.condition,
-                item.depositPointName,
                 item.containerName,
             ]
                 .map(normalize)
@@ -465,9 +461,15 @@ export default function ProfessionalAvailablePage() {
                 return;
             } else {
                 setReserveConfirmItem(null);
+                const logistics = reserveData.logistics || {};
+                const pickupExp =
+                    logistics.pickup_code_expires_at ||
+                    logistics.pickupCodeExpiresAt ||
+                    null;
                 setReserveSuccess({
                     title: item.title,
                     pickupCode,
+                    pickupExpiresAt: pickupExp,
                 });
             }
 
@@ -491,13 +493,26 @@ export default function ProfessionalAvailablePage() {
 
         return (
             <div style={styles.grid}>
-                {filteredItems.map((item) => (
+                {filteredItems.map((item) => {
+                    const thumb = item.image || (item.photos && item.photos[0]) || "/img/placeholder-object.jpg";
+                    return (
                     <article key={item.id} style={styles.card} className="annonce-card">
-                        <img
-                            src={item.image || (item.photos && item.photos[0]) || "/img/placeholder-object.jpg"}
-                            alt={item.title}
-                            style={styles.cardImage}
-                        />
+                        {previewLooksLikeVideo(thumb) ? (
+                            <video
+                                src={thumb}
+                                muted
+                                playsInline
+                                preload="metadata"
+                                aria-label={item.title}
+                                style={styles.cardImage}
+                            />
+                        ) : (
+                            <img
+                                src={thumb}
+                                alt={item.title}
+                                style={styles.cardImage}
+                            />
+                        )}
                         <div style={styles.blurLayer} />
                         <div style={styles.gradientLayer} />
                         <div style={styles.statusBadge}>DISPONIBLE</div>
@@ -505,7 +520,7 @@ export default function ProfessionalAvailablePage() {
                         <div style={styles.cardOverlay}>
                             <div style={styles.titlePriceRow}>
                                 <h3 style={styles.cardTitle}>{item.title}</h3>
-                                <div style={styles.pricePill}>{item.type === "don" ? "GRATUIT" : `${Number(item.price || 0)} EUR`}</div>
+                                <div style={styles.pricePill}>{item.type === "don" ? "GRATUIT" : formatBuyerCardPrice(item)}</div>
                             </div>
 
                             <p style={styles.description}>Publiée le {formatPublishDate(item)}</p>
@@ -514,10 +529,6 @@ export default function ProfessionalAvailablePage() {
                                 {item.category && <span style={styles.tag}>{item.category}</span>}
                                 {item.material && <span style={styles.tag}>{item.material}</span>}
                                 {item.condition && <span style={styles.tag}>{item.condition}</span>}
-                                <span style={styles.tag}>
-                                    <MapPin size={13} />
-                                    {formatDepositLocation(item)}
-                                </span>
                             </div>
 
                             <div style={styles.cardActions}>
@@ -551,7 +562,8 @@ export default function ProfessionalAvailablePage() {
                             </div>
                         </div>
                     </article>
-                ))}
+                    );
+                })}
             </div>
         );
     }, [filteredItems, items.length, loading, busyId, watchlistIds, watchBusyId]);
@@ -680,12 +692,28 @@ export default function ProfessionalAvailablePage() {
                         La réservation de "{reserveSuccess?.title}" est confirmée.
                     </p>
                     <div style={{ borderRadius: "12px", background: "#f3f6f5", padding: "0.75rem 0.9rem" }}>
-                        <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: "0.2rem" }}>
+                        <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: "0.45rem", textAlign: "center" }}>
                             Code de récupération
                         </div>
-                        <div style={{ fontSize: "1.02rem", color: "var(--text-main)", fontWeight: 800, letterSpacing: "0.06em" }}>
-                            {reserveSuccess?.pickupCode || "-"}
-                        </div>
+                        {reserveSuccess?.pickupCode ? (
+                            <DepositCodeQrPanel
+                                code={reserveSuccess.pickupCode}
+                                purpose="pickup"
+                                variant="light"
+                                qrSize={168}
+                                expiresText={
+                                    reserveSuccess.pickupExpiresAt
+                                        ? `Expire le : ${new Date(reserveSuccess.pickupExpiresAt).toLocaleDateString("fr-FR", {
+                                              day: "2-digit",
+                                              month: "2-digit",
+                                              year: "numeric",
+                                          })}`
+                                        : undefined
+                                }
+                            />
+                        ) : (
+                            <div style={{ fontSize: "1.02rem", color: "var(--text-main)", fontWeight: 800, textAlign: "center" }}>—</div>
+                        )}
                     </div>
                     <div style={{ display: "flex", justifyContent: "flex-end" }}>
                         <button

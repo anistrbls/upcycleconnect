@@ -48,6 +48,17 @@ function placesRestantes(item) {
     return Math.max(0, max - (item.participantCount ?? 0));
 }
 
+/** Événement terminé : date de fin passée (ou date de début si fin absente). */
+function isEventPast(item) {
+    if (!item) return false;
+    const end = new Date(item.dateFin);
+    const start = new Date(item.dateDebut);
+    const now = new Date();
+    if (!isNaN(end.getTime())) return end < now;
+    if (!isNaN(start.getTime())) return start < now;
+    return false;
+}
+
 /* ── Card événement style photo plein fond ── */
 function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout, registeredIds, loadingIds }) {
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
@@ -100,16 +111,47 @@ function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout
                     ) : null; })()}
                 </div>
                 <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                    <button type="button" onClick={() => onDetail(item)} style={{ padding: "9px 14px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600 }}>
+                    <button
+                        type="button"
+                        onClick={() => onDetail(item)}
+                        style={{
+                            padding: "9px 14px",
+                            borderRadius: "999px",
+                            border: "1px solid rgba(255,255,255,0.25)",
+                            background: "rgba(255,255,255,0.12)",
+                            backdropFilter: "blur(8px)",
+                            WebkitBackdropFilter: "blur(8px)",
+                            color: "white",
+                            cursor: "pointer",
+                            fontSize: "0.82rem",
+                            fontWeight: 600,
+                            ...(isFull && !isRegistered ? { flex: 1 } : {}),
+                        }}
+                    >
                         Voir le détail
                     </button>
                     {isRegistered ? (
-                        <button type="button" disabled={isLoading} onClick={() => onUnregister(item)} style={{ flex: 1, padding: "9px 14px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)", backdropFilter: "blur(8px)", color: "rgba(255,255,255,0.65)", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600 }}>
+                        <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => onUnregister(item)}
+                            style={{
+                                flex: 1,
+                                padding: "9px 14px",
+                                borderRadius: "999px",
+                                border: "1px solid rgba(252,165,165,0.45)",
+                                background: "rgba(220,38,38,0.28)",
+                                backdropFilter: "blur(8px)",
+                                WebkitBackdropFilter: "blur(8px)",
+                                color: "#fecaca",
+                                cursor: "pointer",
+                                fontSize: "0.82rem",
+                                fontWeight: 600,
+                            }}
+                        >
                             {isLoading ? "…" : "Se désinscrire"}
                         </button>
-                    ) : isFull ? (
-                        <div style={{ flex: 1, padding: "9px 14px", borderRadius: "999px", background: "rgba(220,38,38,0.2)", color: "#fca5a5", fontSize: "0.82rem", fontWeight: 600, textAlign: "center" }}>Complet</div>
-                    ) : isPaid ? (
+                    ) : isFull ? null : isPaid ? (
                         <button type="button" disabled={isLoading} onClick={() => onCheckout(item)} style={{ flex: 1, padding: "9px 14px", borderRadius: "999px", border: "none", background: "white", color: "#111", cursor: "pointer", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: "0.35rem" }}>
                             {isLoading ? "…" : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> Réserver</>}
                         </button>
@@ -163,7 +205,23 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
                 </div>
                 <div style={{ display: "flex", gap: "0.65rem", paddingTop: "0.25rem" }}>
                     {isRegistered ? (
-                        <button type="button" disabled={isLoading} onClick={() => { onUnregister(item); onClose(); }} style={{ flex: 1, padding: "0.75rem", borderRadius: "16px", border: "none", background: "#F0F0F0", color: "var(--text-main)", fontFamily: "inherit", fontSize: "0.9rem", fontWeight: 600, cursor: "pointer" }}>
+                        <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => { onUnregister(item); onClose(); }}
+                            style={{
+                                flex: 1,
+                                padding: "0.75rem",
+                                borderRadius: "16px",
+                                border: "1px solid rgba(220,38,38,0.45)",
+                                background: "rgba(220,38,38,0.1)",
+                                color: "#B91C1C",
+                                fontFamily: "inherit",
+                                fontSize: "0.9rem",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                            }}
+                        >
                             {isLoading ? "…" : "Se désinscrire"}
                         </button>
                     ) : isFull ? (
@@ -186,30 +244,70 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
 
 /* ── Modale Confirmation Annulation ── */
 function CancelConfirmModal({ item, open, onClose, onConfirm, isLoading }) {
+    const [refundReason, setRefundReason] = useState("");
+    useEffect(() => {
+        if (open && item?.id) setRefundReason("");
+    }, [open, item?.id]);
+
     if (!item) return null;
     const isPaid = item.pricingType === "payant" || item.paymentStatus === "paid";
     const start = new Date(item.dateDebut);
     const now = new Date();
     const diffHours = (start - now) / (1000 * 60 * 60);
     const isRefundable = diffHours >= 24;
+    const isPastEvent = isEventPast(item);
+    const needsRefundExplanation = isPastEvent && item.paymentStatus === "paid";
+    const modalTitle = isPastEvent && isPaid ? "Demande de remboursement" : "Annuler ma participation";
 
     return (
-        <AdminModal open={open} title="Annuler ma participation" onClose={onClose}>
+        <AdminModal open={open} title={modalTitle} onClose={onClose}>
             <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--text-main)" }}>
-                    Êtes-vous sûr de vouloir annuler votre participation à l'événement <strong>{item.name}</strong> ?
-                </p>
+                {isPastEvent && isPaid ? (
+                    <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--text-main)" }}>
+                        Vous souhaitez demander un remboursement pour votre participation à l&apos;événement <strong>{item.name}</strong>, qui est déjà terminé.
+                    </p>
+                ) : (
+                    <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--text-main)" }}>
+                        Êtes-vous sûr de vouloir annuler votre participation à l&apos;événement <strong>{item.name}</strong> ?
+                    </p>
+                )}
                 {isPaid && (
-                    <div style={{ background: isRefundable ? "rgba(34,197,94,0.1)" : "rgba(220,38,38,0.1)", padding: "1rem", borderRadius: "12px", border: isRefundable ? "1px solid rgba(34,197,94,0.3)" : "1px solid rgba(220,38,38,0.3)" }}>
-                        <h4 style={{ margin: "0 0 0.4rem 0", color: isRefundable ? "#166534" : "#991B1B", fontSize: "0.95rem" }}>
-                            Condition de remboursement
+                    <div style={{ background: isPastEvent ? "rgba(220,38,38,0.1)" : isRefundable ? "rgba(34,197,94,0.1)" : "rgba(220,38,38,0.1)", padding: "1rem", borderRadius: "12px", border: isPastEvent ? "1px solid rgba(220,38,38,0.35)" : isRefundable ? "1px solid rgba(34,197,94,0.3)" : "1px solid rgba(220,38,38,0.3)" }}>
+                        <h4 style={{ margin: "0 0 0.4rem 0", color: isPastEvent ? "#991B1B" : isRefundable ? "#166534" : "#991B1B", fontSize: "0.95rem" }}>
+                            {isPastEvent ? "Remboursement (événement passé)" : "Condition de remboursement"}
                         </h4>
-                        <p style={{ margin: 0, fontSize: "0.85rem", color: isRefundable ? "#166534" : "#991B1B", lineHeight: 1.5 }}>
-                            {isRefundable 
-                                ? "L'événement commence dans plus de 24h. Vous serez intégralement remboursé sur votre moyen de paiement."
-                                : "L'événement commence dans moins de 24h. Conformément à nos conditions, aucun remboursement n'est possible."}
+                        <p style={{ margin: 0, fontSize: "0.85rem", color: isPastEvent ? "#991B1B" : isRefundable ? "#166534" : "#991B1B", lineHeight: 1.5 }}>
+                            {isPastEvent
+                                ? "Votre demande sera examinée conformément aux conditions prévues pour les événements terminés."
+                                : isRefundable
+                                  ? "L'événement commence dans plus de 24h. Vous serez intégralement remboursé sur votre moyen de paiement."
+                                  : "L'événement commence dans moins de 24h. Conformément à nos conditions, aucun remboursement n'est possible."}
                         </p>
                     </div>
+                )}
+                {needsRefundExplanation && (
+                    <label style={{ display: "flex", flexDirection: "column", gap: "0.45rem", fontSize: "0.88rem", fontWeight: 600, color: "var(--text-main)" }}>
+                        Expliquez pourquoi vous souhaitez être remboursé
+                        <textarea
+                            value={refundReason}
+                            onChange={(e) => setRefundReason(e.target.value)}
+                            rows={8}
+                            placeholder="Décrivez la situation (obligatoire pour enregistrer votre demande)…"
+                            style={{
+                                width: "100%",
+                                minHeight: "10rem",
+                                boxSizing: "border-box",
+                                border: "1px solid rgba(35,59,61,0.2)",
+                                borderRadius: "14px",
+                                padding: "0.85rem 1rem",
+                                fontFamily: "inherit",
+                                fontSize: "0.95rem",
+                                lineHeight: 1.5,
+                                resize: "vertical",
+                                outline: "none",
+                            }}
+                        />
+                    </label>
                 )}
                 {!isPaid && (
                     <div style={{ background: "rgba(59,130,246,0.1)", padding: "1rem", borderRadius: "12px", border: "1px solid rgba(59,130,246,0.3)" }}>
@@ -219,10 +317,10 @@ function CancelConfirmModal({ item, open, onClose, onConfirm, isLoading }) {
                     </div>
                 )}
                 <div style={{ display: "flex", gap: "0.65rem", paddingTop: "0.5rem" }}>
-                    <button type="button" disabled={isLoading} onClick={() => onConfirm(item)} className="action-cta" style={{ flex: 1, background: "#DC2626", color: "white", border: "none", fontSize: "0.9rem", fontFamily: "inherit" }}>
-                        {isLoading ? "…" : "Confirmer l'annulation"}
+                    <button type="button" disabled={isLoading || (needsRefundExplanation && !refundReason.trim())} onClick={() => onConfirm(item, { refundReason: refundReason.trim() })} className="action-cta" style={{ flex: 1, background: "#DC2626", color: "white", border: "none", fontSize: "0.9rem", fontFamily: "inherit" }}>
+                        {isLoading ? "…" : isPastEvent && isPaid ? "Confirmer la demande" : "Confirmer l'annulation"}
                     </button>
-                    <button type="button" onClick={onClose} className="action-cta" style={{ background: "#E8ECEE", color: "var(--text-main)", fontSize: "0.9rem", fontFamily: "inherit" }}>Annuler</button>
+                    <button type="button" onClick={onClose} className="action-cta" style={{ background: "#E8ECEE", color: "var(--text-main)", fontSize: "0.9rem", fontFamily: "inherit" }}>Fermer</button>
                 </div>
             </div>
         </AdminModal>
@@ -233,9 +331,11 @@ function CancelConfirmModal({ item, open, onClose, onConfirm, isLoading }) {
 function RegistrationCard({ item, index, onDetail, onUnregister, isLoading }) {
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
     const start = new Date(item.dateDebut);
+    const isPastEvent = isEventPast(item);
     const isPaid = item.paymentStatus === "paid";
     const isPending = item.paymentStatus === "pending";
-    const isCancelled = item.status === "annule";
+    const isEventCancelled = item.status === "annule";
+    const isRegCancelled = item.registrationStatus === "cancelled";
     const paymentLabel = isPending ? "Paiement en attente" : isPaid ? "Paye" : "Gratuit";
     const paymentStyle = isPending
         ? { bg: "rgba(245, 158, 11, 0.18)", color: "#FCD34D", border: "1px solid rgba(245, 158, 11, 0.35)" }
@@ -257,9 +357,19 @@ function RegistrationCard({ item, index, onDetail, onUnregister, isLoading }) {
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(5,10,5,0.92) 0%, rgba(5,10,5,0.6) 38%, rgba(5,10,5,0.1) 62%, transparent 78%)", pointerEvents: "none" }} />
 
             <div style={{ position: "absolute", top: "14px", right: "14px", display: "flex", gap: "0.4rem", zIndex: 2, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {isCancelled && (
+                {isEventCancelled && (
                     <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(214, 78, 40, 0.16)", color: "#FECACA", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(214, 78, 40, 0.28)", letterSpacing: "0.03em" }}>
                         Annule
+                    </div>
+                )}
+                {!isEventCancelled && isRegCancelled && item.refundStatus === "requested" && (
+                    <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(245, 158, 11, 0.2)", color: "#FDE68A", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(245, 158, 11, 0.35)", letterSpacing: "0.03em" }}>
+                        Remb. demande
+                    </div>
+                )}
+                {!isEventCancelled && !isRegCancelled && isPaid && (
+                    <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: "rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.24)", letterSpacing: "0.03em" }}>
+                        Inscrit
                     </div>
                 )}
                 <div style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 700, background: paymentStyle.bg, color: paymentStyle.color, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: paymentStyle.border, letterSpacing: "0.03em" }}>
@@ -288,7 +398,7 @@ function RegistrationCard({ item, index, onDetail, onUnregister, isLoading }) {
                         </span>
                     )}
                 </div>
-                {isCancelled && (
+                {isEventCancelled && (
                     <div style={{ background: "rgba(214, 78, 40, 0.14)", border: "1px solid rgba(214, 78, 40, 0.24)", color: "#FEE2E2", borderRadius: "14px", padding: "0.7rem 0.8rem", fontSize: "0.78rem", lineHeight: 1.45, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
                         <strong>Evenement annule.</strong>
                         {item.rejectionComment ? ` ${item.rejectionComment}` : " L'organisateur a annule cet evenement."}
@@ -298,9 +408,27 @@ function RegistrationCard({ item, index, onDetail, onUnregister, isLoading }) {
                     <button type="button" onClick={() => onDetail(item)} style={{ padding: "9px 14px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, fontFamily: "inherit" }}>
                         Voir le detail
                     </button>
-                    {!isCancelled && (
-                        <button type="button" disabled={isLoading} onClick={() => onUnregister(item)} style={{ flex: 1, padding: "9px 14px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "rgba(255,255,255,0.78)", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, fontFamily: "inherit" }}>
-                            {isLoading ? "…" : (isPaid ? "Demander remboursement" : "Se desinscrire")}
+                    {!isEventCancelled && !isRegCancelled && !(isPastEvent && !isPaid) && (
+                        <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => onUnregister(item)}
+                            style={{
+                                flex: 1,
+                                padding: "9px 14px",
+                                borderRadius: "999px",
+                                border: "1px solid rgba(252,165,165,0.45)",
+                                background: isPastEvent && isPaid ? "rgba(220,38,38,0.35)" : "rgba(220,38,38,0.28)",
+                                backdropFilter: "blur(8px)",
+                                WebkitBackdropFilter: "blur(8px)",
+                                color: "#fecaca",
+                                cursor: "pointer",
+                                fontSize: "0.82rem",
+                                fontWeight: 600,
+                                fontFamily: "inherit",
+                            }}
+                        >
+                            {isLoading ? "…" : isPastEvent && isPaid ? "Remboursement" : "Se désinscrire"}
                         </button>
                     )}
                 </div>
@@ -437,10 +565,22 @@ export default function ParticulierEvenementsView({ events = [], registrations =
         setCancelItem(item);
     };
 
-    const handleConfirmCancel = async (item) => {
+    const handleConfirmCancel = async (item, opts = {}) => {
+        const past = isEventPast(item);
+        const paidDone = item.paymentStatus === "paid";
+        const reason = (opts.refundReason || "").trim();
+        if (past && paidDone && !reason) {
+            showToast("Veuillez indiquer le motif de votre demande de remboursement.", false);
+            return;
+        }
+
         setLoading(item.id, true);
         try {
-            const res = await fetch(apiUrl(`/events/${item.id}/register`), { method: "DELETE", headers: buildAuthHeaders() });
+            const headers = past && paidDone
+                ? buildAuthHeaders({ "Content-Type": "application/json" })
+                : buildAuthHeaders();
+            const body = past && paidDone ? JSON.stringify({ reason }) : undefined;
+            const res = await fetch(apiUrl(`/events/${item.id}/register`), { method: "DELETE", headers, body });
             const data = await res.json().catch(() => ({}));
             
             // Check the HTTP status explicitly
@@ -448,7 +588,9 @@ export default function ParticulierEvenementsView({ events = [], registrations =
             
             setRegisteredIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
             
-            if (data.refunded) {
+            if (data.refundRequested) {
+                showToast("Demande de remboursement enregistrée. Nous reviendrons vers vous.");
+            } else if (data.refunded) {
                 showToast(`Annulation confirmée et remboursement de ${data.refundAmount}€ initié.`);
             } else if (data.refunded === false) {
                 showToast(`Annulation confirmée. Non remboursable : ${data.reason}.`, false);
@@ -499,7 +641,7 @@ export default function ParticulierEvenementsView({ events = [], registrations =
 
                 <div className="header-section">
                     <div className="title-area">
-                        <span className="activities-label">Espace particulier</span>
+                        <span className="activities-label">Activités & inscriptions</span>
                         <h1>Activités & événements</h1>
                     </div>
                 </div>
@@ -572,7 +714,7 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                 )}
                 <div className="header-section">
                     <div className="title-area">
-                        <span className="activities-label">Espace particulier</span>
+                        <span className="activities-label">Activités & inscriptions</span>
                         <h1>Mes inscriptions</h1>
                     </div>
                 </div>

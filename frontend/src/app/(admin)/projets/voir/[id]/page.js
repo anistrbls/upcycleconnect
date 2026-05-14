@@ -1,17 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useParams } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../../lib/api";
 import { ChevronLeft, ChevronRight, X, ImageIcon, Box, BarChart3, Leaf, Calendar, User, Tag, MapPin, Award } from "lucide-react";
 
 const styles = {
     container: { width: "100%", padding: "1rem 2rem 3rem 0", animation: "fadeIn 0.5s ease-out" },
-    backBtn: {
-        display: "inline-flex", alignItems: "center", gap: "0.4rem",
-        background: "none", border: "none", cursor: "pointer",
-        color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: "1.5rem", padding: 0,
-    },
     headerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "2rem" },
     title: { fontSize: "2.2rem", fontWeight: "800", color: "var(--text-main)", margin: 0, letterSpacing: "-0.02em" },
     meta: { color: "var(--text-muted)", fontSize: "0.95rem", marginTop: "0.5rem" },
@@ -81,7 +76,14 @@ const styles = {
 };
 
 export default function ProjectDetailView() {
-    const router = useRouter();
+    return (
+        <Suspense fallback={<div style={styles.container}><p style={{ color: "var(--text-muted)" }}>Chargement du projet...</p></div>}>
+            <ProjectDetailInner />
+        </Suspense>
+    );
+}
+
+function ProjectDetailInner() {
     const params = useParams();
     const id = params.id;
 
@@ -105,8 +107,8 @@ export default function ProjectDetailView() {
     useEffect(() => {
         const fetchDetail = async () => {
             try {
-                const res = await fetch(apiUrl(`/part/projects/${id}`), { headers: buildAuthHeaders() });
-                const json = await res.json();
+                let res = await fetch(apiUrl(`/part/projects/${id}`), { headers: buildAuthHeaders() });
+                const json = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(json.error || "Erreur de chargement");
                 setData(json);
             } catch (err) {
@@ -131,10 +133,6 @@ export default function ProjectDetailView() {
 
     return (
         <div style={styles.container}>
-            <button style={styles.backBtn} onClick={() => router.push("/projets/postes")}>
-                <ChevronLeft size={16} /> Retour à la liste
-            </button>
-
             <div style={styles.headerRow}>
                 <div>
                     <h1 style={styles.title}>{project.title}</h1>

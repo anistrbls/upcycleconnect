@@ -55,6 +55,23 @@ export const buildAuthHeaders = (extra = {}) => {
     return { Authorization: `Bearer ${token}`, ...extra };
 };
 
+/** Rôle JWT (`particulier`, `professionnel`, etc.) ou null si absent / illisible. */
+export const getRoleFromToken = () => {
+    if (typeof window === "undefined") return null;
+    try {
+        const t = window.localStorage.getItem(TOKEN_KEY);
+        if (!t) return null;
+        const parts = t.split(".");
+        if (parts.length < 2) return null;
+        const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const padded = b64 + "===".slice((b64.length + 3) % 4);
+        const payload = JSON.parse(atob(padded));
+        return typeof payload.role === "string" ? payload.role : null;
+    } catch {
+        return null;
+    }
+};
+
 export const fetchWithTimeout = async (input, init = {}, timeoutMs = 10000) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

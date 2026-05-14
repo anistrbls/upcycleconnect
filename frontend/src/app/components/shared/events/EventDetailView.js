@@ -27,6 +27,16 @@ const STATUS_CONFIG = {
     "brouillon": { label: "Brouillon", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.1)" },
 };
 
+function isEventPastFromEvent(ev) {
+    if (!ev) return false;
+    const end = new Date(ev.dateFin);
+    const start = new Date(ev.dateDebut);
+    const now = new Date();
+    if (!isNaN(end.getTime())) return end < now;
+    if (!isNaN(start.getTime())) return start < now;
+    return false;
+}
+
 export default function EventDetailView({ eventId, onBack }) {
     const [event, setEvent] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -43,6 +53,11 @@ export default function EventDetailView({ eventId, onBack }) {
     const [cancelComment, setCancelComment] = useState("");
     const [cancelError, setCancelError] = useState("");
     const [unregisterModalOpen, setUnregisterModalOpen] = useState(false);
+    const [refundRequestReason, setRefundRequestReason] = useState("");
+
+    useEffect(() => {
+        if (unregisterModalOpen) setRefundRequestReason("");
+    }, [unregisterModalOpen, eventId]);
 
     const loadEventData = async (id) => {
         const token = localStorage.getItem(TOKEN_KEY);
@@ -58,7 +73,11 @@ export default function EventDetailView({ eventId, onBack }) {
         });
         if (regRes.ok) {
             const regData = await regRes.json();
-            setIsRegistered(regData.items?.some(r => String(r.id) === String(id)));
+            setIsRegistered(
+                regData.items?.some(
+                    (r) => String(r.id) === String(id) && r.registrationStatus !== "cancelled"
+                )
+            );
         }
     };
 
@@ -213,9 +232,20 @@ export default function EventDetailView({ eventId, onBack }) {
         setRegistering(true);
         try {
             if (isRegistered) {
+                const pastRefund = isEventPastFromEvent(event);
+                const needReason = pastRefund && event.paymentStatus === "paid";
+                const reason = refundRequestReason.trim();
+                if (needReason && !reason) {
+                    throw new Error("Veuillez indiquer le motif de votre demande de remboursement.");
+                }
+                const body = needReason ? JSON.stringify({ reason }) : undefined;
                 const res = await fetch(apiUrl(`/events/${eventId}/register`), {
                     method: "DELETE",
-                    headers: { Authorization: `Bearer ${token}` }
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        ...(body ? { "Content-Type": "application/json" } : {}),
+                    },
+                    body,
                 });
                 if (!res.ok) {
                     const data = await res.json();
@@ -280,6 +310,12 @@ export default function EventDetailView({ eventId, onBack }) {
 
     const isFull = event.capacite > 0 && event.participantCount >= event.capacite;
     const photos = event.imageUrl ? [event.imageUrl] : [];
+
+    const isPaidEvent = event.pricingType === "payant" || event.paymentStatus === "paid";
+    const isPastEventRefund = isEventPastFromEvent(event);
+    const refundDiffHours = (startDate - new Date()) / (1000 * 3600);
+    const isRefundWindow24h = refundDiffHours >= 24;
+    const unregisterModalTitle = isPastEventRefund && isPaidEvent ? "Demande de remboursement" : "Désinscription";
 
     const copyShareLink = () => {
         if (navigator.share) {
@@ -522,6 +558,30 @@ export default function EventDetailView({ eventId, onBack }) {
                                             <div style={{ fontSize: "0.85rem", color: "var(--state-critical)", background: "rgba(214, 78, 40, 0.08)", padding: "0.85rem", borderRadius: "14px", textAlign: "center", fontWeight: "700" }}>
                                                 Cet evenement est annule.
                                             </div>
+                                        ) : isPastEventRefund && isRegistered && isPaidEvent ? (
+                                            <div style={{ display: "grid", gap: "0.6rem" }}>
+                                                {event.transactionRef && (
+                                                    <div style={{ marginBottom: "0.2rem" }}>
+                                                        <div style={{ fontSize: "0.65rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>Référence de paiement</div>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem", color: "var(--text-main)", fontWeight: "600", fontFamily: "monospace" }}>
+                                                            <CreditCard size={13} style={{ color: "#2563eb" }} /> {event.transactionRef}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setUnregisterModalOpen(true)}
+                                                    disabled={registering}
+                                                    style={{
+                                                        ...actionBtn("neutral"),
+                                                        border: "1px solid rgba(220,38,38,0.45)",
+                                                        background: "rgba(220,38,38,0.1)",
+                                                        color: "#B91C1C",
+                                                    }}
+                                                >
+                                                    <><XCircle size={18} /> Remboursement</>
+                                                </button>
+                                            </div>
                                         ) : isPassed ? (
                                             <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", background: "rgba(35,59,61,0.06)", padding: "0.85rem", borderRadius: "14px", textAlign: "center", fontWeight: "600" }}>
                                                 Cet événement est terminé.
@@ -539,7 +599,16 @@ export default function EventDetailView({ eventId, onBack }) {
                                                 <button 
                                                     onClick={handleRegister}
                                                     disabled={registering || (isFull && !isRegistered)}
-                                                    style={actionBtn(isRegistered ? "neutral" : "primary")}
+                                                    style={
+                                                        isRegistered
+                                                            ? {
+                                                                  ...actionBtn("neutral"),
+                                                                  border: "1px solid rgba(220,38,38,0.45)",
+                                                                  background: "rgba(220,38,38,0.1)",
+                                                                  color: "#B91C1C",
+                                                              }
+                                                            : actionBtn(isFull ? "disabled" : "primary")
+                                                    }
                                                 >
                                                     {isRegistered ? (
                                                         <><XCircle size={18} /> Se désinscrire</>
@@ -646,46 +715,80 @@ export default function EventDetailView({ eventId, onBack }) {
 
             {/* Unregistration Confirmation Modal */}
             {event && (
-                <AdminModal open={unregisterModalOpen} title="Désinscription" onClose={() => setUnregisterModalOpen(false)}>
+                <AdminModal open={unregisterModalOpen} title={unregisterModalTitle} onClose={() => setUnregisterModalOpen(false)}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                        <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--text-main)" }}>
-                            Êtes-vous sûr de vouloir vous désinscrire de cet événement ?
-                        </p>
-                        
-                        {(event.pricingType === "payant" || event.paymentStatus === "paid") && (
-                            <div style={{ 
-                                background: (new Date(event.dateDebut) - new Date()) / (1000 * 3600) >= 24 ? "rgba(34,197,94,0.1)" : "rgba(220,38,38,0.1)", 
-                                padding: "1rem", borderRadius: "12px", 
-                                border: (new Date(event.dateDebut) - new Date()) / (1000 * 3600) >= 24 ? "1px solid rgba(34,197,94,0.3)" : "1px solid rgba(220,38,38,0.3)" 
+                        {isPastEventRefund && isPaidEvent ? (
+                            <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--text-main)" }}>
+                                Vous souhaitez demander un remboursement pour votre participation à cet événement, qui est déjà terminé.
+                            </p>
+                        ) : (
+                            <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--text-main)" }}>
+                                Êtes-vous sûr de vouloir vous désinscrire de cet événement ?
+                            </p>
+                        )}
+
+                        {isPaidEvent && (
+                            <div style={{
+                                background: isPastEventRefund ? "rgba(220,38,38,0.1)" : isRefundWindow24h ? "rgba(34,197,94,0.1)" : "rgba(220,38,38,0.1)",
+                                padding: "1rem",
+                                borderRadius: "12px",
+                                border: isPastEventRefund ? "1px solid rgba(220,38,38,0.35)" : isRefundWindow24h ? "1px solid rgba(34,197,94,0.3)" : "1px solid rgba(220,38,38,0.3)",
                             }}>
-                                <h4 style={{ margin: "0 0 0.4rem 0", color: (new Date(event.dateDebut) - new Date()) / (1000 * 3600) >= 24 ? "#166534" : "#991B1B", fontSize: "0.95rem" }}>
-                                    Condition de remboursement
+                                <h4 style={{ margin: "0 0 0.4rem 0", color: isPastEventRefund ? "#991B1B" : isRefundWindow24h ? "#166534" : "#991B1B", fontSize: "0.95rem" }}>
+                                    {isPastEventRefund ? "Remboursement (événement passé)" : "Condition de remboursement"}
                                 </h4>
-                                <p style={{ margin: 0, fontSize: "0.85rem", color: (new Date(event.dateDebut) - new Date()) / (1000 * 3600) >= 24 ? "#166534" : "#991B1B", lineHeight: 1.5 }}>
-                                    {(new Date(event.dateDebut) - new Date()) / (1000 * 3600) >= 24
-                                        ? "L'événement commence dans plus de 24h. Vous serez intégralement remboursé sur votre moyen de paiement."
-                                        : "L'événement commence dans moins de 24h. Conformément à nos conditions, aucun remboursement n'est possible."}
+                                <p style={{ margin: 0, fontSize: "0.85rem", color: isPastEventRefund ? "#991B1B" : isRefundWindow24h ? "#166534" : "#991B1B", lineHeight: 1.5 }}>
+                                    {isPastEventRefund
+                                        ? "Votre demande sera examinée conformément aux conditions prévues pour les événements terminés."
+                                        : isRefundWindow24h
+                                          ? "L'événement commence dans plus de 24h. Vous serez intégralement remboursé sur votre moyen de paiement."
+                                          : "L'événement commence dans moins de 24h. Conformément à nos conditions, aucun remboursement n'est possible."}
                                 </p>
                             </div>
                         )}
 
+                        {isPastEventRefund && event.paymentStatus === "paid" && (
+                            <label style={{ display: "flex", flexDirection: "column", gap: "0.45rem", fontSize: "0.88rem", fontWeight: 600, color: "var(--text-main)" }}>
+                                Expliquez pourquoi vous souhaitez être remboursé
+                                <textarea
+                                    value={refundRequestReason}
+                                    onChange={(e) => setRefundRequestReason(e.target.value)}
+                                    rows={8}
+                                    placeholder="Décrivez la situation (obligatoire pour enregistrer votre demande)…"
+                                    style={{
+                                        width: "100%",
+                                        minHeight: "10rem",
+                                        boxSizing: "border-box",
+                                        border: "1px solid rgba(35,59,61,0.2)",
+                                        borderRadius: "14px",
+                                        padding: "0.85rem 1rem",
+                                        fontFamily: "inherit",
+                                        fontSize: "0.95rem",
+                                        lineHeight: 1.5,
+                                        resize: "vertical",
+                                        outline: "none",
+                                    }}
+                                />
+                            </label>
+                        )}
+
                         <div style={{ display: "flex", gap: "0.65rem", paddingTop: "0.5rem" }}>
-                            <button 
-                                type="button" 
-                                disabled={registering} 
-                                onClick={handleRegister} 
-                                className="action-cta" 
+                            <button
+                                type="button"
+                                disabled={registering || (isPastEventRefund && event.paymentStatus === "paid" && !refundRequestReason.trim())}
+                                onClick={handleRegister}
+                                className="action-cta"
                                 style={{ flex: 1, background: "#DC2626", color: "white", border: "none", fontSize: "0.9rem", fontFamily: "inherit" }}
                             >
-                                {registering ? "…" : "Confirmer la désinscription"}
+                                {registering ? "…" : isPastEventRefund && isPaidEvent ? "Confirmer la demande" : "Confirmer la désinscription"}
                             </button>
-                            <button 
-                                type="button" 
-                                onClick={() => setUnregisterModalOpen(false)} 
-                                className="action-cta" 
+                            <button
+                                type="button"
+                                onClick={() => setUnregisterModalOpen(false)}
+                                className="action-cta"
                                 style={{ background: "#E8ECEE", color: "var(--text-main)", fontSize: "0.9rem", fontFamily: "inherit" }}
                             >
-                                Annuler
+                                Fermer
                             </button>
                         </div>
                     </div>

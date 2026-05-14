@@ -137,6 +137,7 @@ func (r *Repository) EnsureLogisticsSchema() error {
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_payment_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_amount_cents BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_platform_fee_cents BIGINT NOT NULL DEFAULT 0`,
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_currency TEXT NOT NULL DEFAULT 'eur'`,
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_last_error TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_paid_at TIMESTAMPTZ`,
@@ -162,6 +163,35 @@ func (r *Repository) EnsureLogisticsSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_logistics_stripe_payment_intent ON item_logistics(stripe_payment_intent_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_prof_watchlist_user ON professional_item_watchlist(user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_prof_watchlist_item ON professional_item_watchlist(item_id)`,
+		`CREATE TABLE IF NOT EXISTS sale_commission_config (
+			id      INT PRIMARY KEY DEFAULT 1,
+			percent NUMERIC(6,3) NOT NULL DEFAULT 0,
+			CONSTRAINT sale_commission_percent_range CHECK (percent >= 0 AND percent <= 100)
+		)`,
+		`ALTER TABLE sale_commission_config ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'deducted'`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS sale_commission_mode TEXT NOT NULL DEFAULT ''`,
+		`INSERT INTO sale_commission_config (id, percent) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`,
+		`CREATE TABLE IF NOT EXISTS pro_seller_ratings (
+			id               BIGSERIAL PRIMARY KEY,
+			item_id          BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+			pro_user_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			seller_user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			stars            SMALLINT NOT NULL CHECK (stars >= 1 AND stars <= 5),
+			created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (item_id, pro_user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pro_seller_ratings_seller ON pro_seller_ratings(seller_user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_pro_seller_ratings_item ON pro_seller_ratings(item_id)`,
+		`CREATE TABLE IF NOT EXISTS seller_pro_ratings (
+			item_id          BIGINT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+			seller_user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			pro_user_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			stars            SMALLINT NOT NULL CHECK (stars >= 1 AND stars <= 5),
+			created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_seller_pro_ratings_pro ON seller_pro_ratings(pro_user_id)`,
 	}
 	for _, stmt := range statements {
 		if _, err := r.db.Exec(stmt); err != nil {
@@ -321,11 +351,25 @@ func (r *Repository) releaseExpiredReservations(ctx context.Context) {
 		     stripe_checkout_session_id = '',
 		     stripe_payment_intent_id = '',
 		     stripe_payment_status = '',
+		     stripe_amount_cents = 0,
+		     stripe_platform_fee_cents = 0,
+		     sale_commission_mode = '',
 		     stripe_last_error = '',
 		     updated_at = NOW()
 		 WHERE workflow_status IN ('reserved', 'pending_payment')
 		   AND reservation_expires_at IS NOT NULL
 		   AND reservation_expires_at < NOW()`)
+}
+
+// releaseExpiredDepositCodes aligne la BDD avec l’expiration des codes dépôt (comme GetLogisticsByItemID).
+// Sans cela, la liste admin affiche « expiré » en mémoire mais les stats REST comptent encore « en attente dépôt ».
+func (r *Repository) releaseExpiredDepositCodes(ctx context.Context) {
+	r.db.ExecContext(ctx,
+		`UPDATE item_logistics
+		 SET workflow_status = 'deposit_expired', updated_at = NOW()
+		 WHERE workflow_status = 'deposit_code_sent'
+		   AND deposit_code_expires_at IS NOT NULL
+		   AND deposit_code_expires_at < NOW()`)
 }
 
 type ProfessionalItem struct {
@@ -345,6 +389,7 @@ type ProfessionalItem struct {
 	Country            string  `json:"country"`
 	Image              string  `json:"image"`
 	Photos             []string `json:"photos"`
+	CreatedAt          time.Time `json:"createdAt"`
 	WorkflowStatus     string  `json:"workflowStatus"`
 	TransactionRef     string  `json:"transactionRef,omitempty"`
 	DepositPointName   string  `json:"depositPointName"`
@@ -359,9 +404,22 @@ type ProfessionalItem struct {
 	ReservedAt         *time.Time `json:"reservedAt,omitempty"`
 	ReservationExpiresAt *time.Time `json:"reservation_expires_at,omitempty"`
 	PickupCode           string     `json:"pickupCode,omitempty"`
+	PickupCodeExpiresAt  *time.Time `json:"pickupCodeExpiresAt,omitempty"`
 	PaymentValidatedAt   *time.Time `json:"paymentValidatedAt,omitempty"`
 	DepositedAt          *time.Time `json:"depositedAt,omitempty"`
 	CancelReason         string     `json:"cancelReason,omitempty"`
+	// Affichage prix côté pro (checkout) : mode / taux globaux au moment de la requête.
+	SaleCommissionMode    string  `json:"saleCommissionMode,omitempty"`
+	SaleCommissionPercent float64 `json:"saleCommissionPercent,omitempty"`
+	// Vendeur (particulier) et notes cumulées (notes laissées par les pros sur ce vendeur).
+	SellerUserID         int64      `json:"sellerUserId"`
+	SellerName           string     `json:"sellerName"`
+	SellerRatingAvg      *float64   `json:"sellerRatingAvg,omitempty"`
+	SellerRatingCount    int64      `json:"sellerRatingCount"`
+	MySellerRating       *int       `json:"mySellerRating,omitempty"`
+	SellerCity           string     `json:"sellerCity,omitempty"`
+	SellerRegisteredAt   *time.Time `json:"sellerRegisteredAt,omitempty"`
+	SellerItemsCount     int64      `json:"sellerItemsCount"`
 }
 
 func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]ProfessionalItem, error) {
@@ -370,6 +428,7 @@ func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]Prof
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material,
 		        i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.image, i.photos,
+		        i.created_at,
 		        l.workflow_status,
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
 		        COALESCE(dp.address, ''), COALESCE(dp.zip_code, ''), COALESCE(dp.city, ''), COALESCE(dp.country, ''),
@@ -393,6 +452,7 @@ func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]Prof
 		if err := rows.Scan(
 			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material,
 			&it.Quantity, &weightValue, &it.WeightUnit, &weightGrams, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
+			&it.CreatedAt,
 			&it.WorkflowStatus,
 			&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
 			&it.DepositPointAddress, &it.DepositPointZipCode, &it.DepositPointCity, &it.DepositPointCountry,
@@ -413,6 +473,13 @@ func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]Prof
 	if results == nil {
 		results = []ProfessionalItem{}
 	}
+	// Même enrichissement que GetProfessionalItemDetail : la liste JSON doit exposer mode / % pour le prix affiché côté front (commission « added »).
+	if modeCfg, pct, errCfg := r.GetSaleCommissionConfig(ctx); errCfg == nil {
+		for i := range results {
+			results[i].SaleCommissionMode = modeCfg
+			results[i].SaleCommissionPercent = pct
+		}
+	}
 	return results, nil
 }
 
@@ -423,15 +490,17 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 	var reservedByUserID *int64
 	var weightValue sql.NullFloat64
 	var weightGrams sql.NullFloat64
+	var pickupCodeExp sql.NullTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material,
 		        i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.image, i.photos,
+		        i.created_at,
 		        l.workflow_status,
 		        COALESCE(l.transaction_ref, ''),
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
 		        COALESCE(dp.address, ''), COALESCE(dp.zip_code, ''), COALESCE(dp.city, ''), COALESCE(dp.country, ''),
 		        COALESCE(ct.name, ''), l.updated_at, COALESCE(l.stripe_payment_status, ''),
-		        l.reserved_by_user_id, l.reserved_at, l.reservation_expires_at, l.pickup_code, l.payment_validated_at, l.deposited_at
+		        l.reserved_by_user_id, l.reserved_at, l.reservation_expires_at, l.pickup_code, l.pickup_code_expires_at, l.payment_validated_at, l.deposited_at
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 LEFT JOIN deposit_points dp ON dp.id = l.deposit_point_id
@@ -441,12 +510,13 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 	).Scan(
 		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material,
 		&it.Quantity, &weightValue, &it.WeightUnit, &weightGrams, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
+		&it.CreatedAt,
 		&it.WorkflowStatus,
 		&it.TransactionRef,
 		&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
 		&it.DepositPointAddress, &it.DepositPointZipCode, &it.DepositPointCity, &it.DepositPointCountry,
 		&it.ContainerName, &it.AvailableAt, &it.StripePaymentStatus,
-		&reservedByUserID, &it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &it.PaymentValidatedAt, &it.DepositedAt,
+		&reservedByUserID, &it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &pickupCodeExp, &it.PaymentValidatedAt, &it.DepositedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -459,6 +529,10 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 		g := weightGrams.Float64
 		it.WeightGrams = &g
 	}
+	if pickupCodeExp.Valid {
+		t := pickupCodeExp.Time
+		it.PickupCodeExpiresAt = &t
+	}
 
 	if it.WorkflowStatus != WFAvailable {
 		if reservedByUserID == nil || *reservedByUserID != userID {
@@ -468,6 +542,73 @@ func (r *Repository) GetProfessionalItemDetail(ctx context.Context, itemID, user
 
 	if reservedByUserID == nil || *reservedByUserID != userID {
 		it.PickupCode = ""
+		it.PickupCodeExpiresAt = nil
+	}
+
+	if modeCfg, pct, errCfg := r.GetSaleCommissionConfig(ctx); errCfg == nil {
+		it.SaleCommissionMode = modeCfg
+		it.SaleCommissionPercent = pct
+	}
+
+	var sellerRatingAvg sql.NullFloat64
+	var sellerRatingCount sql.NullInt64
+	var mySellerStars sql.NullInt64
+	var sellerCreatedAt sql.NullTime
+	var sellerFirst, sellerLast, sellerEmail string
+	err = r.db.QueryRowContext(ctx,
+		`SELECT i.user_id,
+		        TRIM(COALESCE(seller.firstname, '')),
+		        TRIM(COALESCE(seller.lastname, '')),
+		        TRIM(COALESCE(seller.email, '')),
+		        (SELECT AVG(r.stars)::float8 FROM pro_seller_ratings r WHERE r.seller_user_id = i.user_id),
+		        (SELECT COUNT(*)::bigint FROM pro_seller_ratings r WHERE r.seller_user_id = i.user_id),
+		        (SELECT r.stars FROM pro_seller_ratings r WHERE r.item_id = i.id AND r.pro_user_id = $2 LIMIT 1),
+		        seller.created_at,
+		        (SELECT COUNT(*)::bigint FROM items i2 WHERE i2.user_id = i.user_id
+		           AND NOT COALESCE(i2.deleted_by_user, false)
+		           AND TRIM(LOWER(COALESCE(i2.status, ''))) <> 'brouillon'),
+		        COALESCE(TRIM(seller.city), '')
+		 FROM items i
+		 JOIN users seller ON seller.id = i.user_id
+		 WHERE i.id = $1`,
+		itemID, userID,
+	).Scan(
+		&it.SellerUserID,
+		&sellerFirst,
+		&sellerLast,
+		&sellerEmail,
+		&sellerRatingAvg,
+		&sellerRatingCount,
+		&mySellerStars,
+		&sellerCreatedAt,
+		&it.SellerItemsCount,
+		&it.SellerCity,
+	)
+	if err != nil {
+		return nil, err
+	}
+	displayName := strings.TrimSpace(sellerFirst + " " + sellerLast)
+	if displayName == "" {
+		displayName = strings.TrimSpace(sellerEmail)
+	}
+	if displayName == "" {
+		displayName = "Non renseigné"
+	}
+	it.SellerName = displayName
+	if sellerRatingAvg.Valid {
+		v := sellerRatingAvg.Float64
+		it.SellerRatingAvg = &v
+	}
+	if sellerRatingCount.Valid {
+		it.SellerRatingCount = sellerRatingCount.Int64
+	}
+	if mySellerStars.Valid {
+		s := int(mySellerStars.Int64)
+		it.MySellerRating = &s
+	}
+	if sellerCreatedAt.Valid {
+		t := sellerCreatedAt.Time
+		it.SellerRegisteredAt = &t
 	}
 
 	return &it, nil
@@ -482,14 +623,21 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material,
 		        i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.image, i.photos,
+		        i.created_at,
 		        l.workflow_status,
 		        COALESCE(l.transaction_ref, ''),
 		        COALESCE(dp.name, ''), COALESCE(dp.photos, '{}'),
 		        COALESCE(dp.address, ''), COALESCE(dp.zip_code, ''), COALESCE(dp.city, ''), COALESCE(dp.country, ''),
 		        COALESCE(ct.name, ''), l.updated_at, COALESCE(l.stripe_payment_status, ''),
-		        l.reserved_at, l.reservation_expires_at, l.pickup_code, l.payment_validated_at, l.deposited_at, COALESCE(l.cancel_reason, '')
+		        l.reserved_at, l.reservation_expires_at, l.pickup_code, l.pickup_code_expires_at, l.payment_validated_at, l.deposited_at, COALESCE(l.cancel_reason, ''),
+		        i.user_id,
+		        COALESCE(NULLIF(TRIM(CONCAT_WS(' ', NULLIF(TRIM(seller.firstname), ''), NULLIF(TRIM(seller.lastname), ''))), ''), NULLIF(TRIM(seller.email), ''), '(inconnu)'),
+		        (SELECT AVG(r.stars)::float8 FROM pro_seller_ratings r WHERE r.seller_user_id = i.user_id),
+		        (SELECT COUNT(*)::bigint FROM pro_seller_ratings r WHERE r.seller_user_id = i.user_id),
+		        (SELECT r.stars FROM pro_seller_ratings r WHERE r.item_id = i.id AND r.pro_user_id = $1 LIMIT 1)
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
+		 JOIN users seller ON seller.id = i.user_id
 		 LEFT JOIN deposit_points dp ON dp.id = l.deposit_point_id
 		 LEFT JOIN containers ct ON ct.id = l.container_id
 		 WHERE l.workflow_status IN ('pending_payment', 'reserved', 'assigned', 'deposit_code_sent', 'deposited', 'picked_up', 'ready_for_pickup', 'cancelled')
@@ -517,15 +665,22 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 		var it ProfessionalItem
 		var weightValue sql.NullFloat64
 		var weightGrams sql.NullFloat64
+		var sellerRatingAvg sql.NullFloat64
+		var sellerRatingCount sql.NullInt64
+		var mySellerStars sql.NullInt64
+		var pickupCodeExp sql.NullTime
 		if err := rows.Scan(
 			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material,
 			&it.Quantity, &weightValue, &it.WeightUnit, &weightGrams, &it.City, &it.Country, &it.Image, pq.Array(&it.Photos),
+			&it.CreatedAt,
 			&it.WorkflowStatus,
 			&it.TransactionRef,
 			&it.DepositPointName, pq.Array(&it.DepositPointPhotos),
 			&it.DepositPointAddress, &it.DepositPointZipCode, &it.DepositPointCity, &it.DepositPointCountry,
 			&it.ContainerName, &it.AvailableAt, &it.StripePaymentStatus,
-			&it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &it.PaymentValidatedAt, &it.DepositedAt, &it.CancelReason,
+			&it.ReservedAt, &it.ReservationExpiresAt, &it.PickupCode, &pickupCodeExp, &it.PaymentValidatedAt, &it.DepositedAt, &it.CancelReason,
+			&it.SellerUserID, &it.SellerName,
+			&sellerRatingAvg, &sellerRatingCount, &mySellerStars,
 		); err != nil {
 			return nil, err
 		}
@@ -537,12 +692,136 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 			g := weightGrams.Float64
 			it.WeightGrams = &g
 		}
+		if pickupCodeExp.Valid {
+			t := pickupCodeExp.Time
+			it.PickupCodeExpiresAt = &t
+		}
+		if sellerRatingAvg.Valid {
+			v := sellerRatingAvg.Float64
+			it.SellerRatingAvg = &v
+		}
+		if sellerRatingCount.Valid {
+			it.SellerRatingCount = sellerRatingCount.Int64
+		}
+		if mySellerStars.Valid {
+			s := int(mySellerStars.Int64)
+			it.MySellerRating = &s
+		}
 		results = append(results, it)
 	}
 	if results == nil {
 		results = []ProfessionalItem{}
 	}
+	if modeCfg, pct, errCfg := r.GetSaleCommissionConfig(ctx); errCfg == nil {
+		for i := range results {
+			results[i].SaleCommissionMode = modeCfg
+			results[i].SaleCommissionPercent = pct
+		}
+	}
 	return results, nil
+}
+
+// UpsertProfessionalSellerRating enregistre ou met à jour la note du pro sur le vendeur pour cet objet (une seule note par objet et par pro).
+func (r *Repository) UpsertProfessionalSellerRating(ctx context.Context, itemID, proUserID int64, stars int, displayName, companyName string) error {
+	if stars < 1 || stars > 5 {
+		return fmt.Errorf("stars must be between 1 and 5")
+	}
+	normalizedName := strings.TrimSpace(displayName)
+	normalizedCompany := strings.TrimSpace(companyName)
+	var sellerID int64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT i.user_id
+		 FROM items i
+		 INNER JOIN item_logistics l ON l.item_id = i.id
+		 WHERE i.id = $1
+		   AND l.workflow_status = 'picked_up'
+		   AND (
+		     l.reserved_by_user_id = $2
+		     OR (
+		       l.reserved_by_user_id IS NULL
+		       AND (
+		         ($3 <> '' AND LOWER(TRIM(l.reserved_by_name)) = LOWER(TRIM($3)))
+		         OR ($4 <> '' AND LOWER(TRIM(l.reserved_by_name)) = LOWER(TRIM($4)))
+		       )
+		     )
+		   )`,
+		itemID, proUserID, normalizedName, normalizedCompany,
+	).Scan(&sellerID)
+	if err != nil {
+		return err
+	}
+	if sellerID == proUserID {
+		return fmt.Errorf("cannot rate own listing")
+	}
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO pro_seller_ratings (item_id, pro_user_id, seller_user_id, stars)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (item_id, pro_user_id) DO UPDATE SET
+		   stars = EXCLUDED.stars,
+		   seller_user_id = EXCLUDED.seller_user_id,
+		   updated_at = NOW()`,
+		itemID, proUserID, sellerID, stars,
+	)
+	return err
+}
+
+// UpsertSellerProfessionalRating enregistre la note du particulier (vendeur) sur le professionnel ayant récupéré l'objet (parcours terminé).
+func (r *Repository) UpsertSellerProfessionalRating(ctx context.Context, itemID, sellerUserID int64, stars int) error {
+	if stars < 1 || stars > 5 {
+		return fmt.Errorf("stars must be between 1 and 5")
+	}
+	var ownerID int64
+	var proUserID sql.NullInt64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT i.user_id, l.reserved_by_user_id
+		 FROM items i
+		 INNER JOIN item_logistics l ON l.item_id = i.id
+		 WHERE i.id = $1 AND l.workflow_status = 'picked_up'`,
+		itemID,
+	).Scan(&ownerID, &proUserID)
+	if err != nil {
+		return err
+	}
+	if ownerID != sellerUserID {
+		return fmt.Errorf("only item owner can rate the professional")
+	}
+	if !proUserID.Valid || proUserID.Int64 == 0 {
+		return fmt.Errorf("no professional associated with this pickup")
+	}
+	if proUserID.Int64 == sellerUserID {
+		return fmt.Errorf("invalid reservation")
+	}
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO seller_pro_ratings (item_id, seller_user_id, pro_user_id, stars)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (item_id) DO UPDATE SET
+		   pro_user_id = EXCLUDED.pro_user_id,
+		   stars = EXCLUDED.stars,
+		   updated_at = NOW()`,
+		itemID, sellerUserID, proUserID.Int64, stars,
+	)
+	return err
+}
+
+// GetSellerProfessionalRating retourne la note laissée par le vendeur sur le pro (si existe).
+func (r *Repository) GetSellerProfessionalRating(ctx context.Context, itemID, sellerUserID int64) (stars int, ok bool, err error) {
+	var s sql.NullInt64
+	err = r.db.QueryRowContext(ctx,
+		`SELECT r.stars FROM seller_pro_ratings r
+		 INNER JOIN items i ON i.id = r.item_id
+		 WHERE r.item_id = $1 AND r.seller_user_id = $2 AND i.user_id = $2`,
+		itemID, sellerUserID,
+	).Scan(&s)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	if !s.Valid {
+		return 0, false, nil
+	}
+	return int(s.Int64), true, nil
 }
 
 func (r *Repository) ListProfessionalWatchlistItemIDs(ctx context.Context, userID int64) ([]int64, error) {
@@ -688,6 +967,9 @@ func (r *Repository) GetLogisticsByItemID(ctx context.Context, itemID int64) (*I
 }
 
 func (r *Repository) ListLogistics(ctx context.Context, statusFilter string) ([]ItemLogistics, error) {
+	r.releaseExpiredReservations(ctx)
+	r.releaseExpiredDepositCodes(ctx)
+
 	query := `
 		SELECT l.id, l.item_id, l.workflow_status,
 				l.deposit_point_id, l.container_id, l.assigned_at, l.assigned_by,
@@ -735,18 +1017,6 @@ func (r *Repository) ListLogistics(ctx context.Context, statusFilter string) ([]
 			&l.OwnerName, &l.DepositPointName, &l.ContainerName,
 		); err != nil {
 			return nil, err
-		}
-
-		// Auto-detect expired states on list too
-		now := time.Now()
-		if l.WorkflowStatus == WFDepositCodeSent && l.DepositCodeExpiresAt != nil && now.After(*l.DepositCodeExpiresAt) {
-			l.WorkflowStatus = WFDepositExpired
-		}
-		if l.WorkflowStatus == WFReserved && l.ReservationExpiresAt != nil && now.After(*l.ReservationExpiresAt) {
-			l.WorkflowStatus = WFAvailable
-		}
-		if l.WorkflowStatus == WFPendingPayment && l.ReservationExpiresAt != nil && now.After(*l.ReservationExpiresAt) {
-			l.WorkflowStatus = WFAvailable
 		}
 
 		results = append(results, l)
@@ -932,6 +1202,60 @@ func priceToCents(price float64) int64 {
 	return int64(math.Round(price * 100))
 }
 
+// saleCommissionFeeCents calcule la commission plateforme (arrondi au centime) sur le prix annonce affiché.
+func saleCommissionFeeCents(baseCents int64, percent float64) int64 {
+	if baseCents <= 0 || percent <= 0 {
+		return 0
+	}
+	return int64(math.Round(float64(baseCents) * percent / 100.0))
+}
+
+const (
+	// SaleCommissionModeDeducted : l'acheteur paie le prix annonce ; la commission est prélevée sur ce montant (part plateforme).
+	SaleCommissionModeDeducted = "deducted"
+	// SaleCommissionModeAdded : la commission s'ajoute au prix annonce pour l'acheteur (deux lignes Stripe si commission > 0).
+	SaleCommissionModeAdded = "added"
+)
+
+func normalizeSaleCommissionMode(m string) string {
+	switch strings.TrimSpace(strings.ToLower(m)) {
+	case SaleCommissionModeAdded:
+		return SaleCommissionModeAdded
+	default:
+		return SaleCommissionModeDeducted
+	}
+}
+
+func (r *Repository) GetSaleCommissionConfig(ctx context.Context) (mode string, percent float64, err error) {
+	var m sql.NullString
+	var p sql.NullFloat64
+	err = r.db.QueryRowContext(ctx, `SELECT mode, percent FROM sale_commission_config WHERE id = 1`).Scan(&m, &p)
+	if err == sql.ErrNoRows {
+		return SaleCommissionModeDeducted, 0, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	mode = normalizeSaleCommissionMode(m.String)
+	if p.Valid {
+		percent = p.Float64
+	}
+	return mode, percent, nil
+}
+
+func (r *Repository) SetSaleCommissionConfig(ctx context.Context, mode string, percent float64) error {
+	if percent < 0 || percent > 100 {
+		return fmt.Errorf("le pourcentage doit être entre 0 et 100")
+	}
+	mode = normalizeSaleCommissionMode(mode)
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO sale_commission_config (id, percent, mode) VALUES (1, $1, $2)
+		 ON CONFLICT (id) DO UPDATE SET percent = EXCLUDED.percent, mode = EXCLUDED.mode`,
+		percent, mode,
+	)
+	return err
+}
+
 func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePayload) (string, error) {
 	var status string
 	var itemType string
@@ -964,7 +1288,23 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 	now := time.Now()
 	transactionRef := generateTransactionRef(now)
 	reservationExpires := now.Add(ReservationTTL)
-	amountCents := priceToCents(price)
+	baseCents := priceToCents(price)
+	feeCents := int64(0)
+	modeStored := SaleCommissionModeDeducted
+	if requiresPayment(itemType, price) {
+		modeCfg, pct, errCfg := r.GetSaleCommissionConfig(ctx)
+		if errCfg != nil {
+			return "", fmt.Errorf("commission: %w", errCfg)
+		}
+		modeStored = modeCfg
+		feeCents = saleCommissionFeeCents(baseCents, pct)
+	}
+	var totalCents int64
+	if modeStored == SaleCommissionModeAdded {
+		totalCents = baseCents + feeCents
+	} else {
+		totalCents = baseCents
+	}
 
 	workflowTarget := WFReserved
 	pickupCode := ""
@@ -994,14 +1334,16 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 			stripe_payment_intent_id = '',
 			stripe_payment_status = $9,
 			stripe_amount_cents = $10,
+			stripe_platform_fee_cents = $11,
+			sale_commission_mode = $12,
 			stripe_currency = 'eur',
 			stripe_last_error = '',
 			stripe_paid_at = NULL,
 			picked_up_at = NULL,
 			updated_at = $5
-		 WHERE item_id = $11 AND (workflow_status = 'available' OR workflow_status = 'validated')`,
+		 WHERE item_id = $13 AND (workflow_status = 'available' OR workflow_status = 'validated')`,
 		workflowTarget, p.ReservedByName, p.ReservedByUserID, transactionRef, now, reservationExpires, pickupCode, pickupExpires,
-		stripePaymentStatus, amountCents, itemID,
+		stripePaymentStatus, totalCents, feeCents, modeStored, itemID,
 	)
 	if err != nil {
 		return "", err
@@ -1130,10 +1472,13 @@ func (r *Repository) FailStripePaymentByProfessional(ctx context.Context, itemID
 }
 
 type StripeCheckoutReservation struct {
-	ItemID      int64
-	ItemTitle   string
-	AmountCents int64
-	Currency    string
+	ItemID             int64
+	ItemTitle          string
+	AmountCents        int64  // montant total débité sur Stripe
+	BaseCents          int64  // prix annonce (ligne 1 Checkout)
+	PlatformFeeCents   int64  // commission (ligne 2 si mode added et > 0)
+	CommissionMode     string // deducted | added
+	Currency           string
 }
 
 func (r *Repository) GetStripeCheckoutReservation(ctx context.Context, itemID, userID int64) (*StripeCheckoutReservation, error) {
@@ -1142,15 +1487,19 @@ func (r *Repository) GetStripeCheckoutReservation(ctx context.Context, itemID, u
 	var title string
 	var price float64
 	var reservedByUserID *int64
-	var amountCents int64
+	var storedTotalCents int64
+	var platformFeeCents int64
+	var rowMode sql.NullString
 	var currency string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT l.workflow_status, l.reserved_by_user_id, i.type, i.title, i.price, l.stripe_amount_cents, l.stripe_currency
+		`SELECT l.workflow_status, l.reserved_by_user_id, i.type, i.title, i.price,
+		        l.stripe_amount_cents, COALESCE(l.stripe_platform_fee_cents, 0),
+		        l.sale_commission_mode, l.stripe_currency
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 WHERE l.item_id = $1`,
 		itemID,
-	).Scan(&status, &reservedByUserID, &itemType, &title, &price, &amountCents, &currency)
+	).Scan(&status, &reservedByUserID, &itemType, &title, &price, &storedTotalCents, &platformFeeCents, &rowMode, &currency)
 	if err != nil {
 		return nil, fmt.Errorf("item not in logistics: %w", err)
 	}
@@ -1163,16 +1512,51 @@ func (r *Repository) GetStripeCheckoutReservation(ctx context.Context, itemID, u
 	if !requiresPayment(itemType, price) {
 		return nil, fmt.Errorf("payment is only required for sale items")
 	}
-	if amountCents <= 0 {
-		amountCents = priceToCents(price)
+	listedCents := priceToCents(price)
+	rawMode := strings.TrimSpace(rowMode.String)
+	var mode string
+	var baseCents, feeCents, totalCharged int64
+
+	if storedTotalCents > 0 {
+		feeCents = platformFeeCents
+		if rawMode != "" {
+			mode = normalizeSaleCommissionMode(rawMode)
+		} else if feeCents > 0 && storedTotalCents == listedCents+feeCents {
+			mode = SaleCommissionModeAdded
+		} else {
+			mode = SaleCommissionModeDeducted
+		}
+		if mode == SaleCommissionModeAdded && feeCents > 0 && storedTotalCents > feeCents {
+			baseCents = storedTotalCents - feeCents
+			totalCharged = storedTotalCents
+		} else {
+			baseCents = storedTotalCents
+			totalCharged = storedTotalCents
+		}
+	} else {
+		modeCfg, pct, _ := r.GetSaleCommissionConfig(ctx)
+		mode = modeCfg
+		baseCents = listedCents
+		feeCents = saleCommissionFeeCents(baseCents, pct)
+		if mode == SaleCommissionModeAdded {
+			totalCharged = baseCents + feeCents
+		} else {
+			totalCharged = baseCents
+		}
 	}
-	if amountCents <= 0 {
+
+	if totalCharged <= 0 || baseCents <= 0 {
 		return nil, fmt.Errorf("invalid payment amount")
 	}
 	if strings.TrimSpace(currency) == "" {
 		currency = "eur"
 	}
-	return &StripeCheckoutReservation{ItemID: itemID, ItemTitle: title, AmountCents: amountCents, Currency: currency}, nil
+	return &StripeCheckoutReservation{
+		ItemID: itemID, ItemTitle: title,
+		AmountCents: totalCharged, BaseCents: baseCents, PlatformFeeCents: feeCents,
+		CommissionMode: mode,
+		Currency:       currency,
+	}, nil
 }
 
 func (r *Repository) SaveStripeCheckoutSession(ctx context.Context, itemID, userID int64, sessionID, paymentIntentID string) error {
@@ -1492,6 +1876,9 @@ type LogisticsStats struct {
 }
 
 func (r *Repository) GetLogisticsStats(ctx context.Context) (*LogisticsStats, error) {
+	r.releaseExpiredReservations(ctx)
+	r.releaseExpiredDepositCodes(ctx)
+
 	var s LogisticsStats
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT workflow_status, COUNT(*) FROM item_logistics GROUP BY workflow_status`)

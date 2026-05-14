@@ -2,8 +2,8 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Heart, Bookmark, ArrowLeft } from "lucide-react";
-import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import { Search, Heart, Bookmark } from "lucide-react";
+import { apiUrl, buildAuthHeaders, getRoleFromToken } from "../../../lib/api";
 
 const styles = {
     container: {
@@ -184,6 +184,7 @@ const styles = {
 
 function FavoritesContent() {
     const router = useRouter();
+    const spaceLabel = getRoleFromToken() === "professionnel" ? "Espace Professionnel" : "Espace Particulier";
     const [projects, setProjects] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [filterType, setFilterType] = useState("all"); // 'all', 'liked', 'bookmarked'
@@ -254,11 +255,8 @@ function FavoritesContent() {
     return (
         <div style={styles.container}>
             <header style={styles.header}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.45rem' }}>
-                    <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.5rem', color: 'var(--text-muted)' }}>
-                        <ArrowLeft size={20} />
-                    </button>
-                    <p className="activities-label" style={{ margin: 0 }}>Espace Particulier</p>
+                <div style={{ marginBottom: "0.45rem" }}>
+                    <p className="activities-label" style={{ margin: 0 }}>{spaceLabel}</p>
                 </div>
                 <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.45rem 0", letterSpacing: "-0.02em" }}>Projets favoris</h1>
                 <p style={{ color: "var(--text-muted)", fontSize: "1.05rem" }}>Retrouvez les créations que vous avez aimées ou enregistrées pour plus tard.</p>
@@ -356,7 +354,7 @@ function FavoritesContent() {
                         <article
                             key={project.id}
                             style={styles.card}
-                            onClick={() => router.push(`/projets/voir/${project.id}`)}
+                            onClick={() => router.push(`/projets/voir/${project.id}?from=favoris`)}
                             className="project-card-hover"
                         >
                             {/* Social Buttons */}

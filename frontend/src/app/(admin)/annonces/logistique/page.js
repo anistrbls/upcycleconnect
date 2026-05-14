@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import AdminModal from "../../../components/admin/AdminModal";
+import DepositCodeQrPanel from "../../../components/DepositCodeQrPanel";
 
 // --- Status Config ---
 
@@ -1091,17 +1092,17 @@ function LogisticsCard({ item, actions, onClickCard }) {
                     </span>
                 </div>
 
-                {item.workflow_status === 'deposit_code_sent' && (
+                {item.workflow_status === 'deposit_code_sent' && item.deposit_code && (
                     <div style={styles.codeBox}>
                         <div style={styles.codeLabel}>Code de dépôt</div>
-                        <div style={styles.codeVal}>{item.deposit_code}</div>
+                        <DepositCodeQrPanel code={item.deposit_code} qrSize={108} variant="darkCard" />
                     </div>
                 )}
                 
                 {(item.workflow_status === 'deposited' || (item.workflow_status === 'reserved' && item.deposited_at)) && item.pickup_code && (
                     <div style={styles.codeBox}>
                         <div style={styles.codeLabel}>Code Récupération ({item.reserved_by_name})</div>
-                        <div style={styles.codeVal}>{item.pickup_code}</div>
+                        <DepositCodeQrPanel code={item.pickup_code} purpose="pickup" variant="darkCard" qrSize={108} />
                     </div>
                 )}
                 

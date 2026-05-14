@@ -98,8 +98,16 @@ export default function AdminLayout({ children }) {
             router.push("/annonces/mes-annonces");
             return;
         }
+        if (isPro && moduleKey === "vue-globale") {
+            router.push("/vue-globale/vue-generale");
+            return;
+        }
         if (isPro && moduleKey === "annonces") {
             router.push("/annonces/disponible");
+            return;
+        }
+        if (isPro && moduleKey === "evenements") {
+            router.push("/evenements/activites");
             return;
         }
         if (isParticulier && moduleKey === "evenements") {
@@ -138,7 +146,7 @@ export default function AdminLayout({ children }) {
     ];
     const visibleSubNav = activeModule.key === "annonces"
         ? (isAdmin ? adminAnnoncesSubNav : (isPro ? proAnnoncesSubNav : activeModule.subNav))
-        : (activeModule.key === "evenements" && isParticulier)
+        : (activeModule.key === "evenements" && (isParticulier || isPro))
         ? particulierEvenementsSubNav
         : activeModule.subNav;
     const userDisplayName = (() => {

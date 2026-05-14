@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TOKEN_KEY, apiUrl } from "../../../lib/api";
+import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
+import DepositCodeQrPanel from "../../../components/DepositCodeQrPanel";
+import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
 import {
     ArrowLeft,
     MapPin,
@@ -22,7 +24,6 @@ import {
     Info,
     Clock,
     Box,
-    QrCode,
     AlertCircle,
     Trash2,
 } from "lucide-react";
@@ -96,6 +97,18 @@ const formatWeight = (item) => {
     }
 
     return "N/A";
+};
+
+const fmtEur = (amount) =>
+    new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(amount) || 0);
+
+/** Même logique que l’API Go (saleCommissionFeeCents). */
+const saleCommissionFeeCents = (priceEuros, percent) => {
+    const baseCents = Math.round(Number(priceEuros) * 100);
+    if (!Number.isFinite(baseCents) || baseCents <= 0) return 0;
+    const p = Number(percent);
+    if (!Number.isFinite(p) || p <= 0) return 0;
+    return Math.round((baseCents * p) / 100);
 };
 
 const getInitials = (name) => {
@@ -256,6 +269,7 @@ function AnnonceDetailContent() {
     const [annonce,      setAnnonce]      = useState(null);
     const [isLoadingAnnonce, setIsLoadingAnnonce] = useState(true);
     const [isAnnonceNotFound, setIsAnnonceNotFound] = useState(false);
+    const [detailFetchError, setDetailFetchError] = useState("");
     const [activePhoto,  setActivePhoto]  = useState(0);
     const [isAdmin,      setIsAdmin]      = useState(false);
     const [currentUserID, setCurrentUserID] = useState(null);
@@ -263,6 +277,9 @@ function AnnonceDetailContent() {
     const [showSoldModal, setShowSoldModal] = useState(false);
     const [showCancelModal, setShowCancelModal] = useState(false);
     const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+    const [proRatingExisting, setProRatingExisting] = useState(null);
+    const [proRatingDraft, setProRatingDraft] = useState(0);
+    const [proRatingBusy, setProRatingBusy] = useState(false);
     const [moderationActionType, setModerationActionType] = useState(""); // "refus" | "desactivation"
     const [moderationReasons, setModerationReasons] = useState([]);
     const [selectedModerationReason, setSelectedModerationReason] = useState("");
@@ -270,6 +287,7 @@ function AnnonceDetailContent() {
     const [authorProfile, setAuthorProfile] = useState({
         name: "Auteur inconnu",
         rating: 0,
+        ratingCount: 0,
         annoncesCount: 0,
         registeredAt: "",
         city: "",
@@ -310,34 +328,46 @@ function AnnonceDetailContent() {
         };
     }, []);
 
-    useEffect(() => {
-        const fetchDetail = async () => {
-            const token = window.localStorage.getItem(TOKEN_KEY);
-            setIsLoadingAnnonce(true);
-            setIsAnnonceNotFound(false);
-            try {
-                const response = await fetch(apiUrl(`/items/${params.id}`), {
-                    method: "GET",
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    setAnnonce({ ...data, status: normalizeStatus(data.status) });
-                } else if (response.status === 404) {
-                    setAnnonce(null);
-                    setIsAnnonceNotFound(true);
-                }
-            } catch (err) {
-                console.error("Failed to fetch ad detail", err);
-            } finally {
-                setIsLoadingAnnonce(false);
-            }
-        };
-
-        if (params.id) {
-            fetchDetail();
+    const loadAnnonceDetail = useCallback(async () => {
+        const id = params?.id;
+        if (!id) {
+            setIsLoadingAnnonce(false);
+            return;
         }
-    }, [params.id]);
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        setIsLoadingAnnonce(true);
+        setIsAnnonceNotFound(false);
+        setDetailFetchError("");
+        try {
+            const response = await fetch(apiUrl(`/items/${id}`), {
+                method: "GET",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setAnnonce({ ...data, status: normalizeStatus(data.status) });
+            } else if (response.status === 404) {
+                setAnnonce(null);
+                setIsAnnonceNotFound(true);
+            } else {
+                setAnnonce(null);
+                setDetailFetchError(
+                    `Le serveur a renvoyé une erreur (${response.status}). Réessayez plus tard ou contactez le support.`
+                );
+            }
+        } catch {
+            setAnnonce(null);
+            setDetailFetchError(
+                "Connexion au serveur impossible. Démarrez l'API (en local : port 8080 par défaut) et vérifiez que Next redirige bien `/api` vers cette API (voir `next.config.mjs`, variable `API_INTERNAL_URL`)."
+            );
+        } finally {
+            setIsLoadingAnnonce(false);
+        }
+    }, [params?.id]);
+
+    useEffect(() => {
+        loadAnnonceDetail();
+    }, [loadAnnonceDetail]);
 
     useEffect(() => {
         let isMounted = true;
@@ -397,38 +427,87 @@ function AnnonceDetailContent() {
     }, []);
 
     useEffect(() => {
+        if (!annonce?.id || isAdmin) return;
+        if (String(annonce.workflowStatus || "").toLowerCase() !== "picked_up") return;
+        const token = typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
+        if (!token) return;
+        const ownerId = annonce.userId ?? annonce.user_id;
+        if (currentUserID == null || String(currentUserID) !== String(ownerId)) return;
+
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(apiUrl(`/items/${annonce.id}/my-professional-rating`), {
+                    headers: buildAuthHeaders(),
+                });
+                const data = await res.json();
+                if (cancelled) return;
+                if (typeof data.stars === "number" && data.stars >= 1 && data.stars <= 5) {
+                    setProRatingExisting(data.stars);
+                    setProRatingDraft(data.stars);
+                } else {
+                    setProRatingExisting(null);
+                    setProRatingDraft(0);
+                }
+            } catch {
+                if (!cancelled) {
+                    setProRatingExisting(null);
+                }
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [annonce?.id, annonce?.workflowStatus, annonce?.userId, annonce?.user_id, isAdmin, currentUserID]);
+
+    useEffect(() => {
         if (!annonce) return;
 
         const local = JSON.parse(localStorage.getItem("user_annonces") || "[]");
         const allAnnonces = [...local, ...MOCK_ANNONCES];
-        const name = getAnnonceAuthor(annonce);
+        const name = String(annonce.userName || "").trim() || getAnnonceAuthor(annonce);
         const authorKey = String(name || "").trim().toLowerCase();
 
         const related = allAnnonces.filter((item) => String(getAnnonceAuthor(item) || "").trim().toLowerCase() === authorKey);
-        const annoncesCount = related.length || 1;
+        const fallbackCount = related.length || 1;
+        const apiSellerItems = Number(annonce.sellerItemsCount ?? annonce.seller_items_count);
+        const annoncesCount = Number.isFinite(apiSellerItems) && apiSellerItems >= 0 ? apiSellerItems : fallbackCount;
+
+        const rating = Number(
+            annonce.sellerRatingAvg ??
+                annonce.seller_rating_avg ??
+                annonce?.seller?.rating ??
+                annonce?.authorRating ??
+                0
+        );
+        const ratingCount = Number(annonce.sellerRatingCount ?? annonce.seller_rating_count ?? 0);
 
         setAuthorProfile({
             name,
-            rating: Number(annonce?.seller?.rating || annonce?.authorRating || 0),
+            rating,
+            ratingCount,
             annoncesCount,
             registeredAt: String(
-                annonce?.userRegistrationDate || 
-                annonce?.seller?.since || 
-                annonce?.authorSince || 
-                annonce?.registeredAt || 
-                ""
+                annonce.userRegistrationDate ??
+                    annonce.user_registration_date ??
+                    annonce?.seller?.since ??
+                    annonce?.authorSince ??
+                    annonce?.registeredAt ??
+                    ""
             ),
             city: String(
-                annonce?.seller?.city ||
-                annonce?.authorCity ||
-                annonce?.city ||
-                ""
+                annonce.sellerCity ??
+                    annonce.seller_city ??
+                    annonce?.seller?.city ??
+                    annonce?.authorCity ??
+                    annonce?.city ??
+                    ""
             ),
             country: String(
                 annonce?.seller?.country ||
-                annonce?.authorCountry ||
-                annonce?.country ||
-                ""
+                    annonce?.authorCountry ||
+                    annonce?.country ||
+                    ""
             ),
             avatar: annonce?.seller?.avatar || annonce?.authorAvatar || "",
         });
@@ -440,6 +519,29 @@ function AnnonceDetailContent() {
         </div>
     );
 
+    if (detailFetchError) return (
+        <div style={{ padding: "4rem 2rem", maxWidth: "32rem", margin: "0 auto", textAlign: "center" }}>
+            <p style={{ color: "var(--state-critical)", fontWeight: 700, marginBottom: "0.75rem" }}>Impossible de charger l'annonce</p>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.95rem", lineHeight: 1.55, marginBottom: "1.25rem" }}>{detailFetchError}</p>
+            <button
+                type="button"
+                onClick={() => loadAnnonceDetail()}
+                style={{
+                    border: "none",
+                    borderRadius: "999px",
+                    padding: "0.65rem 1.25rem",
+                    background: "var(--forest-deep)",
+                    color: "#fff",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                }}
+            >
+                Réessayer
+            </button>
+        </div>
+    );
+
     if (isAnnonceNotFound || !annonce) return (
         <div style={{ padding: "4rem 2rem", textAlign: "center", color: "var(--text-muted)" }}>
             Annonce introuvable.
@@ -448,6 +550,14 @@ function AnnonceDetailContent() {
 
     const photos = annonce.photos?.length ? annonce.photos : [annonce.image];
     const isDon  = annonce.type === "don";
+    const saleModeRaw = String(annonce.saleCommissionMode ?? annonce.sale_commission_mode ?? "").toLowerCase();
+    const saleModeAdded = !isDon && saleModeRaw === "added";
+    const salePctRaw = annonce.saleCommissionPercent ?? annonce.sale_commission_percent;
+    const salePct = typeof salePctRaw === "number" ? salePctRaw : parseFloat(String(salePctRaw ?? "").replace(",", "."));
+    const salePercent = Number.isFinite(salePct) ? salePct : 0;
+    const feeCents = saleModeAdded ? saleCommissionFeeCents(annonce.price, salePercent) : 0;
+    const baseCents = Math.round(Number(annonce.price || 0) * 100);
+    const displayBuyerCents = saleModeAdded && feeCents > 0 ? baseCents + feeCents : baseCents;
 
     const buildUserUpdatePayload = (status) => ({
         title: annonce.title || "",
@@ -607,7 +717,7 @@ function AnnonceDetailContent() {
         setShowCancelModal(false);
         const token = window.localStorage.getItem(TOKEN_KEY);
         try {
-            const response = await fetch(apiUrl(`/items/cancel/${annonce.id}`), {
+            const response = await fetch(apiUrl(`/items/${annonce.id}/cancel`), {
                 method: "POST",
                 headers: {
                     Authorization: `Bearer ${token}`
@@ -699,7 +809,12 @@ function AnnonceDetailContent() {
     const authorName = getAnnonceAuthor(annonce);
     const sc = STATUS_COLORS[statusKey] || STATUS_COLORS.actif;
     const authorRating = Math.max(0, Math.min(5, Number(authorProfile.rating || 0)));
+    const sellerRatingCount = Number(authorProfile.ratingCount ?? 0);
     const roundedStars = Math.round(authorRating);
+    const sellerRatingLabel =
+        sellerRatingCount > 0
+            ? `${authorRating.toFixed(1)} · ${sellerRatingCount} avis`
+            : "Pas encore d'avis";
     const registrationDisplay = (() => {
         const raw = String(authorProfile.registeredAt || "").trim();
         if (!raw) return "N/A";
@@ -728,7 +843,7 @@ function AnnonceDetailContent() {
         const nextStep =
             (wf === "validated" && "L'équipe UpcycleConnect valide actuellement votre annonce.") ||
             (wf === "assigned" && "L'équipe UpcycleConnect va générer votre code de dépôt.") ||
-            (wf === "deposit_code_sent" && "Vous pouvez déposer votre objet au point attribué avec votre code.") ||
+            (wf === "deposit_code_sent" && "Vous pouvez déposer votre objet au point attribué : montrez le QR code (ou le code texte en secours).") ||
             (wf === "deposited" && "Votre dépôt est en cours de vérification par l'équipe UpcycleConnect.") ||
             (wf === "available" && "Votre objet est disponible pour les professionnels intéressés.") ||
             (wf === "reserved" && "Un professionnel est en train d'organiser le retrait.") ||
@@ -752,7 +867,13 @@ function AnnonceDetailContent() {
         const codeValue = annonce.depositCode;
         const codeExpires = annonce.depositCodeExpiresAt;
         const codeColor = color;
-        const codeHelpText = "À conserver et présenter au point de dépôt lors de la remise.";
+        const ownerId = annonce.userId ?? annonce.user_id;
+        const ownerSeesProRating =
+            wf === "picked_up" &&
+            !isAdmin &&
+            currentUserID != null &&
+            ownerId != null &&
+            String(currentUserID) === String(ownerId);
 
         return (
             <div style={{
@@ -809,23 +930,21 @@ function AnnonceDetailContent() {
                     {shouldShowCode && codeValue && (
                         <div style={{
                             flex: "0 0 auto",
-                            minWidth: "220px",
+                            minWidth: "min(100%, 260px)",
+                            maxWidth: "280px",
                             background: "rgba(255,255,255,0.8)",
                             border: "1px solid rgba(35,59,61,0.08)",
                             borderRadius: "18px",
-                            padding: "0.95rem 1rem",
+                            padding: "0.85rem 0.95rem",
                             boxShadow: "0 10px 30px rgba(20, 32, 34, 0.05)"
                         }}>
-                            <div style={{ fontSize: "0.68rem", fontWeight: "800", textTransform: "uppercase", color: codeColor, letterSpacing: "0.08em", marginBottom: "0.35rem" }}>{codeLabel}</div>
-                            <div style={{ fontSize: "1.48rem", fontWeight: "900", color: "var(--text-main)", letterSpacing: "0.14em", fontFamily: "monospace", marginBottom: "0.3rem" }}>{codeValue}</div>
-                            {codeExpires && (
-                                <div style={{ fontSize: "0.72rem", fontWeight: "700", color: "var(--state-critical)", marginBottom: "0.4rem" }}>
-                                    Expire le : {codeExpires}
-                                </div>
-                            )}
-                            <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: "1.45" }}>
-                                {codeHelpText}
-                            </div>
+                            <div style={{ fontSize: "0.68rem", fontWeight: "800", textTransform: "uppercase", color: codeColor, letterSpacing: "0.08em", marginBottom: "0.45rem", textAlign: "center" }}>{codeLabel}</div>
+                            <DepositCodeQrPanel
+                                code={codeValue}
+                                expiresText={codeExpires ? `Expire le : ${codeExpires}` : undefined}
+                                qrSize={188}
+                                variant="light"
+                            />
                         </div>
                     )}
                 </div>
@@ -864,6 +983,99 @@ function AnnonceDetailContent() {
                         </div>
                     </div>
                 </div>
+
+                {ownerSeesProRating && (
+                    <div
+                        style={{
+                            position: "relative",
+                            zIndex: 1,
+                            padding: "1rem 1.05rem",
+                            borderRadius: "18px",
+                            background: "rgba(255,255,255,0.85)",
+                            border: "1px solid rgba(35,59,61,0.08)",
+                        }}
+                    >
+                        <div style={{ fontSize: "0.68rem", fontWeight: "800", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>
+                            Note au professionnel
+                        </div>
+                        <p style={{ margin: "0 0 0.85rem", fontSize: "0.84rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                            Évaluez le professionnel qui a récupéré votre objet.
+                        </p>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.2rem", flexWrap: "wrap", marginBottom: "0.85rem" }}>
+                            {[1, 2, 3, 4, 5].map((n) => (
+                                <button
+                                    key={n}
+                                    type="button"
+                                    disabled={proRatingBusy}
+                                    onClick={() => setProRatingDraft(n)}
+                                    aria-label={`${n} étoiles`}
+                                    aria-pressed={proRatingDraft === n}
+                                    style={{
+                                        background: "none",
+                                        border: "none",
+                                        padding: "0.2rem",
+                                        cursor: proRatingBusy ? "wait" : "pointer",
+                                        lineHeight: 0,
+                                        opacity: proRatingBusy ? 0.6 : 1,
+                                    }}
+                                >
+                                    <Star
+                                        size={26}
+                                        aria-hidden
+                                        fill={proRatingDraft >= n ? "#ca8a04" : "none"}
+                                        color={proRatingDraft >= n ? "#ca8a04" : "rgba(35,59,61,0.28)"}
+                                        strokeWidth={proRatingDraft >= n ? 0 : 1.65}
+                                    />
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            disabled={
+                                proRatingBusy ||
+                                proRatingDraft < 1 ||
+                                (proRatingExisting != null && proRatingDraft === proRatingExisting)
+                            }
+                            onClick={async () => {
+                                if (proRatingDraft < 1) return;
+                                setProRatingBusy(true);
+                                try {
+                                    const res = await fetch(apiUrl(`/items/${annonce.id}/rate-professional`), {
+                                        method: "POST",
+                                        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                                        body: JSON.stringify({ stars: proRatingDraft }),
+                                    });
+                                    const data = await res.json().catch(() => ({}));
+                                    if (!res.ok) throw new Error(data.error || "Enregistrement impossible");
+                                    setProRatingExisting(proRatingDraft);
+                                } catch (e) {
+                                    window.alert(e.message || "Erreur");
+                                } finally {
+                                    setProRatingBusy(false);
+                                }
+                            }}
+                            style={{
+                                padding: "0.58rem 1.1rem",
+                                borderRadius: "999px",
+                                border: "none",
+                                fontWeight: "700",
+                                fontFamily: "inherit",
+                                fontSize: "0.86rem",
+                                cursor: proRatingBusy ? "wait" : "pointer",
+                                background: "var(--forest-deep)",
+                                color: "#fff",
+                                opacity:
+                                    proRatingBusy ||
+                                    proRatingDraft < 1 ||
+                                    (proRatingExisting != null && proRatingDraft === proRatingExisting)
+                                        ? 0.55
+                                        : 1,
+                            }}
+                        >
+                            {proRatingBusy ? "Envoi…" : proRatingExisting != null ? "Mettre à jour la note" : "Envoyer la note"}
+                        </button>
+                    </div>
+                )}
             </div>
         );
     };
@@ -941,11 +1153,21 @@ function AnnonceDetailContent() {
                     <div style={{ background: "var(--black)", borderRadius: "28px", padding: "1rem", border: "1px solid rgba(18, 25, 26, 0.08)" }}>
                         <div style={{ borderRadius: "22px", overflow: "hidden", background: "#12191A", position: "relative" }}>
                             <div style={{ position: "relative", width: "100%", aspectRatio: "4/3", overflow: "hidden" }}>
-                                <img
-                                    src={photos[activePhoto]}
-                                    alt={annonce.title}
-                                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
-                                />
+                                {previewLooksLikeVideo(photos[activePhoto]) ? (
+                                    <video
+                                        src={photos[activePhoto]}
+                                        controls
+                                        playsInline
+                                        muted
+                                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", zIndex: 1, background: "#0a0f0f" }}
+                                    />
+                                ) : (
+                                    <img
+                                        src={photos[activePhoto]}
+                                        alt={annonce.title}
+                                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
+                                    />
+                                )}
 
                                 <div style={{
                                     position: "absolute",
@@ -994,7 +1216,18 @@ function AnnonceDetailContent() {
                                                         position: "relative"
                                                     }}
                                                 >
-                                                    <img src={p} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                                    {previewLooksLikeVideo(p) ? (
+                                                        <video
+                                                            src={p}
+                                                            muted
+                                                            playsInline
+                                                            preload="metadata"
+                                                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                                            aria-hidden
+                                                        />
+                                                    ) : (
+                                                        <img src={p} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                                    )}
                                                 </button>
                                             ))}
                                         </div>
@@ -1009,7 +1242,22 @@ function AnnonceDetailContent() {
                             <div>
                             <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>{isAdmin ? "Vue administrateur" : "Votre annonce"}</div>
                             <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: "1.12", letterSpacing: "-0.03em" }}>{annonce.title}</h1>
-                            <div style={{ fontSize: isDon ? "1.5rem" : "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>{isDon ? "Gratuit" : `${annonce.price} EUR`}</div>
+                            {isDon ? (
+                                <div style={{ fontSize: "1.5rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>Gratuit</div>
+                            ) : saleModeAdded && feeCents > 0 ? (
+                                <div style={{ marginBottom: "0.7rem" }}>
+                                    <div style={{ fontSize: "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.35rem" }}>
+                                        {fmtEur(displayBuyerCents / 100)}
+                                    </div>
+                                    <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.45 }}>
+                                        dont <strong>{fmtEur(feeCents / 100)}</strong> de frais plateforme
+                                    </p>
+                                </div>
+                            ) : (
+                                <div style={{ fontSize: "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>
+                                    {fmtEur(Number(annonce.price || 0))}
+                                </div>
+                            )}
 
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", color: "var(--text-muted)", fontSize: "0.84rem", marginBottom: "1rem" }}>
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}><MapPin size={12} /> {annonce.city}{annonce.zip ? ` · ${annonce.zip}` : ""}</span>
@@ -1172,7 +1420,7 @@ function AnnonceDetailContent() {
                                                 />
                                             ))}
                                             <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--text-muted)", marginLeft: "0.18rem" }}>
-                                                {authorRating > 0 ? authorRating.toFixed(1) : "N/A"}
+                                                {sellerRatingLabel}
                                             </span>
                                         </div>
                                     </div>

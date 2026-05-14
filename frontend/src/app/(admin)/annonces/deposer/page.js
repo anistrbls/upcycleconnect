@@ -3,6 +3,14 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
+import {
+    MAX_ANNONCE_MEDIA,
+    MAX_ANNONCE_VIDEOS,
+    MAX_VIDEO_DURATION_SEC,
+    MAX_VIDEO_FILE_BYTES,
+    getVideoDurationFromFile,
+    previewLooksLikeVideo,
+} from "../../../lib/mediaUploadLimits";
 import { CityAutocomplete } from "../../../components/CityAutocomplete";
 import {
     Camera,
@@ -20,6 +28,27 @@ import {
     ChevronRight,
     Trash2
 } from "lucide-react";
+
+function AnnonceMediaPreview({ preview, isVideo, style, alt, thumb }) {
+    const mergedStyle =
+        isVideo && !thumb
+            ? { ...style, objectFit: "contain", background: "#0a0f0f" }
+            : style;
+    if (isVideo) {
+        return (
+            <video
+                src={preview}
+                style={mergedStyle}
+                muted
+                playsInline
+                controls={!thumb}
+                preload="metadata"
+                aria-label={alt}
+            />
+        );
+    }
+    return <img alt={alt} src={preview} style={mergedStyle} />;
+}
 
 // Styles locaux pour la page (en plus des variables globales)
 const styles = {
@@ -284,7 +313,7 @@ export default function DeposerAnnoncePage() {
     const initialEditSnapshotRef = useRef(null);
     const [type, setType] = useState("don"); // 'don' ou 'vente'
     const [isSubmitted, setIsSubmitted] = useState(false);
-    const [photos, setPhotos] = useState([]); // Array of { file, preview }
+    const [photos, setPhotos] = useState([]); // { file, preview, isVideo? } — max 1 vidéo, 15 s, voir mediaUploadLimits
     const [coverIndex, setCoverIndex] = useState(0);
     const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
     const [conditions, setConditions] = useState(DEFAULT_CONDITIONS);
@@ -432,9 +461,21 @@ export default function DeposerAnnoncePage() {
                 confirm: true
             });
 
-            const initialPhotoPreviews = annonceToEdit.image ? [annonceToEdit.image] : [];
-            if (initialPhotoPreviews.length > 0) {
-                setPhotos([{ preview: initialPhotoPreviews[0], file: null }]);
+            const merged = [];
+            if (annonceToEdit.image) merged.push(annonceToEdit.image);
+            if (Array.isArray(annonceToEdit.photos)) {
+                for (const p of annonceToEdit.photos) {
+                    if (p && !merged.includes(p)) merged.push(p);
+                }
+            }
+            if (merged.length > 0) {
+                setPhotos(
+                    merged.map((preview) => ({
+                        preview,
+                        file: null,
+                        isVideo: previewLooksLikeVideo(preview),
+                    })),
+                );
                 setCoverIndex(0);
             }
 
@@ -456,7 +497,7 @@ export default function DeposerAnnoncePage() {
                     deliveryMode: annonceToEdit.deliveryMode || "main_propre",
                     dimensions: annonceToEdit.dimensions || "",
                 },
-                photoPreviews: initialPhotoPreviews,
+                photoPreviews: merged,
             });
         };
 
@@ -494,24 +535,59 @@ export default function DeposerAnnoncePage() {
 
     const addFiles = async (files) => {
         if (disableAllEdits) return;
-        if (photos.length + files.length > 10) {
-            alert("Vous ne pouvez pas ajouter plus de 10 photos.");
-            return;
+        const list = Array.from(files);
+        const accepted = [];
+
+        const countVideos = (arr) =>
+            arr.filter((p) => p.isVideo || previewLooksLikeVideo(p.preview)).length;
+        let videoSoFar = countVideos(photos);
+
+        for (const file of list) {
+            const isVid = file.type.startsWith("video/");
+            const isImg = file.type.startsWith("image/");
+            if (!isImg && !isVid) {
+                alert(`${file.name} : format non accepté (images ou vidéo MP4, WebM, MOV).`);
+                continue;
+            }
+            if (photos.length + accepted.length >= MAX_ANNONCE_MEDIA) {
+                alert(`Maximum ${MAX_ANNONCE_MEDIA} fichiers (photos + vidéo).`);
+                break;
+            }
+            if (isVid) {
+                if (videoSoFar >= MAX_ANNONCE_VIDEOS) {
+                    alert("Une seule vidéo par annonce est autorisée.");
+                    continue;
+                }
+                if (file.size > MAX_VIDEO_FILE_BYTES) {
+                    alert(`Vidéo trop volumineuse (max ${Math.round(MAX_VIDEO_FILE_BYTES / (1024 * 1024))} Mo).`);
+                    continue;
+                }
+                try {
+                    const dur = await getVideoDurationFromFile(file);
+                    if (dur > MAX_VIDEO_DURATION_SEC + 0.2) {
+                        alert(
+                            `La vidéo ne doit pas dépasser ${MAX_VIDEO_DURATION_SEC} secondes (durée détectée : environ ${Math.ceil(dur)} s).`,
+                        );
+                        continue;
+                    }
+                } catch {
+                    alert("Impossible de vérifier la durée de la vidéo.");
+                    continue;
+                }
+                videoSoFar += 1;
+            }
+            try {
+                const preview = await fileToBase64(file);
+                accepted.push({ file, preview, isVideo: isVid });
+            } catch {
+                alert(`Lecture impossible : ${file.name}`);
+            }
         }
 
-        const newPhotosPromises = files.map(async (file) => {
-            const base64 = await fileToBase64(file);
-            return {
-                file,
-                preview: base64
-            };
-        });
+        if (accepted.length === 0) return;
 
-        const newPhotos = await Promise.all(newPhotosPromises);
-
-        setPhotos(prev => {
-            const updated = [...prev, ...newPhotos];
-            // Si c'est le premier ajout de photos, la première devient la couverture
+        setPhotos((prev) => {
+            const updated = [...prev, ...accepted];
             if (prev.length === 0 && updated.length > 0) {
                 setCoverIndex(0);
             }
@@ -751,13 +827,13 @@ export default function DeposerAnnoncePage() {
                     <section style={styles.card}>
                         <h2 style={styles.sectionTitle}>
                             <Camera size={20} strokeWidth={2} />
-                            Photos des objets
+                            Photos et vidéo
                         </h2>
 
                         <input
                             type="file"
                             multiple
-                            accept="image/*"
+                            accept="image/*,video/mp4,video/webm,video/quicktime"
                             ref={fileInputRef}
                             style={{ display: "none" }}
                             onChange={handleFileChange}
@@ -773,18 +849,32 @@ export default function DeposerAnnoncePage() {
                             <div style={{ marginBottom: "0.5rem", color: "var(--text-muted)" }}>
                                 <Camera size={40} strokeWidth={1.5} />
                             </div>
-                            <p style={{ fontWeight: "600", color: "var(--text-main)" }}>Glissez vos images ici ou cliquez pour parcourir</p>
-                            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Jusqu'à 10 photos • Format JPG ou PNG</p>
+                            <p style={{ fontWeight: "600", color: "var(--text-main)" }}>Glissez vos images ou une vidéo ici, ou cliquez pour parcourir</p>
+                            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                                Jusqu&apos;à {MAX_ANNONCE_MEDIA} fichiers • 1 vidéo max. ({MAX_VIDEO_DURATION_SEC} s max.,{" "}
+                                {Math.round(MAX_VIDEO_FILE_BYTES / (1024 * 1024))} Mo max.) • images JPG, PNG, WebP…
+                            </p>
                         </div>
 
                         {photos.length > 0 && (
                             <div style={{ background: "var(--black)", borderRadius: "28px", padding: "1rem", border: "1px solid rgba(35, 59, 61, 0.06)", marginTop: "1rem" }}>
                                 <div style={{ borderRadius: "22px", overflow: "hidden", background: "rgb(18, 25, 26)", position: "relative" }}>
                                     <div style={{ position: "relative", width: "100%", aspectRatio: "4/3", overflow: "hidden" }}>
-                                        <img
+                                        <AnnonceMediaPreview
+                                            preview={photos[coverIndex]?.preview}
+                                            isVideo={
+                                                photos[coverIndex]?.isVideo ||
+                                                previewLooksLikeVideo(photos[coverIndex]?.preview)
+                                            }
                                             alt="Prévisualisation"
-                                            src={photos[coverIndex]?.preview}
-                                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
+                                            style={{
+                                                position: "absolute",
+                                                inset: 0,
+                                                width: "100%",
+                                                height: "100%",
+                                                objectFit: "cover",
+                                                zIndex: 1,
+                                            }}
                                         />
 
                                         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(10, 15, 15, 0.7) 0%, rgba(10, 15, 15, 0.2) 20%, rgba(10, 15, 15, 0) 40%)", pointerEvents: "none", zIndex: 2 }}></div>
@@ -841,14 +931,26 @@ export default function DeposerAnnoncePage() {
                                                     style={{ border: coverIndex === index ? "2px solid white" : "1px solid rgba(255, 255, 255, 0.16)", padding: "0px", borderRadius: "14px", overflow: "hidden", cursor: "pointer", background: "rgba(255, 255, 255, 0.08)", backdropFilter: "blur(8px)", opacity: coverIndex === index ? 1 : 0.6, transition: "0.2s", minWidth: "64px", width: "64px", height: "64px", position: "relative" }}
                                                     disabled={disableAllEdits}
                                                 >
-                                                    <img alt="" src={photo.preview} style={{ position: "absolute", inset: "0px", width: "100%", height: "100%", objectFit: "cover" }} />
+                                                    <AnnonceMediaPreview
+                                                        preview={photo.preview}
+                                                        isVideo={photo.isVideo || previewLooksLikeVideo(photo.preview)}
+                                                        alt=""
+                                                        thumb
+                                                        style={{
+                                                            position: "absolute",
+                                                            inset: "0px",
+                                                            width: "100%",
+                                                            height: "100%",
+                                                            objectFit: "cover",
+                                                        }}
+                                                    />
                                                     {coverIndex === index && (
                                                         <div style={{ position: "absolute", bottom: "4px", left: "0", right: "0", textAlign: "center", fontSize: "0.55rem", fontWeight: "600", color: "white", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>Couverture</div>
                                                     )}
                                                 </button>
                                             ))}
                                             
-                                            {photos.length < 10 && (
+                                            {photos.length < MAX_ANNONCE_MEDIA && (
                                                 <button
                                                     type="button"
                                                     onClick={(e) => {

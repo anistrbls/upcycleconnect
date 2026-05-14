@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import RefundPaymentDetailModal, { showEventRefundDetailsButton } from "../../finances/RefundPaymentDetailModal";
 
 export default function PaymentsAdminView() {
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [refundDetailPayment, setRefundDetailPayment] = useState(null);
 
     const fetchPayments = async () => {
         setLoading(true);
@@ -31,6 +34,30 @@ export default function PaymentsAdminView() {
     const formatAmount = (amount) => {
         return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(amount);
     };
+
+    const statusLabel = (p) => {
+        if (p.status === "refund_requested") return "Remboursement demandé";
+        if (p.status === "succeeded" || p.status === "paid" || p.status === "success") return "Payé";
+        if (p.status === "refunded") return "Remboursé";
+        if (p.status === "non_refundable") return "Non remboursable";
+        if (p.status === "refund_failed") return "Remboursement échoué";
+        return p.status || "—";
+    };
+
+    const statusStyle = (p) => {
+        if (p.status === "refund_requested") {
+            return { bg: "#fffbeb", color: "#b45309", border: "#fcd34d" };
+        }
+        if (p.status === "paid" || p.status === "succeeded" || p.status === "success") {
+            return { bg: "#ecfdf5", color: "#059669", border: "#6ee7b7" };
+        }
+        if (p.status === "refunded") {
+            return { bg: "#eff6ff", color: "#2563eb", border: "#93c5fd" };
+        }
+        return { bg: "#fff1f2", color: "#e11d48", border: "#fda4af" };
+    };
+
+    const showRefundLink = (p) => p.status === "refund_requested" && String(p.source || "").includes("événement");
 
     const formatDate = (dateStr) => {
         if (!dateStr) return "N/A";
@@ -84,11 +111,14 @@ export default function PaymentsAdminView() {
                                     <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Type / Source</th>
                                     <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Montant</th>
                                     <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Statut</th>
+                                    <th style={{ padding: "1rem 1.5rem", fontWeight: "600", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {payments.map((p, i) => (
-                                    <tr key={i} className="table-row-hover" style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.2s" }}>
+                                {payments.map((p, i) => {
+                                    const st = statusStyle(p);
+                                    return (
+                                    <tr key={`${p.source}-${p.sourceId}-${i}`} className="table-row-hover" style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.2s" }}>
                                         <td style={{ padding: "1.2rem 1.5rem" }}>
                                             <div style={{ fontWeight: "700", color: "var(--text-main)", marginBottom: "0.2rem" }}>{p.entityName}</div>
                                             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -132,25 +162,50 @@ export default function PaymentsAdminView() {
                                                 borderRadius: "999px",
                                                 fontSize: "0.75rem",
                                                 fontWeight: "700",
-                                                background: p.status === "paid" || p.status === "succeeded" || p.status === "success" ? "#ecfdf5" : 
-                                                            p.status === "refunded" ? "#eff6ff" : "#fff1f2",
-                                                color: p.status === "paid" || p.status === "succeeded" || p.status === "success" ? "#059669" : 
-                                                       p.status === "refunded" ? "#2563eb" : "#e11d48",
-                                                border: "1px solid currentColor",
-                                                borderOpacity: 0.1
+                                                background: st.bg,
+                                                color: st.color,
+                                                border: `1px solid ${st.border}`,
                                             }}>
-                                                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor", marginRight: "6px" }}></span>
-                                                {p.status === "succeeded" || p.status === "paid" || p.status === "success" ? "Payé" : 
-                                                 p.status === "refunded" ? "Remboursé" : p.status}
+                                                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor", marginRight: "6px", opacity: 0.85 }}></span>
+                                                {statusLabel(p)}
                                             </span>
                                         </td>
+                                        <td style={{ padding: "1.2rem 1.5rem", verticalAlign: "middle" }}>
+                                            <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", alignItems: "flex-start" }}>
+                                                {showRefundLink(p) ? (
+                                                    <Link
+                                                        href="/operations/validations?tab=remboursements"
+                                                        className="action-cta task-action-btn"
+                                                        style={{ fontSize: "0.78rem", padding: "0.45rem 0.9rem", textDecoration: "none", display: "inline-flex" }}
+                                                    >
+                                                        Voir la demande
+                                                    </Link>
+                                                ) : null}
+                                                {showEventRefundDetailsButton(p) ? (
+                                                    <button
+                                                        type="button"
+                                                        className="action-cta task-action-btn"
+                                                        style={{ fontSize: "0.78rem", padding: "0.45rem 0.9rem" }}
+                                                        onClick={() => setRefundDetailPayment(p)}
+                                                    >
+                                                        Voir le remboursement
+                                                    </button>
+                                                ) : null}
+                                                {!showRefundLink(p) && !showEventRefundDetailsButton(p) ? (
+                                                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>—</span>
+                                                ) : null}
+                                            </div>
+                                        </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
                 )}
             </div>
+
+            <RefundPaymentDetailModal open={!!refundDetailPayment} payment={refundDetailPayment} onClose={() => setRefundDetailPayment(null)} />
 
             <style jsx>{`
                 .table-row-hover:hover {

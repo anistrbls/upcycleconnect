@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Leaf, Box, BarChart3, Heart, Bookmark } from "lucide-react";
-import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import { apiUrl, buildAuthHeaders, getRoleFromToken } from "../../../lib/api";
 
 const styles = {
     container: {
@@ -302,6 +302,8 @@ const styles = {
 
 function ProjetsParticipesContent() {
     const router = useRouter();
+    const isPro = getRoleFromToken() === "professionnel";
+    const spaceLabel = isPro ? "Espace Professionnel" : "Espace Particulier";
     const [projects, setProjects] = useState([]);
     const [myScore, setMyScore] = useState(null);
     const [myWeight, setMyWeight] = useState(null);
@@ -342,9 +344,13 @@ function ProjetsParticipesContent() {
     return (
         <div style={styles.container}>
             <header style={styles.header}>
-                <p className="activities-label">Espace Particulier</p>
+                <p className="activities-label">{spaceLabel}</p>
                 <h1 style={{ fontSize: "2.5rem", fontWeight: "500", margin: "0.45rem 0", letterSpacing: "-0.02em" }}>My Upcycle</h1>
-                <p style={{ color: "var(--text-muted)", fontSize: "1.05rem" }}>Retrouvez les projets d'upcycling qui ont abouti grâce aux objets que vous avez donnés ou vendus.</p>
+                <p style={{ color: "var(--text-muted)", fontSize: "1.05rem" }}>
+                    {isPro
+                        ? "Vos projets publiés et validés, réalisés avec des objets que vous avez réellement récupérés (ramassage effectué)."
+                        : "Retrouvez les projets d'upcycling qui ont abouti grâce aux objets que vous avez donnés ou vendus."}
+                </p>
             </header>
 
             {/* ── My UpcycleScore banner ── */}
@@ -371,7 +377,9 @@ function ProjetsParticipesContent() {
                 <div style={{ zIndex: 1 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.3rem" }}>
                         <Leaf size={16} color="#4ade80" />
-                        <span style={{ fontSize: "0.7rem", fontWeight: "800", color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em" }}>My UpcycleScore</span>
+                        <span style={{ fontSize: "0.7rem", fontWeight: "800", color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                            {isPro ? "UpCycle Connect (pro)" : "My UpcycleScore"}
+                        </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: "0.4rem" }}>
                         <span style={{ fontSize: "3.5rem", fontWeight: "800", color: "#fff", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
@@ -379,8 +387,10 @@ function ProjetsParticipesContent() {
                         </span>
                         <span style={{ fontSize: "1.1rem", fontWeight: "600", color: "rgba(255,255,255,0.4)" }}>UC</span>
                     </div>
-                    <p style={{ marginTop: "0.5rem", fontSize: "0.82rem", color: "rgba(255,255,255,0.45)", maxWidth: "380px", lineHeight: 1.5 }}>
-                        Score calculé sur vos objets intégrés dans des projets certifiés — (poids en kg) × (coefficient matériau).
+                    <p style={{ marginTop: "0.5rem", fontSize: "0.82rem", color: "rgba(255,255,255,0.45)", maxWidth: "420px", lineHeight: 1.5 }}>
+                        {isPro
+                            ? "Somme des scores des objets que vous avez récupérés (statut ramassé) et utilisés dans vos projets publiés et validés : (kg) × (coefficient matériau). Les seules réservations ne comptent pas."
+                            : "Score calculé sur vos objets intégrés dans des projets certifiés — (poids en kg) × (coefficient matériau)."}
                     </p>
                 </div>
                 <div style={{ zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
@@ -399,10 +409,10 @@ function ProjetsParticipesContent() {
                 </div>
             </div>
 
-            <div style={styles.kpiGrid}>
-                <div style={styles.kpiCard}><Heart size={18} color="#E11D48" /><div><strong>{filtered.length}</strong><div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Projets participés</div></div></div>
-                <div style={styles.kpiCard}><BarChart3 size={18} color="#34585b" /><div><strong>{totalScore.toFixed(1)}</strong><div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Impact cumulé (UC)</div></div></div>
-                <div style={styles.kpiCard}><Leaf size={18} color="#2E7D6E" /><div><strong>{totalWeight.toFixed(1)} kg</strong><div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Masse revalorisée</div></div></div>
+                <div style={styles.kpiGrid}>
+                <div style={styles.kpiCard}><Heart size={18} color="#E11D48" /><div><strong>{filtered.length}</strong><div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{isPro ? "Projets publiés" : "Projets participés"}</div></div></div>
+                <div style={styles.kpiCard}><BarChart3 size={18} color="#34585b" /><div><strong>{totalScore.toFixed(1)}</strong><div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{isPro ? "UC (objets récupérés)" : "Impact cumulé (UC)"}</div></div></div>
+                <div style={styles.kpiCard}><Leaf size={18} color="#2E7D6E" /><div><strong>{isPro ? (myWeight === null ? "–" : `${myWeight.toFixed(1)}`) : totalWeight.toFixed(1)} kg</strong><div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{isPro ? "Masse (récupérés, validés)" : "Masse revalorisée"}</div></div></div>
             </div>
 
             <div style={styles.searchRow}>
@@ -410,7 +420,7 @@ function ProjetsParticipesContent() {
                     <Search size={16} color="var(--text-muted)" />
                     <input
                         style={styles.searchInput}
-                        placeholder="Rechercher par titre ou professionnel..."
+                        placeholder={isPro ? "Rechercher dans vos projets publiés…" : "Rechercher par titre ou professionnel..."}
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
@@ -419,11 +429,17 @@ function ProjetsParticipesContent() {
 
             <div style={styles.feed}>
                 {loading ? (
-                    <p style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>Chargement de vos participations...</p>
+                    <p style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
+                        {isPro ? "Chargement de vos projets validés…" : "Chargement de vos participations..."}
+                    </p>
                 ) : filtered.length === 0 ? (
                     <div style={{ textAlign: "center", padding: "4rem 2rem", background: "#f9f9f9", borderRadius: "24px", color: "var(--text-muted)" }}>
-                        <p style={{ fontSize: "1.2rem", fontWeight: "500" }}>Aucun projet trouvé</p>
-                        <p>Vos objets n'ont pas encore été intégrés dans un projet finalisé.</p>
+                        <p style={{ fontSize: "1.2rem", fontWeight: "500" }}>{isPro ? "Aucun projet validé pour l'instant" : "Aucun projet trouvé"}</p>
+                        <p>
+                            {isPro
+                                ? "Publiez un projet validé par la modération avec au moins un objet récupéré (ramassé) pour le voir ici et alimenter votre score UpCycle Connect."
+                                : "Vos objets n'ont pas encore été intégrés dans un projet finalisé."}
+                        </p>
                     </div>
                 ) : (
                     filtered.map((project) => {
@@ -475,7 +491,7 @@ function ProjetsParticipesContent() {
                         <article
                             key={project.id}
                             style={styles.card}
-                            onClick={() => router.push(`/projets/voir/${project.id}`)}
+                            onClick={() => router.push(`/projets/voir/${project.id}?from=participes`)}
                             className="project-card-hover"
                         >
                             {/* Social Buttons */}
@@ -559,8 +575,16 @@ function ProjetsParticipesContent() {
                                         <p style={styles.description}>{project.description}</p>
                                         <div style={styles.tagsRow}>
                                             <span style={styles.tag}>{project.itemCount} objet(s) au total</span>
-                                            <span style={styles.tag}>{Number(project.upcyclingScore).toFixed(1)} points UC</span>
-                                            <span style={styles.tag}>{Number(project.totalWeightKg).toFixed(1)} kg sauvés</span>
+                                            <span style={styles.tag}>
+                                                {isPro
+                                                    ? `${Number(project.upcyclingScore).toFixed(1)} UC (récup.)`
+                                                    : `${Number(project.upcyclingScore).toFixed(1)} points UC`}
+                                            </span>
+                                            <span style={styles.tag}>
+                                                {isPro
+                                                    ? `${Number(project.totalWeightKg).toFixed(1)} kg (projet)`
+                                                    : `${Number(project.totalWeightKg).toFixed(1)} kg sauvés`}
+                                            </span>
                                         </div>
                                     </div>
 

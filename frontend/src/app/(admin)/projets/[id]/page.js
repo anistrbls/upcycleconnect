@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
-import { ChevronLeft, Save, Send, Plus, X, Trash2, Image as ImageIcon, Box, BarChart3, FileText, Info, Leaf, CheckCircle2 } from "lucide-react";
+import { ChevronLeft, Save, Send, Plus, X, Trash2, Image as ImageIcon, Box, BarChart3, FileText, Info, Leaf, CheckCircle2, Heart, Bookmark, TrendingUp } from "lucide-react";
 
 const STATUS_LABELS = { brouillon: "Brouillon", publie: "Publié" };
 const MODERATION_LABELS = { pending: "En validation", approved: "Validé", rejected: "Refusé" };
@@ -145,6 +145,10 @@ export default function ProjetDetail() {
     const [success, setSuccess] = useState(null);
     const [newImageType, setNewImageType] = useState("autre");
     const [showItemSelect, setShowItemSelect] = useState(false);
+    const [likersOpen, setLikersOpen] = useState(false);
+    const [likers, setLikers] = useState([]);
+    const [likersLoading, setLikersLoading] = useState(false);
+    const [likersError, setLikersError] = useState(null);
 
     const formatWeight = (grams) => {
         const value = Number(grams || 0);
@@ -181,6 +185,32 @@ export default function ProjetDetail() {
     };
 
     useEffect(() => { load(); }, [projectId]);
+
+    useEffect(() => {
+        if (!likersOpen) return;
+        const onKey = (e) => {
+            if (e.key === "Escape") setLikersOpen(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [likersOpen]);
+
+    const openLikersModal = async () => {
+        setLikersOpen(true);
+        setLikersLoading(true);
+        setLikersError(null);
+        try {
+            const res = await fetch(apiUrl(`/pro/projects/${projectId}/likes`), { headers: buildAuthHeaders() });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Impossible de charger la liste des j'aime");
+            setLikers(Array.isArray(data.likers) ? data.likers : []);
+        } catch (e) {
+            setLikersError(e?.message || "Erreur");
+            setLikers([]);
+        } finally {
+            setLikersLoading(false);
+        }
+    };
 
     const flash = (msg, type = "success") => {
         if (type === "success") { setSuccess(msg); setError(null); }
@@ -478,6 +508,51 @@ export default function ProjetDetail() {
                 </div>
 
                 <aside style={styles.infoColumn}>
+                    <div style={{ ...styles.card, marginBottom: 0, padding: "1.25rem 1.5rem" }}>
+                        <h2 style={{ ...styles.sectionTitle, marginBottom: "1rem" }}><TrendingUp size={16} /> Engagement visiteurs</h2>
+                        <div style={{ display: "flex", gap: "0.75rem" }}>
+                            <button
+                                type="button"
+                                onClick={openLikersModal}
+                                title="Voir qui a aimé ce projet"
+                                style={{
+                                    flex: 1,
+                                    background: "#fff",
+                                    borderRadius: "14px",
+                                    padding: "1rem 0.65rem",
+                                    textAlign: "center",
+                                    border: "1px solid var(--border)",
+                                    cursor: "pointer",
+                                    fontFamily: "inherit",
+                                }}
+                            >
+                                <Heart size={20} strokeWidth={2} style={{ color: "#c0392b", margin: "0 auto 0.35rem", display: "block" }} aria-hidden />
+                                <div style={{ fontSize: "1.35rem", fontWeight: "700", color: "var(--text-main)", lineHeight: 1.2 }}>
+                                    {Number(project.likeCount ?? 0)}
+                                </div>
+                                <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "0.25rem", fontWeight: "600" }}>
+                                    J&apos;aime
+                                </div>
+                            </button>
+                            <div style={{
+                                flex: 1,
+                                background: "#fff",
+                                borderRadius: "14px",
+                                padding: "1rem 0.65rem",
+                                textAlign: "center",
+                                border: "1px solid var(--border)",
+                            }}>
+                                <Bookmark size={20} strokeWidth={2} style={{ color: "var(--accent)", margin: "0 auto 0.35rem", display: "block" }} aria-hidden />
+                                <div style={{ fontSize: "1.35rem", fontWeight: "700", color: "var(--text-main)", lineHeight: 1.2 }}>
+                                    {Number(project.bookmarkCount ?? 0)}
+                                </div>
+                                <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "0.25rem", fontWeight: "600" }}>
+                                    Enregistrements
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div style={{ ...styles.card, marginBottom: 0, borderRadius: "28px", border: "medium", background: "rgb(229, 255, 188)", color: "var(--text-main)" }}>
                         <div style={{ marginBottom: "1rem", color: "var(--forest-deep)" }}>
                             <Leaf size={24} strokeWidth={2} />
@@ -505,6 +580,100 @@ export default function ProjetDetail() {
                     </div>
                 </aside>
             </div>
+
+            {likersOpen ? (
+                <div
+                    role="presentation"
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(15, 20, 25, 0.45)",
+                        zIndex: 10000,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "1rem",
+                    }}
+                    onClick={() => setLikersOpen(false)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="likers-modal-title"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            background: "var(--surface-hover)",
+                            borderRadius: "16px",
+                            maxWidth: "440px",
+                            width: "100%",
+                            maxHeight: "min(70vh, 520px)",
+                            overflow: "hidden",
+                            display: "flex",
+                            flexDirection: "column",
+                            boxShadow: "0 16px 48px rgba(0,0,0,0.18)",
+                        }}
+                    >
+                        <div style={{
+                            padding: "1rem 1.25rem",
+                            borderBottom: "1px solid var(--border)",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "0.75rem",
+                        }}>
+                            <h3 id="likers-modal-title" style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--text-main)" }}>
+                                Personnes qui ont aimé ce projet
+                            </h3>
+                            <button
+                                type="button"
+                                aria-label="Fermer"
+                                onClick={() => setLikersOpen(false)}
+                                style={{
+                                    border: "none",
+                                    background: "none",
+                                    cursor: "pointer",
+                                    padding: "0.25rem",
+                                    color: "var(--text-muted)",
+                                    display: "flex",
+                                    borderRadius: "8px",
+                                }}
+                            >
+                                <X size={22} />
+                            </button>
+                        </div>
+                        <div style={{ overflowY: "auto", padding: "1rem 1.25rem 1.25rem" }}>
+                            {likersLoading ? (
+                                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>Chargement…</p>
+                            ) : likersError ? (
+                                <p style={{ margin: 0, color: "#c0392b", fontSize: "0.9rem" }}>{likersError}</p>
+                            ) : likers.length === 0 ? (
+                                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                                    Aucun j&apos;aime pour le moment.
+                                </p>
+                            ) : (
+                                <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+                                    {likers.map((liker, idx) => (
+                                        <li
+                                            key={liker.userId}
+                                            style={{
+                                                paddingBottom: idx < likers.length - 1 ? "0.85rem" : 0,
+                                                borderBottom: idx < likers.length - 1 ? "1px solid var(--border)" : "none",
+                                            }}
+                                        >
+                                            <div style={{ fontWeight: 600, fontSize: "0.95rem", color: "var(--text-main)" }}>
+                                                {liker.displayName || `Utilisateur #${liker.userId}`}
+                                            </div>
+                                            <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                                                {liker.role || "—"}
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }

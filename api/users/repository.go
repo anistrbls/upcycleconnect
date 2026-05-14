@@ -15,6 +15,11 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// DB expose la connexion pour des agrégations transverses (ex. score UC projets).
+func (r *Repository) DB() *sql.DB {
+	return r.db
+}
+
 // EnsureSchema crée/migre la table users.
 func (r *Repository) EnsureSchema() error {
 	statements := []string{
@@ -410,6 +415,24 @@ func scanRows(rows *sql.Rows) (User, error) {
 		u.SessionsInvalidBefore = &t
 	}
 	return u, nil
+}
+
+// GetSellerRatingAggregate retourne la moyenne et le nombre d'avis dans pro_seller_ratings pour ce vendeur (seller_user_id).
+func (r *Repository) GetSellerRatingAggregate(sellerUserID int64) (avg *float64, count int64, err error) {
+	var avgNull sql.NullFloat64
+	err = r.db.QueryRow(`
+		SELECT AVG(stars)::float8, COUNT(*)::bigint
+		FROM pro_seller_ratings
+		WHERE seller_user_id = $1
+	`, sellerUserID).Scan(&avgNull, &count)
+	if err != nil {
+		return nil, 0, err
+	}
+	if count > 0 && avgNull.Valid {
+		v := avgNull.Float64
+		return &v, count, nil
+	}
+	return nil, count, nil
 }
 
 func scanRow(row *sql.Row) (User, error) {

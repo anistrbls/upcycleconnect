@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../../lib/api";
+import { previewLooksLikeVideo } from "../../../../lib/mediaUploadLimits";
 import {
     ArrowLeft,
     MapPin,
@@ -14,6 +15,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Box,
+    Star,
 } from "lucide-react";
 
 const sectionLabel = {
@@ -110,6 +112,28 @@ function formatWeight(item) {
     return "Non renseigne";
 }
 
+function getInitials(name) {
+    const s = String(name || "").trim();
+    if (!s) return "?";
+    const parts = s.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+        return `${(parts[0][0] || "").toUpperCase()}${(parts[parts.length - 1][0] || "").toUpperCase()}`;
+    }
+    return s.slice(0, 2).toUpperCase();
+}
+
+const fmtEur = (amount) =>
+    new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(amount) || 0);
+
+/** Même logique que l’API Go (saleCommissionFeeCents) : arrondi au centime sur le prix annonce. */
+function saleCommissionFeeCents(priceEuros, percent) {
+    const baseCents = Math.round(Number(priceEuros) * 100);
+    if (!Number.isFinite(baseCents) || baseCents <= 0) return 0;
+    const p = Number(percent);
+    if (!Number.isFinite(p) || p <= 0) return 0;
+    return Math.round((baseCents * p) / 100);
+}
+
 export default function ProfessionalAvailableDetailPage() {
     const router = useRouter();
     const params = useParams();
@@ -132,7 +156,16 @@ export default function ProfessionalAvailableDetailPage() {
             if (!res.ok) {
                 throw new Error(data.error || "Annonce inaccessible");
             }
-            setItem(data);
+            const norm = (v, alt) => (v !== undefined && v !== null ? v : alt);
+            setItem({
+                ...data,
+                sellerName: norm(data.sellerName, data.seller_name) ?? "",
+                sellerRatingAvg: data.sellerRatingAvg ?? data.seller_rating_avg,
+                sellerRatingCount: Number(data.sellerRatingCount ?? data.seller_rating_count ?? 0),
+                sellerItemsCount: Number(data.sellerItemsCount ?? data.seller_items_count ?? 0),
+                sellerCity: data.sellerCity ?? data.seller_city ?? "",
+                sellerRegisteredAt: data.sellerRegisteredAt ?? data.seller_registered_at,
+            });
         } catch (err) {
             setError(err.message || "Erreur inattendue");
         } finally {
@@ -198,6 +231,14 @@ export default function ProfessionalAvailableDetailPage() {
 
     const photos = item.photos?.length ? item.photos : [item.image || "/img/placeholder-object.jpg"];
     const isDon = item.type === "don";
+    const saleModeRaw = String(item.saleCommissionMode ?? item.sale_commission_mode ?? "").toLowerCase();
+    const saleModeAdded = !isDon && saleModeRaw === "added";
+    const salePctRaw = item.saleCommissionPercent ?? item.sale_commission_percent;
+    const salePct = typeof salePctRaw === "number" ? salePctRaw : parseFloat(String(salePctRaw ?? "").replace(",", "."));
+    const salePercent = Number.isFinite(salePct) ? salePct : 0;
+    const feeCents = saleModeAdded ? saleCommissionFeeCents(item.price, salePercent) : 0;
+    const baseCents = Math.round(Number(item.price || 0) * 100);
+    const displayBuyerCents = saleModeAdded && feeCents > 0 ? baseCents + feeCents : baseCents;
     const displayDate = formatDate(
         item.availableAt ||
         item.available_at ||
@@ -222,6 +263,35 @@ export default function ProfessionalAvailableDetailPage() {
 
     const prev = () => setActivePhoto((i) => (i - 1 + photos.length) % photos.length);
     const next = () => setActivePhoto((i) => (i + 1) % photos.length);
+
+    const sellerDisplayName = String(item.sellerName || "").trim() || "Non renseigné";
+    const authorRating = Math.max(0, Math.min(5, Number(item.sellerRatingAvg ?? 0)));
+    const roundedStars = Math.round(authorRating);
+    const sellerRatingCount = Number(item.sellerRatingCount ?? 0);
+    const sellerRatingLabel =
+        sellerRatingCount > 0
+            ? `${authorRating.toFixed(1)} · ${sellerRatingCount} avis`
+            : "Pas encore d'avis";
+    const registrationDisplay = item.sellerRegisteredAt
+        ? new Date(item.sellerRegisteredAt).toLocaleDateString("fr-FR", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+          })
+        : "Non renseignée";
+    const locationDisplay =
+        [item.sellerCity || item.city, item.country].filter(Boolean).join(", ") || "N/A";
+
+    const detailRows = [
+        { label: "Catégorie", val: item.category || "N/A", icon: <Tag size={13} /> },
+        { label: "Type", val: isDon ? "Don" : "Vente", icon: isDon ? <Gift size={13} /> : <Tag size={13} /> },
+        { label: "État", val: item.condition || "N/A", icon: <CheckCircle2 size={13} /> },
+        { label: "Matière", val: item.material || "N/A", icon: <Package size={13} /> },
+        { label: "Poids estime", val: estimatedWeight, icon: <Package size={13} /> },
+        { label: "Publiée le", val: displayDate, icon: <Calendar size={13} /> },
+        { label: "Point de dépôt", val: item.depositPointName || "À assigner", icon: <Box size={13} /> },
+        { label: "Conteneur", val: item.containerName || "À assigner", icon: <Box size={13} /> },
+    ];
 
     return (
         <div style={{ width: "100%", padding: "1rem 0 4rem 0", animation: "fadeIn 0.4s ease-out" }}>
@@ -253,14 +323,25 @@ export default function ProfessionalAvailableDetailPage() {
                 )}
 
                 <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(360px, 0.8fr)", gap: "1.5rem", alignItems: "stretch" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", minWidth: 0 }}>
                     <div style={{ background: "var(--black)", borderRadius: "28px", padding: "1rem", border: "1px solid rgba(18, 25, 26, 0.08)" }}>
                         <div style={{ borderRadius: "22px", overflow: "hidden", background: "#12191A", position: "relative" }}>
                             <div style={{ position: "relative", width: "100%", aspectRatio: "4/3", overflow: "hidden" }}>
-                                <img
-                                    src={photos[activePhoto]}
-                                    alt={item.title}
-                                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
-                                />
+                                {previewLooksLikeVideo(photos[activePhoto]) ? (
+                                    <video
+                                        src={photos[activePhoto]}
+                                        controls
+                                        playsInline
+                                        muted
+                                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", zIndex: 1, background: "#0a0f0f" }}
+                                    />
+                                ) : (
+                                    <img
+                                        src={photos[activePhoto]}
+                                        alt={item.title}
+                                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
+                                    />
+                                )}
 
                                 <div style={{
                                     position: "absolute",
@@ -309,7 +390,18 @@ export default function ProfessionalAvailableDetailPage() {
                                                         position: "relative",
                                                     }}
                                                 >
-                                                    <img src={p} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                                    {previewLooksLikeVideo(p) ? (
+                                                        <video
+                                                            src={p}
+                                                            muted
+                                                            playsInline
+                                                            preload="metadata"
+                                                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                                            aria-hidden
+                                                        />
+                                                    ) : (
+                                                        <img src={p} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                                    )}
                                                 </button>
                                             ))}
                                         </div>
@@ -319,12 +411,43 @@ export default function ProfessionalAvailableDetailPage() {
                         </div>
                     </div>
 
-                    <div style={{ display: "grid", gap: "0.85rem", gridTemplateRows: "auto auto", alignContent: "start" }}>
+                    <section style={{ paddingTop: "0.2rem" }}>
+                        <span style={sectionLabel}>Détails</span>
+                        <div className="details-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem 1.2rem" }}>
+                            {detailRows.map(({ label, val, icon }) => (
+                                <div key={label} style={{ paddingBottom: "0.85rem", borderBottom: "1px solid rgba(35,59,61,0.08)" }}>
+                                    <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.38rem" }}>{label}</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.94rem", fontWeight: "600", color: "var(--text-main)", lineHeight: "1.45" }}>
+                                        <span style={{ color: "var(--forest-deep)", display: "flex", flexShrink: 0 }}>{icon}</span>
+                                        <span>{val}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                    </div>
+
+                    <div style={{ display: "grid", gap: "0.85rem", gridTemplateRows: "auto auto auto", alignContent: "start" }}>
                         <div style={{ background: "#F7F8F7", borderRadius: "24px", padding: "1rem", border: "none", display: "flex", flexDirection: "column", justifyContent: "flex-start", minHeight: 0 }}>
                             <div>
                                 <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>Vue professionnel</div>
                                 <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: "1.12", letterSpacing: "-0.03em" }}>{item.title}</h1>
-                                <div style={{ fontSize: isDon ? "1.5rem" : "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>{isDon ? "Gratuit" : `${item.price} EUR`}</div>
+                                {isDon ? (
+                                    <div style={{ fontSize: "1.5rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>Gratuit</div>
+                                ) : saleModeAdded && feeCents > 0 ? (
+                                    <div style={{ marginBottom: "0.7rem" }}>
+                                        <div style={{ fontSize: "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.35rem" }}>
+                                            {fmtEur(displayBuyerCents / 100)}
+                                        </div>
+                                        <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.45 }}>
+                                            dont <strong>{fmtEur(feeCents / 100)}</strong> de frais plateforme
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div style={{ fontSize: "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>
+                                        {fmtEur(Number(item.price || 0))}
+                                    </div>
+                                )}
 
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", color: "var(--text-muted)", fontSize: "0.84rem", marginBottom: "1rem" }}>
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}><MapPin size={12} /> {depositLocation}</span>
@@ -373,6 +496,101 @@ export default function ProfessionalAvailableDetailPage() {
                             </div>
                         </div>
 
+                        <div
+                            style={{
+                                background: "#F7F8F7",
+                                borderRadius: "20px",
+                                padding: "0.95rem 1.05rem",
+                                border: "none",
+                                display: "grid",
+                                gap: "0.7rem",
+                            }}
+                        >
+                            <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>
+                                Auteur
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.7rem" }}>
+                                <div
+                                    style={{
+                                        width: "46px",
+                                        height: "46px",
+                                        borderRadius: "50%",
+                                        background: "rgba(35,59,61,0.12)",
+                                        color: "var(--text-main)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: "0.82rem",
+                                        fontWeight: "700",
+                                    }}
+                                >
+                                    {getInitials(sellerDisplayName)}
+                                </div>
+
+                                <div style={{ minWidth: 0 }}>
+                                    <div
+                                        style={{
+                                            fontSize: "0.98rem",
+                                            fontWeight: "700",
+                                            color: "var(--text-main)",
+                                            lineHeight: "1.2",
+                                            whiteSpace: "nowrap",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                        }}
+                                    >
+                                        {sellerDisplayName}
+                                    </div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.32rem", marginTop: "0.24rem" }}>
+                                        {[1, 2, 3, 4, 5].map((star) => (
+                                            <Star
+                                                key={star}
+                                                size={12}
+                                                strokeWidth={2}
+                                                style={{
+                                                    color: star <= roundedStars ? "#f4b740" : "rgba(35,59,61,0.2)",
+                                                    fill: star <= roundedStars ? "#f4b740" : "transparent",
+                                                }}
+                                            />
+                                        ))}
+                                        <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--text-muted)", marginLeft: "0.18rem" }}>
+                                            {sellerRatingLabel}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem" }}>
+                                <div style={{ background: "rgba(255,255,255,0.72)", borderRadius: "12px", padding: "0.55rem 0.65rem", border: "none" }}>
+                                    <div style={{ fontSize: "0.64rem", fontWeight: "700", letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.2rem" }}>
+                                        Nb annonces
+                                    </div>
+                                    <div style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text-main)", lineHeight: 1.25 }}>
+                                        {Number(item.sellerItemsCount ?? 0)}
+                                    </div>
+                                </div>
+
+                                <div style={{ background: "rgba(255,255,255,0.72)", borderRadius: "12px", padding: "0.55rem 0.65rem", border: "none" }}>
+                                    <div style={{ fontSize: "0.64rem", fontWeight: "700", letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.2rem" }}>
+                                        Date inscription
+                                    </div>
+                                    <div style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text-main)" }}>
+                                        {registrationDisplay}
+                                    </div>
+                                </div>
+
+                                <div style={{ background: "rgba(255,255,255,0.72)", borderRadius: "12px", padding: "0.55rem 0.65rem", border: "none", gridColumn: "1 / -1" }}>
+                                    <div style={{ fontSize: "0.64rem", fontWeight: "700", letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.2rem" }}>
+                                        Localisation
+                                    </div>
+                                    <div style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text-main)" }}>
+                                        {locationDisplay}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div style={{
                             background: "#F7F8F7",
                             borderRadius: "20px",
@@ -381,7 +599,6 @@ export default function ProfessionalAvailableDetailPage() {
                             display: "grid",
                             gap: "0.85rem",
                             alignContent: "start",
-                            minHeight: "340px",
                         }}>
                             <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>
                                 Point de depot
@@ -414,40 +631,13 @@ export default function ProfessionalAvailableDetailPage() {
                     </div>
                 </div>
 
-                <div className="content-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)", gap: "3rem", paddingTop: "0.8rem" }}>
+                <div className="content-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "3rem", paddingTop: "0.8rem" }}>
                     <section style={{ paddingTop: "0.2rem" }}>
                         <span style={sectionLabel}>Description</span>
                         <div style={{ display: "grid", gap: "1rem", maxWidth: "78ch" }}>
-                            <p style={{ fontSize: "0.86rem", lineHeight: "1.7", color: "var(--text-muted)", margin: 0, maxWidth: "62ch" }}>
-                                Informations utiles pour evaluer l'objet avant reservation.
-                            </p>
                             <p style={{ fontSize: "0.98rem", lineHeight: "1.9", color: "var(--text-main)", margin: 0 }}>
                                 {item.description || "Aucune description fournie."}
                             </p>
-                        </div>
-                    </section>
-
-                    <section style={{ paddingTop: "0.2rem" }}>
-                        <span style={sectionLabel}>Détails</span>
-                        <div className="details-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem 1.2rem" }}>
-                            {[
-                                { label: "Catégorie", val: item.category || "N/A", icon: <Tag size={13} /> },
-                                { label: "Type", val: isDon ? "Don" : "Vente", icon: isDon ? <Gift size={13} /> : <Tag size={13} /> },
-                                { label: "État", val: item.condition || "N/A", icon: <CheckCircle2 size={13} /> },
-                                { label: "Matière", val: item.material || "N/A", icon: <Package size={13} /> },
-                                { label: "Poids estime", val: estimatedWeight, icon: <Package size={13} /> },
-                                { label: "Publiée le", val: displayDate, icon: <Calendar size={13} /> },
-                                { label: "Point de dépôt", val: item.depositPointName || "À assigner", icon: <Box size={13} /> },
-                                { label: "Conteneur", val: item.containerName || "À assigner", icon: <Box size={13} /> },
-                            ].map(({ label, val, icon }) => (
-                                <div key={label} style={{ paddingBottom: "0.85rem", borderBottom: "1px solid rgba(35,59,61,0.08)" }}>
-                                    <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.38rem" }}>{label}</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.94rem", fontWeight: "600", color: "var(--text-main)", lineHeight: "1.45" }}>
-                                        <span style={{ color: "var(--forest-deep)", display: "flex", flexShrink: 0 }}>{icon}</span>
-                                        <span>{val}</span>
-                                    </div>
-                                </div>
-                            ))}
                         </div>
                     </section>
                 </div>

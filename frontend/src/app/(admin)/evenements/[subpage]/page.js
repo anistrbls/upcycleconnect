@@ -10,7 +10,7 @@ import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import ParticulierEvenementsView from "../../../components/particulier/ParticulierEvenementsView";
 import EventDetailView from "../../../components/shared/events/EventDetailView";
 import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
-import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
+import { NAV_MODULES, PARTICULIER_MODULES, getModuleByKey, getSubNavItem } from "../../../lib/constants";
 
 export default function EventsSubPage({ params }) {
     const { subpage } = use(params);
@@ -34,10 +34,17 @@ export default function EventsSubPage({ params }) {
             return null;
         }
     };
-    const isParticulier = getUserRole() === "particulier";
+    const userRole = getUserRole();
+    const isAttendee = userRole === "particulier" || userRole === "professionnel";
+    const isAdminUser = userRole === "admin";
 
-    const activeModule = getModuleByKey("evenements");
-    const activeSub = getSubNavItem(activeModule.key, subpage);
+    const adminEventsModule = NAV_MODULES.find((m) => m.key === "evenements");
+    const attendeeEventsModule = PARTICULIER_MODULES.find((m) => m.key === "evenements");
+    const activeModule = isAdminUser ? (adminEventsModule || getModuleByKey("evenements")) : (attendeeEventsModule || getModuleByKey("evenements"));
+    const activeSub =
+        activeModule?.subNav.find((item) => item.key === subpage) ||
+        activeModule?.subNav[0] ||
+        getSubNavItem("evenements", subpage);
     const openEventId = useMemo(() => {
         const rawValue = searchParams.get("open");
         if (!rawValue) {
@@ -116,12 +123,16 @@ export default function EventsSubPage({ params }) {
     };
 
     useEffect(() => {
+        const role = getUserRole();
+        const attendee = role === "particulier" || role === "professionnel";
+        const admin = role === "admin";
+
         const successSessionId = searchParams.get("session_id");
         const isSuccess = searchParams.get("success") === "1" || searchParams.get("stripe") === "success";
         const isCancel = searchParams.get("stripe") === "cancel";
         const redirectEventId = searchParams.get("id");
 
-        if (isParticulier && isSuccess && successSessionId) {
+        if (attendee && isSuccess && successSessionId) {
             const confirmWithRetry = async () => {
                 let ok = false;
                 let lastStatus = 0;
@@ -186,7 +197,7 @@ export default function EventsSubPage({ params }) {
             return;
         }
 
-        if (isParticulier && isCancel && redirectEventId) {
+        if (attendee && isCancel && redirectEventId) {
             fetch(apiUrl(`/events/${encodeURIComponent(redirectEventId)}/register`), {
                 method: "DELETE",
                 headers: buildAuthHeaders(),
@@ -198,7 +209,7 @@ export default function EventsSubPage({ params }) {
             return;
         }
 
-        if (isParticulier) {
+        if (attendee) {
             setEventsLoading(true);
             setEventsError("");
             Promise.all([loadPublicEvents(), loadMyRegistrations()])
@@ -206,8 +217,9 @@ export default function EventsSubPage({ params }) {
                 .finally(() => setEventsLoading(false));
             return;
         }
-        if (subpage === "tous-evenements" || subpage === "planning" || subpage === "moderation") {
+        if (admin && (subpage === "tous-evenements" || subpage === "planning" || subpage === "moderation")) {
             refreshEventsData();
+            return;
         }
         if (subpage === "activites") {
             setEventsLoading(true);
@@ -216,13 +228,13 @@ export default function EventsSubPage({ params }) {
                 .catch((err) => setEventsError(String(err?.message || "Impossible de charger les activités.")))
                 .finally(() => setEventsLoading(false));
         }
-    }, [subpage]);
+    }, [subpage, searchParams, router]);
 
     useEffect(() => {
-        if (subpage === "tous-evenements" && openEventId) {
+        if (isAdminUser && subpage === "tous-evenements" && openEventId) {
             setPendingOpenEventId(openEventId);
         }
-    }, [subpage, openEventId]);
+    }, [isAdminUser, subpage, openEventId]);
 
     const createEvent = async (payload) => {
         const response = await fetch(apiUrl("/admin/events"), {
@@ -277,7 +289,7 @@ export default function EventsSubPage({ params }) {
             return;
         }
 
-        if (isParticulier) {
+        if (isAttendee) {
             router.push(`/evenements/mes-inscriptions?id=${eventItem.id}`);
         } else {
             router.push(`/evenements/tous-evenements?id=${eventItem.id}`);
@@ -286,7 +298,7 @@ export default function EventsSubPage({ params }) {
 
     const handleConsumedOpenEvent = () => {
         setPendingOpenEventId(null);
-        if (searchParams.get("open")) {
+        if (isAdminUser && searchParams.get("open")) {
             router.replace("/evenements/tous-evenements");
         }
     };
@@ -305,7 +317,7 @@ export default function EventsSubPage({ params }) {
         );
     }
 
-    if (isParticulier && (subpage === "activites" || subpage === "mes-inscriptions")) {
+    if (isAttendee && (subpage === "activites" || subpage === "mes-inscriptions")) {
         return (
             <ParticulierEvenementsView
                 events={publicEvents}
@@ -323,7 +335,7 @@ export default function EventsSubPage({ params }) {
         );
     }
 
-    if (subpage === "tous-evenements") {
+    if (subpage === "tous-evenements" && isAdminUser) {
         return (
             <EventAdminView
                 events={events}
@@ -343,7 +355,7 @@ export default function EventsSubPage({ params }) {
     }
 
 
-    if (subpage === "planning" && !isParticulier) {
+    if (subpage === "planning" && isAdminUser) {
         return (
             <EventPlanningView 
                 events={events} 
@@ -354,7 +366,7 @@ export default function EventsSubPage({ params }) {
         );
     }
 
-    if (subpage === "moderation" && !isParticulier) {
+    if (subpage === "moderation" && isAdminUser) {
         return (
             <EventValidationView
                 events={events}
@@ -377,7 +389,7 @@ export default function EventsSubPage({ params }) {
                         events={myRegistrations}
                         onOpenEvent={openEventFromPlanning}
                         title="Mon planning"
-                        subtitle="Espace particulier"
+                        subtitle="Mes inscriptions"
                     />
                 )}
             </>

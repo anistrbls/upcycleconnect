@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { User, Mail, Phone, MapPin, ShieldCheck, Save, Loader2, KeyRound, AlertCircle } from "lucide-react";
+import { User, Mail, Phone, MapPin, ShieldCheck, Save, Loader2, KeyRound, BarChart3, Star } from "lucide-react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
 
 const styles = {
@@ -90,8 +90,78 @@ const styles = {
         border: "1px solid rgba(255,255,255,0.1)",
         backdropFilter: "blur(12px)",
         animation: "slideIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-    }
+    },
+    metricPill: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.45rem",
+        padding: "0.45rem 0.85rem",
+        borderRadius: "12px",
+        background: "var(--surface-hover)",
+        fontSize: "0.88rem",
+        color: "var(--text-main)",
+    },
 };
+
+function AccountHeaderMetrics({ role, sellerRatingAvg, sellerRatingCount, upcycleConnectScore }) {
+    const showSeller = role === "particulier" || role === "professionnel";
+    const showUc = role === "professionnel" && typeof upcycleConnectScore === "number";
+    if (!showSeller && !showUc) return null;
+
+    const cnt = Number(sellerRatingCount) || 0;
+    const avgNum =
+        sellerRatingAvg != null && !Number.isNaN(Number(sellerRatingAvg)) ? Number(sellerRatingAvg) : null;
+    const hasRatings = cnt > 0 && avgNum != null;
+    const displayAvg = hasRatings
+        ? avgNum.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+        : null;
+
+    return (
+        <div
+            style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+                marginTop: "1.1rem",
+                alignItems: "center",
+            }}
+        >
+            {showSeller ? (
+                <div style={styles.metricPill}>
+                    <span style={{ display: "inline-flex", gap: "0.05rem" }} aria-hidden>
+                        {[1, 2, 3, 4, 5].map((n) => {
+                            const on = hasRatings && avgNum >= n - 1e-9;
+                            return (
+                                <Star
+                                    key={n}
+                                    size={16}
+                                    fill={on ? "#ca8a04" : "none"}
+                                    color={on ? "#ca8a04" : "rgba(35,59,61,0.22)"}
+                                    strokeWidth={on ? 0 : 1.4}
+                                />
+                            );
+                        })}
+                    </span>
+                    <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                        {hasRatings ? `${displayAvg}/5` : "—"}
+                    </span>
+                    {cnt > 0 ? (
+                        <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>({cnt})</span>
+                    ) : null}
+                </div>
+            ) : null}
+            {showUc ? (
+                <div style={styles.metricPill}>
+                    <BarChart3 size={16} color="var(--text-muted)" strokeWidth={2} />
+                    <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>UC</span>
+                    <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                        {upcycleConnectScore.toFixed(1)}
+                    </span>
+                </div>
+            ) : null}
+        </div>
+    );
+}
 
 export default function MonComptePage() {
     const [userData, setUserData] = useState({
@@ -112,7 +182,10 @@ export default function MonComptePage() {
         // Champs Salarié
         employeeRole: "",
         siteLocation: "",
-        skills: ""
+        skills: "",
+        upcycleConnectScore: null,
+        sellerRatingAvg: null,
+        sellerRatingCount: 0,
     });
     const [passwords, setPasswords] = useState({
         oldPassword: "",
@@ -253,9 +326,12 @@ export default function MonComptePage() {
                          userData.role === 'salarie' ? 'Espace Salarié' : 'Espace particulier'}
                     </span>
                     <h1>Mon compte</h1>
-                    <p style={{ color: "var(--text-muted)", fontSize: "1rem", marginTop: "0.25rem" }}>
-                        Gérez vos informations personnelles et consultez vos données professionnelles.
-                    </p>
+                    <AccountHeaderMetrics
+                        role={userData.role}
+                        sellerRatingAvg={userData.sellerRatingAvg}
+                        sellerRatingCount={userData.sellerRatingCount}
+                        upcycleConnectScore={userData.upcycleConnectScore}
+                    />
                 </div>
             </div>
 
@@ -269,7 +345,7 @@ export default function MonComptePage() {
                     
                     <div style={styles.infoBadge}>
                         <ShieldCheck size={16} />
-                        Compte {userData.role} · {userData.status === 'active' ? 'Vérifié' : 'En attente'}
+                        {userData.status === "active" ? "Compte actif" : "En attente"}
                     </div>
 
                     <form onSubmit={handleUpdateProfile}>
@@ -397,23 +473,19 @@ export default function MonComptePage() {
                             {savingPass ? <Loader2 className="animate-spin" size={18} /> : <KeyRound size={18} />}
                             Changer le mot de passe
                         </button>
-                        <p style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                            <AlertCircle size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
-                            Cette action vous déconnectera de tous vos appareils.
+                        <p style={{ marginTop: "0.75rem", fontSize: "0.78rem", color: "var(--text-muted)", textAlign: "center" }}>
+                            Déconnexion sur tous les appareils.
                         </p>
                     </form>
                 </section>
 
                 {/* Section Professionnelle (si applicable) */}
                 {userData.role === 'professionnel' && (
-                    <section style={{...styles.section, background: 'rgba(229, 255, 188, 0.4)'}}>
+                    <section style={styles.section}>
                         <div style={styles.sectionTitle}>
-                            <ShieldCheck size={20} color="var(--forest-deep)" />
-                            Informations d'entreprise
+                            <ShieldCheck size={20} />
+                            Entreprise
                         </div>
-                        <p style={{ fontSize: '0.8rem', color: 'var(--forest-deep)', marginBottom: '1.5rem', opacity: 0.8 }}>
-                            Ces informations ont été validées lors de votre inscription et ne peuvent être modifiées que par un administrateur.
-                        </p>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
                             <div style={styles.formGroup}>

@@ -1,6 +1,7 @@
 package items
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
@@ -34,6 +35,60 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 	})
+
+	mux.Handle("GET /api/items/{item_id}/my-professional-rating", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil || itemID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		uid := int64(claims["userId"].(float64))
+		stars, ok, err := repo.GetSellerProfessionalRating(context.Background(), itemID, uid)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load rating")
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusOK, map[string]any{"stars": nil})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"stars": stars})
+	})))
+
+	mux.Handle("POST /api/items/{item_id}/rate-professional", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil || itemID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		uid := int64(claims["userId"].(float64))
+		var body struct {
+			Stars int `json:"stars"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		if err := repo.UpsertSellerProfessionalRating(context.Background(), itemID, uid, body.Stars); err != nil {
+			if strings.Contains(err.Error(), "only item owner") {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			if strings.Contains(err.Error(), "stars must be") {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if strings.Contains(err.Error(), "no professional") || strings.Contains(err.Error(), "invalid reservation") {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not save rating")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})))
 
 	// GET /api/items/{id} (public detail)
 	mux.HandleFunc("GET /api/items/", func(w http.ResponseWriter, r *http.Request) {
@@ -303,8 +358,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		writeJSON(w, http.StatusOK, item)
 	})))
 
-	// POST /api/items/{id}/cancel (user cancel before deposit)
-	mux.Handle("POST /api/items/cancel/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// POST /api/items/{item_id}/cancel (user cancel before deposit)
+	// Chemin explicite {item_id}/cancel pour éviter le conflit ServeMux avec POST /api/items/{item_id}/rate-professional.
+	mux.Handle("POST /api/items/{item_id}/cancel", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := r.Context().Value("authClaims").(jwt.MapClaims)
 		email := claims["sub"].(string)
 
@@ -315,10 +371,8 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 
-		path := r.URL.Path
-		idStr := strings.TrimPrefix(path, "/api/items/cancel/")
-		itemID, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil || itemID <= 0 {
 			writeError(w, http.StatusBadRequest, "invalid item id")
 			return
 		}

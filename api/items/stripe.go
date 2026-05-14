@@ -1,18 +1,23 @@
 package items
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/stripe/stripe-go/v81"
+	"github.com/stripe/stripe-go/v81/refund"
 )
 
 type StripeConfig struct {
@@ -50,9 +55,20 @@ type stripeCheckoutSession struct {
 	Metadata      map[string]string `json:"metadata"`
 }
 
-func createStripeCheckoutSession(cfg *StripeConfig, itemID, userID int64, title string, amountCents int64, currency string) (*stripeCheckoutSession, error) {
-	if amountCents <= 0 {
+// createStripeCheckoutSession crée une session Checkout : une ligne (prix annonce) ou deux si commission en supplément (mode added).
+func createStripeCheckoutSession(cfg *StripeConfig, itemID, userID int64, title string, itemAmountCents, platformFeeCents int64, currency string) (*stripeCheckoutSession, error) {
+	if itemAmountCents < 0 {
+		itemAmountCents = 0
+	}
+	if platformFeeCents < 0 {
+		platformFeeCents = 0
+	}
+	total := itemAmountCents + platformFeeCents
+	if total <= 0 {
 		return nil, fmt.Errorf("invalid amount")
+	}
+	if platformFeeCents > 0 && itemAmountCents <= 0 {
+		return nil, fmt.Errorf("invalid base amount")
 	}
 
 	itemIDStr := strconv.FormatInt(itemID, 10)
@@ -68,10 +84,21 @@ func createStripeCheckoutSession(cfg *StripeConfig, itemID, userID int64, title 
 	form.Set("cancel_url", cfg.CancelURL)
 	form.Set("metadata[item_id]", itemIDStr)
 	form.Set("metadata[user_id]", userIDStr)
-	form.Set("line_items[0][quantity]", "1")
-	form.Set("line_items[0][price_data][currency]", cleanCurrency)
-	form.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(amountCents, 10))
-	form.Set("line_items[0][price_data][product_data][name]", title)
+	if platformFeeCents <= 0 {
+		form.Set("line_items[0][quantity]", "1")
+		form.Set("line_items[0][price_data][currency]", cleanCurrency)
+		form.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(itemAmountCents, 10))
+		form.Set("line_items[0][price_data][product_data][name]", title)
+	} else {
+		form.Set("line_items[0][quantity]", "1")
+		form.Set("line_items[0][price_data][currency]", cleanCurrency)
+		form.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(itemAmountCents, 10))
+		form.Set("line_items[0][price_data][product_data][name]", title)
+		form.Set("line_items[1][quantity]", "1")
+		form.Set("line_items[1][price_data][currency]", cleanCurrency)
+		form.Set("line_items[1][price_data][unit_amount]", strconv.FormatInt(platformFeeCents, 10))
+		form.Set("line_items[1][price_data][product_data][name]", "Commission plateforme")
+	}
 
 	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -108,7 +135,7 @@ func GetStripeConfigPublic() (*StripeConfig, error) {
 
 // CreateStripeCheckoutSessionPublic expose la création de session Stripe pour d'autres packages
 func CreateStripeCheckoutSessionPublic(cfg *StripeConfig, itemID, userID int64, title string, amountCents int64, currency string) (*StripeCheckoutSessionPublic, error) {
-	session, err := createStripeCheckoutSession(cfg, itemID, userID, title, amountCents, currency)
+	session, err := createStripeCheckoutSession(cfg, itemID, userID, title, amountCents, 0, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +194,38 @@ type stripeWebhookCheckoutSession struct {
 	ID            string            `json:"id"`
 	PaymentIntent string            `json:"payment_intent"`
 	Metadata      map[string]string `json:"metadata"`
+}
+
+// ParseStripeWebhookPaymentIntentField extrait l'ID PaymentIntent depuis un champ JSON Stripe (string ou objet développé).
+func ParseStripeWebhookPaymentIntentField(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if id := strings.TrimSpace(s); id != "" {
+			return id
+		}
+	}
+	var wrap struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err == nil {
+		return strings.TrimSpace(wrap.ID)
+	}
+	return ""
+}
+
+type stripeWebhookRefund struct {
+	ID            string          `json:"id"`
+	Status        string          `json:"status"`
+	Amount        int64           `json:"amount"`
+	PaymentIntent json.RawMessage `json:"payment_intent"`
+}
+
+type stripeWebhookCharge struct {
+	PaymentIntent  json.RawMessage `json:"payment_intent"`
+	AmountRefunded int64           `json:"amount_refunded"`
 }
 
 func verifyStripeSignature(payload []byte, signatureHeader, webhookSecret string) error {
@@ -357,34 +416,88 @@ func GetStripePaymentIntentFromSessionPublic(cfg *StripeConfig, sessionID string
 	return session.PaymentIntent, nil
 }
 
-// RefundStripePaymentIntentPublic issues a full refund for a given payment intent
-func RefundStripePaymentIntentPublic(cfg *StripeConfig, paymentIntentID string) (string, error) {
-	form := url.Values{}
-	form.Set("payment_intent", paymentIntentID)
+// RefundPaymentIntentParams options pour RefundStripePaymentIntentPublic (remboursement partiel, idempotence).
+type RefundPaymentIntentParams struct {
+	// AmountCents : nil ou pointeur vers 0 = remboursement intégral ; valeur > 0 = partiel (centimes).
+	AmountCents *int64
+	// IdempotencyKey : recommandé pour éviter un double remboursement en cas de retry réseau (max 255 caractères côté Stripe).
+	IdempotencyKey string
+}
 
-	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/refunds", strings.NewReader(form.Encode()))
+// RefundEURToAmountCents convertit un montant en euros en centimes Stripe (arrondi, au moins 1 si eur > 0).
+func RefundEURToAmountCents(eur float64) int64 {
+	if eur <= 0 {
+		return 0
+	}
+	c := math.Round(eur * 100)
+	if c < 1 {
+		c = 1
+	}
+	return int64(c)
+}
+
+// NewEventRefundStripeParams construit remboursement + clé d'idempotence stable par (opération, événement, utilisateur, PI, centimes).
+// partialAmountCents non nil et > 0 : remboursement partiel de ce montant ; sinon billet complet = ticketEUR en centimes.
+// recordEUR est le montant à persister en base après succès (aligné sur les centimes envoyés à Stripe).
+func NewEventRefundStripeParams(operation string, eventID, userID int64, paymentIntentID string, ticketEUR float64, partialAmountCents *int64) (*RefundPaymentIntentParams, float64) {
+	pi := strings.TrimSpace(paymentIntentID)
+	var cents int64
+	if partialAmountCents != nil && *partialAmountCents > 0 {
+		cents = *partialAmountCents
+	} else {
+		cents = RefundEURToAmountCents(ticketEUR)
+	}
+	var ac *int64
+	if cents > 0 {
+		ac = &cents
+	}
+	op := strings.TrimSpace(operation)
+	if op == "" {
+		op = "event"
+	}
+	key := fmt.Sprintf("event-refund-%s-%d-%d-%s-%d", op, eventID, userID, pi, cents)
+	if len(key) > 255 {
+		key = key[:255]
+	}
+	recordEUR := ticketEUR
+	if cents > 0 {
+		recordEUR = float64(cents) / 100.0
+	}
+	return &RefundPaymentIntentParams{AmountCents: ac, IdempotencyKey: key}, recordEUR
+}
+
+// RefundStripePaymentIntentPublic crée un remboursement Stripe pour le PaymentIntent donné (SDK officiel).
+func RefundStripePaymentIntentPublic(ctx context.Context, cfg *StripeConfig, paymentIntentID string, opts *RefundPaymentIntentParams) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	pi := strings.TrimSpace(paymentIntentID)
+	if pi == "" {
+		return "", fmt.Errorf("payment intent id is required")
+	}
+
+	stripe.Key = strings.TrimSpace(cfg.SecretKey)
+	params := &stripe.RefundParams{
+		Params: stripe.Params{
+			Context: ctx,
+		},
+		PaymentIntent: stripe.String(pi),
+	}
+	if opts != nil {
+		if opts.AmountCents != nil && *opts.AmountCents > 0 {
+			params.Amount = stripe.Int64(*opts.AmountCents)
+		}
+		if k := strings.TrimSpace(opts.IdempotencyKey); k != "" {
+			params.SetIdempotencyKey(k)
+		}
+	}
+
+	ref, err := refund.New(params)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
+	if ref == nil || strings.TrimSpace(ref.ID) == "" {
+		return "", fmt.Errorf("stripe refund returned empty id")
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("stripe refund failed: %s", strings.TrimSpace(string(body)))
-	}
-
-	var refundRes struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(body, &refundRes); err != nil {
-		return "", err
-	}
-	return refundRes.ID, nil
+	return ref.ID, nil
 }

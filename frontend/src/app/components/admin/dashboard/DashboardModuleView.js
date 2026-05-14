@@ -1,9 +1,86 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { DISTINCT, FLUX_DISTINCT, LEVEL_COLORS } from "../../../lib/constants";
 import { Icon, SearchIcon } from "../Icon";
+
+function ProVueGlobaleHome({ title }) {
+    const tiles = [
+        {
+            href: "/annonces/disponible",
+            label: "Annonces disponibles",
+            desc: "Parcourir et réserver des objets.",
+            icon: "M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6 M12 12V2 M12 2l4 4 M12 2L8 6",
+        },
+        {
+            href: "/projets/mes-projets",
+            label: "Mes projets",
+            desc: "Créer et suivre vos projets d’upcycling.",
+            icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+        },
+        {
+            href: "/forum/sujets",
+            label: "Forum",
+            desc: "Échanger avec la communauté.",
+            icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        },
+        {
+            href: "/mon-compte",
+            label: "Mon compte",
+            desc: "Profil, entreprise et préférences.",
+            icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z",
+        },
+    ];
+
+    return (
+        <>
+            <div className="header-section">
+                <div className="title-area">
+                    <span className="activities-label">Espace professionnel</span>
+                    <h1>{title}</h1>
+                    <p style={{ marginTop: "0.5rem", color: "var(--text-muted)", fontSize: "0.95rem", maxWidth: "42rem" }}>
+                        Accédez rapidement aux modules principaux de votre activité sur UpcycleConnect.
+                    </p>
+                </div>
+            </div>
+
+            <div
+                style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+                    gap: "1rem",
+                    marginTop: "1.5rem",
+                }}
+            >
+                {tiles.map((tile) => (
+                    <Link
+                        key={tile.href}
+                        href={tile.href}
+                        className="panel"
+                        style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.75rem",
+                            padding: "1.25rem",
+                            textDecoration: "none",
+                            color: "inherit",
+                            borderRadius: "12px",
+                            transition: "box-shadow 0.15s ease, transform 0.15s ease",
+                        }}
+                    >
+                        <span className="sidebar-icon" style={{ alignSelf: "flex-start" }}>
+                            <Icon path={tile.icon} />
+                        </span>
+                        <div style={{ fontWeight: 700, fontSize: "1rem" }}>{tile.label}</div>
+                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.45 }}>{tile.desc}</div>
+                    </Link>
+                ))}
+            </div>
+        </>
+    );
+}
 
 const AlertRow = ({ title, desc, count, level, action }) => (
     <div className="alert-row">
@@ -28,8 +105,33 @@ export default function DashboardModuleView({ subpage, title }) {
 
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [sessionRole, setSessionRole] = useState(null);
 
     useEffect(() => {
+        let cancelled = false;
+        async function loadRole() {
+            try {
+                const res = await fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (!cancelled) setSessionRole(data.user?.role ?? null);
+                }
+            } catch {
+                if (!cancelled) setSessionRole(null);
+            }
+        }
+        loadRole();
+        return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
+        if (sessionRole === null) {
+            return;
+        }
+        if (sessionRole === "professionnel") {
+            setLoading(false);
+            return;
+        }
         if (!showGlobalKpis && !showGlobalRealtime && !showGlobalAlerts) {
             setLoading(false);
             return;
@@ -50,7 +152,15 @@ export default function DashboardModuleView({ subpage, title }) {
             }
         }
         fetchStats();
-    }, [showGlobalKpis, showGlobalRealtime, showGlobalAlerts]);
+    }, [sessionRole, showGlobalKpis, showGlobalRealtime, showGlobalAlerts]);
+
+    if (sessionRole === null && subpage === "vue-generale") {
+        return <div style={{ padding: "1.5rem" }}>Chargement...</div>;
+    }
+
+    if (sessionRole === "professionnel" && subpage === "vue-generale") {
+        return <ProVueGlobaleHome title={title} />;
+    }
 
     const safe = (val) => stats ? (stats[val] || 0) : 0;
 

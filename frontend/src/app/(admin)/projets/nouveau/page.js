@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
-import { ChevronLeft, Save, Send, FileText, Plus, Trash2, Image as ImageIcon, Box, X, BarChart3, Info, Leaf, CheckCircle2 } from "lucide-react";
+import { Save, Send, FileText, Plus, Trash2, Image as ImageIcon, Box, X, BarChart3, Info, Leaf, CheckCircle2 } from "lucide-react";
 
 const CATEGORIES = ["Mobilier", "Textile", "Électronique", "Décoration", "Livres & Culture", "Jouets", "Outillage", "Jardin", "Sport", "Autre"];
 const IMAGE_TYPES = [{ value: "avant", label: "Avant" }, { value: "apres", label: "Après" }, { value: "autre", label: "Autre" }];
@@ -13,11 +13,6 @@ const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const styles = {
     container: { width: "100%", padding: "1rem 2rem 3rem 0", animation: "fadeIn 0.5s ease-out" },
-    backBtn: {
-        display: "inline-flex", alignItems: "center", gap: "0.4rem",
-        background: "none", border: "none", cursor: "pointer",
-        color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: "1.5rem", padding: 0,
-    },
     header: { marginBottom: "2rem" },
     title: { margin: "0.5rem 0", fontSize: "2.5rem", fontWeight: 500, letterSpacing: "-0.02em", color: "var(--text-main)" },
     subtitle: { margin: "0.4rem 0 0", color: "var(--text-muted)", fontSize: "1.05rem" },
@@ -352,9 +347,6 @@ export default function NouveauProjet() {
 
     return (
         <div style={styles.container}>
-            <button style={styles.backBtn} onClick={() => router.back()}>
-                <ChevronLeft size={16} /> Retour
-            </button>
             <header style={styles.header}>
                 <p className="activities-label">Espace Professionnel</p>
                 <h1 style={styles.title}>Nouveau projet d'upcycling</h1>

@@ -1,6 +1,7 @@
 package items
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -191,6 +192,12 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		}
 		result = append(result, it)
 	}
+	if modeCfg, pct, errCfg := r.GetSaleCommissionConfig(context.Background()); errCfg == nil {
+		for i := range result {
+			result[i].SaleCommissionMode = modeCfg
+			result[i].SaleCommissionPercent = pct
+		}
+	}
 	return result, nil
 }
 
@@ -233,6 +240,12 @@ func (r *Repository) ListByUser(userID int64) ([]Item, error) {
 		}
 		it.Date = it.CreatedAt.Format("02/01/2006")
 		result = append(result, it)
+	}
+	if modeCfg, pct, errCfg := r.GetSaleCommissionConfig(context.Background()); errCfg == nil {
+		for i := range result {
+			result[i].SaleCommissionMode = modeCfg
+			result[i].SaleCommissionPercent = pct
+		}
 	}
 	return result, nil
 }
@@ -291,6 +304,10 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 		SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
 		(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')) as user_name,
 		u.created_at as user_created_at,
+		(SELECT AVG(r.stars)::float8 FROM pro_seller_ratings r WHERE r.seller_user_id = i.user_id),
+		(SELECT COUNT(*)::bigint FROM pro_seller_ratings r WHERE r.seller_user_id = i.user_id),
+		(SELECT COUNT(*)::bigint FROM items i2 WHERE i2.user_id = i.user_id AND NOT COALESCE(i2.deleted_by_user, false) AND TRIM(LOWER(COALESCE(i2.status, ''))) <> 'brouillon'),
+		COALESCE(TRIM(u.city), ''),
 		COALESCE(l.workflow_status, ''),
 		COALESCE(l.deposit_code, ''),
 		COALESCE(l.pickup_code, ''),
@@ -312,11 +329,15 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 	var depExp, pickExp, modAt sql.NullTime
 	var weightValue sql.NullFloat64
 	var weightGrams sql.NullFloat64
-	
+	var sellerRatingAvg sql.NullFloat64
+	var sellerRatingCount sql.NullInt64
+	var sellerItemsCount sql.NullInt64
+
 	err := r.db.QueryRow(query, id).Scan(
 		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity, &weightValue, &it.WeightUnit, &weightGrams,
 		&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.Views, &it.Saves, &it.Interested,
 		&it.UserID, &it.CreatedAt, &it.UpdatedAt, &it.UserName, &userRegistrationTS,
+		&sellerRatingAvg, &sellerRatingCount, &sellerItemsCount, &it.SellerCity,
 		&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
 		&it.DepositPointName, &it.ContainerName,
 		&depExp, &pickExp,
@@ -349,7 +370,22 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 	if modAt.Valid {
 		it.ModeratedAt = modAt.Time.Format("02/01/2006")
 	}
-	
+	if sellerRatingAvg.Valid {
+		v := sellerRatingAvg.Float64
+		it.SellerRatingAvg = &v
+	}
+	if sellerRatingCount.Valid {
+		it.SellerRatingCount = sellerRatingCount.Int64
+	}
+	if sellerItemsCount.Valid {
+		it.SellerItemsCount = sellerItemsCount.Int64
+	}
+
+	if modeCfg, pct, errCfg := r.GetSaleCommissionConfig(context.Background()); errCfg == nil {
+		it.SaleCommissionMode = modeCfg
+		it.SaleCommissionPercent = pct
+	}
+
 	log.Printf("Repository details success for id=%d: status=%s", id, it.WorkflowStatus)
 	return it, nil
 }
@@ -581,6 +617,61 @@ func (r *Repository) UndoCancelledByUser(itemID, userID int64) error {
 	}
 
 	return tx.Commit()
+}
+
+// SyncRefundFromStripeWebhook aligne event_registrations et item_logistics sur les webhooks remboursement Stripe.
+func (r *Repository) SyncRefundFromStripeWebhook(ctx context.Context, paymentIntentID, refundID string, amountCents int64, status string) error {
+	pi := strings.TrimSpace(paymentIntentID)
+	if pi == "" {
+		return nil
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	rid := strings.TrimSpace(refundID)
+
+	switch status {
+	case "pending", "requires_action":
+		return nil
+	case "succeeded":
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE event_registrations
+			SET refund_status = 'refunded',
+			    stripe_refund_id = CASE WHEN $1 <> '' THEN $1 ELSE stripe_refund_id END,
+			    refund_amount = CASE WHEN $2 > 0 THEN ($2::numeric / 100.0) ELSE refund_amount END,
+			    refund_error = ''
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $3
+		`, rid, amountCents, pi); err != nil {
+			return err
+		}
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE item_logistics
+			SET stripe_payment_status = 'refunded', updated_at = NOW()
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
+		`, pi); err != nil {
+			return err
+		}
+		return nil
+	case "failed", "canceled":
+		errMsg := fmt.Sprintf("stripe refund %s: %s", rid, status)
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE event_registrations
+			SET refund_status = 'failed', refund_error = $1
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $2
+			  AND refund_status IS DISTINCT FROM 'refunded'
+		`, errMsg, pi); err != nil {
+			return err
+		}
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE item_logistics
+			SET stripe_payment_status = 'failed', updated_at = NOW()
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
+			  AND stripe_payment_status IS DISTINCT FROM 'refunded'
+		`, pi); err != nil {
+			return err
+		}
+		return nil
+	default:
+		return nil
+	}
 }
 
 func (r *Repository) IsItemUsedInUpcyclingProject(itemID int64) (bool, error) {

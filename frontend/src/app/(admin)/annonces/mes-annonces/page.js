@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
+import { formatBuyerCardPrice } from "../../../lib/salePrice";
 import {
     Tag,
     Gift,
@@ -13,7 +14,6 @@ import {
     Pencil,
     Trash2,
     Search,
-    Filter,
     Plus,
     Check
 } from "lucide-react";
@@ -68,6 +68,13 @@ const styles = {
         backgroundRepeat: "no-repeat",
         backgroundPosition: "right 0.9rem center",
         backgroundSize: "0.65rem auto",
+    },
+    statusPillsRow: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "0.5rem",
+        marginBottom: "1.5rem",
+        alignItems: "center",
     },
     grid: {
         display: "grid",
@@ -341,6 +348,18 @@ const normalizeStatus = (status) => {
     return value;
 };
 
+/** Filtres statut (valeurs alignées sur `normalizeStatus`) */
+const STATUS_FILTER_OPTIONS_USER = [
+    { value: "", label: "Toutes" },
+    { value: "actif", label: "Actives" },
+    { value: "en attente", label: "En attente" },
+    { value: "vendu", label: "Vendues" },
+];
+const STATUS_FILTER_OPTIONS_ADMIN = [
+    ...STATUS_FILTER_OPTIONS_USER,
+    { value: "refusee", label: "Refusées" },
+];
+
 const getAnnonceAuthor = (annonce) => {
     return (
         annonce?.authorName ||
@@ -602,22 +621,52 @@ function MesAnnoncesContent() {
                     <option value="don">Don</option>
                     <option value="vente">Vente</option>
                 </select>
+            </div>
 
-                <select
-                    style={styles.filterSelect}
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
-                >
-                    <option value="">Tous les statuts</option>
-                    <option value="actif">Actif</option>
-                    <option value="vendu">Terminée</option>
-                    {isAdmin && <option value="en attente">En attente (Modération)</option>}
-                    {isAdmin && <option value="refusee">Refusée</option>}
-                </select>
+            <div style={styles.statusPillsRow} role="group" aria-label="Filtrer par statut">
+                {(isAdmin ? STATUS_FILTER_OPTIONS_ADMIN : STATUS_FILTER_OPTIONS_USER).map((opt) => {
+                    const selected = filterStatus === opt.value;
+                    return (
+                        <button
+                            key={opt.value === "" ? "all" : opt.value}
+                            type="button"
+                            onClick={() => setFilterStatus(opt.value)}
+                            style={{
+                                padding: "0.45rem 1rem",
+                                borderRadius: "999px",
+                                border: selected ? "2px solid var(--forest-deep, #3e686c)" : "1px solid rgba(35,59,61,0.22)",
+                                background: selected ? "rgb(229, 255, 188)" : "#fff",
+                                color: "var(--text-main)",
+                                fontFamily: "inherit",
+                                fontSize: "0.88rem",
+                                fontWeight: selected ? "700" : "500",
+                                cursor: "pointer",
+                                transition: "background 0.15s ease, border-color 0.15s ease",
+                            }}
+                        >
+                            {opt.label}
+                        </button>
+                    );
+                })}
             </div>
 
             <div style={styles.grid}>
-                {filteredAnnonces.map((annonce) => {
+                {filteredAnnonces.length === 0 ? (
+                    <div
+                        style={{
+                            gridColumn: "1 / -1",
+                            textAlign: "center",
+                            padding: "2.5rem 1rem",
+                            color: "var(--text-muted)",
+                            fontSize: "1rem",
+                            borderRadius: "16px",
+                            background: "#F7F8F7",
+                        }}
+                    >
+                        Aucune annonce ne correspond à ces critères.
+                    </div>
+                ) : (
+                filteredAnnonces.map((annonce) => {
                     const statusKey = normalizeStatus(annonce.status);
                     const workflowKey = String(annonce.workflowStatus || "").toLowerCase();
                     const isAfterDeposit = ["deposited", "available", "pending_payment", "reserved", "picked_up"].includes(workflowKey);
@@ -654,7 +703,7 @@ function MesAnnoncesContent() {
                             <div style={styles.titlePriceRow}>
                                 <h3 style={styles.cardTitle}>{annonce.title}</h3>
                                 <div style={styles.pricePill}>
-                                    {annonce.type === "don" ? "GRATUIT" : `${annonce.price} €`}
+                                    {annonce.type === "don" ? "GRATUIT" : formatBuyerCardPrice(annonce)}
                                 </div>
                             </div>
                             <p style={styles.description}>
@@ -747,7 +796,9 @@ function MesAnnoncesContent() {
                             </div>
                         </div>
                     </div>
-                )})}
+                );
+                })
+                )}
             </div>
 
             {showDeleteModal && (

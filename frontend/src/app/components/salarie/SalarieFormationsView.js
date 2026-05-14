@@ -8,6 +8,12 @@ import EventDetailView from "../shared/events/EventDetailView";
 import { EVENT_STATUSES, EVENT_TYPES } from "../../lib/constants";
 import { TOKEN_KEY } from "../../lib/api";
 import { toDateTimeInputValue } from "../../lib/formatters";
+import {
+    MAX_VIDEO_DURATION_SEC,
+    MAX_VIDEO_FILE_BYTES,
+    getVideoDurationFromFile,
+    previewLooksLikeVideo,
+} from "../../lib/mediaUploadLimits";
 
 const TYPE_LABELS = { atelier: "Atelier", formation: "Formation", evenement: "Événement", conference: "Conférence" };
 const TYPE_COLORS = {
@@ -114,10 +120,38 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
     };
 
     const handleFileDrop = (file) => {
-        if (!file || !file.type.startsWith("image/")) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => setFormState(p => ({ ...p, imageUrl: ev.target.result }));
-        reader.readAsDataURL(file);
+        void (async () => {
+            if (!file) return;
+            if (file.type.startsWith("image/")) {
+                const reader = new FileReader();
+                reader.onload = (ev) => setFormState((p) => ({ ...p, imageUrl: ev.target.result }));
+                reader.readAsDataURL(file);
+                return;
+            }
+            if (file.type.startsWith("video/")) {
+                if (file.size > MAX_VIDEO_FILE_BYTES) {
+                    alert(`Vidéo trop volumineuse (max ${Math.round(MAX_VIDEO_FILE_BYTES / (1024 * 1024))} Mo).`);
+                    return;
+                }
+                try {
+                    const dur = await getVideoDurationFromFile(file);
+                    if (dur > MAX_VIDEO_DURATION_SEC + 0.2) {
+                        alert(
+                            `La vidéo ne doit pas dépasser ${MAX_VIDEO_DURATION_SEC} secondes (durée détectée : environ ${Math.ceil(dur)} s).`,
+                        );
+                        return;
+                    }
+                } catch {
+                    alert("Impossible de vérifier la durée de la vidéo.");
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = (ev) => setFormState((p) => ({ ...p, imageUrl: ev.target.result }));
+                reader.readAsDataURL(file);
+                return;
+            }
+            alert("Format non accepté. Utilisez une image (JPG, PNG, WebP…) ou une vidéo MP4 / WebM / MOV.");
+        })();
     };
     return (
         <div style={S.container}>
@@ -239,7 +273,17 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                             <h2 style={S.sectionTitle}>Image de couverture</h2>
                             {formState.imageUrl ? (
                                 <div style={{ position: "relative", borderRadius: "16px", overflow: "hidden", marginBottom: "0.5rem" }}>
-                                    <img src={formState.imageUrl} alt="Aperçu" style={{ width: "100%", maxHeight: "220px", objectFit: "cover", display: "block" }} />
+                                    {previewLooksLikeVideo(formState.imageUrl) ? (
+                                        <video
+                                            src={formState.imageUrl}
+                                            controls
+                                            playsInline
+                                            muted
+                                            style={{ width: "100%", maxHeight: "220px", objectFit: "contain", display: "block", background: "#111" }}
+                                        />
+                                    ) : (
+                                        <img src={formState.imageUrl} alt="Aperçu" style={{ width: "100%", maxHeight: "220px", objectFit: "cover", display: "block" }} />
+                                    )}
                                     <button type="button" onClick={() => setFormState(p => ({ ...p, imageUrl: "" }))}
                                         style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "1rem" }}>
                                         ×
@@ -250,11 +294,13 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                     onDragOver={e => e.preventDefault()}
                                     onDrop={e => { e.preventDefault(); handleFileDrop(e.dataTransfer.files[0]); }}>
                                     <IconCamera />
-                                    <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>Cliquer ou glisser une image</span>
-                                    <span style={{ fontSize: "0.78rem" }}>JPG, PNG, WEBP — 5 Mo max</span>
+                                    <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>Cliquer ou glisser une image ou une vidéo</span>
+                                    <span style={{ fontSize: "0.78rem" }}>
+                                        Image : JPG, PNG, WebP — Vidéo : {MAX_VIDEO_DURATION_SEC} s max., {Math.round(MAX_VIDEO_FILE_BYTES / (1024 * 1024))} Mo max.
+                                    </span>
                                 </div>
                             )}
-                            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleFileDrop(e.target.files[0])} />
+                            <input ref={fileRef} type="file" accept="image/*,video/mp4,video/webm,video/quicktime" style={{ display: "none" }} onChange={e => handleFileDrop(e.target.files[0])} />
                             <div style={{ marginTop: "0.75rem" }}>
                                 <label style={{ ...S.label, fontSize: "0.78rem" }}>
                                     URL externe (facultatif)
@@ -696,7 +742,18 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                         <article key={item.id} style={{ position: "relative", borderRadius: "28px", overflow: "hidden", height: "400px", background: item.imageUrl ? "#111" : tc.bg, boxShadow: "0 4px 24px rgba(0,0,0,0.10)" }}>
                             {item.imageUrl ? (
                                 <>
-                                    <img src={item.imageUrl} alt={item.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} />
+                                    {previewLooksLikeVideo(item.imageUrl) ? (
+                                        <video
+                                            src={item.imageUrl}
+                                            muted
+                                            playsInline
+                                            preload="metadata"
+                                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                                            aria-label={item.name}
+                                        />
+                                    ) : (
+                                        <img src={item.imageUrl} alt={item.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} />
+                                    )}
                                     <div style={{ position: "absolute", inset: 0, backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", maskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)", WebkitMaskImage: "linear-gradient(to top, black 0%, black 38%, transparent 62%)", pointerEvents: "none" }} />
                                 </>
                             ) : (
