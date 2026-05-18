@@ -88,6 +88,13 @@ export default function AdminLayout({ children }) {
         }
     }, [isPro, pathname, currentSubKey, router]);
 
+    useEffect(() => {
+        const moduleKey = pathname.split("/").filter(Boolean)[0] || "";
+        if (isSalarie && moduleKey === "prestations" && currentSubKey === "mes-reservations") {
+            router.replace("/prestations/catalogue");
+        }
+    }, [isSalarie, pathname, currentSubKey, router]);
+
     const handleLogout = () => {
         window.localStorage.removeItem(TOKEN_KEY);
         router.replace("/login");
@@ -112,6 +119,10 @@ export default function AdminLayout({ children }) {
         }
         if (isParticulier && moduleKey === "evenements") {
             router.push("/evenements/activites");
+            return;
+        }
+        if (isSalarie && moduleKey === "prestations") {
+            router.push("/prestations/catalogue");
             return;
         }
         router.push(getDefaultSubRouteForRole(moduleKey, isAdmin, isSalarie, isPro, isParticulier));
@@ -144,11 +155,12 @@ export default function AdminLayout({ children }) {
         { key: "mes-inscriptions", label: "Mes inscriptions", shortLabel: "Inscriptions" },
         { key: "agenda", label: "Agenda", shortLabel: "Agenda" },
     ];
-    const visibleSubNav = activeModule.key === "annonces"
+    const visibleSubNav = (activeModule.key === "annonces"
         ? (isAdmin ? adminAnnoncesSubNav : (isPro ? proAnnoncesSubNav : activeModule.subNav))
         : (activeModule.key === "evenements" && (isParticulier || isPro))
         ? particulierEvenementsSubNav
-        : activeModule.subNav;
+        : activeModule.subNav
+    ).filter((subItem) => !subItem.hideInTopbar);
     const userDisplayName = (() => {
         if (user?.firstname && user?.lastname) {
             return `${user.firstname} ${user.lastname}`;

@@ -99,6 +99,24 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rule)
 }
 
+// DeleteHandler gère DELETE /api/admin/pricing/:id
+func (h *Handler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.URL.Path, "/api/admin/pricing/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid pricing rule id")
+		return
+	}
+
+	if err := h.repo.Delete(id); err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "pricing rule not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not delete pricing rule")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
 // --- Helpers locaux ---
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

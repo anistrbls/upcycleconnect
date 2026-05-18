@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import AdminModal from "../AdminModal";
-import { formatDateFR } from "../../../lib/formatters";
+import { formatDateFR, formatDateTimeFR } from "../../../lib/formatters";
 import { fieldStyle, labelStyle, pillInputStyle } from "../../../lib/styles";
 
 // Badges statut réservation
@@ -36,7 +36,7 @@ function Badge({ value, map }) {
     );
 }
 
-export default function ReservationsAdminView({ bookings, services, employees, loading, errorMessage, onReload, onUpdateStatus, onAssignEmployee }) {
+export default function ReservationsAdminView({ bookings, services, employees, loading, errorMessage, onReload, onUpdateStatus, onAssignEmployee, onDelete }) {
     const [statusFilter, setStatusFilter] = useState("all");
     const [paymentFilter, setPaymentFilter] = useState("all");
     const [serviceFilter, setServiceFilter] = useState("all");
@@ -87,6 +87,21 @@ export default function ReservationsAdminView({ bookings, services, employees, l
             setStatusModalOpen(false);
         } catch (err) {
             setLocalError(String(err?.message || "Une erreur est survenue."));
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!selectedBooking || !onDelete) return;
+        if (!window.confirm(`Supprimer définitivement la réservation #${selectedBooking.id} ?`)) return;
+        setIsSaving(true);
+        try {
+            await onDelete(selectedBooking.id);
+            setStatusModalOpen(false);
+            setSelectedBooking(null);
+        } catch (err) {
+            setLocalError(String(err?.message || "Impossible de supprimer la réservation."));
         } finally {
             setIsSaving(false);
         }
@@ -177,7 +192,7 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                                     <td style={{ padding: "0.6rem 0.75rem", fontWeight: 500 }}>{b.userName}</td>
                                     <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)" }}>{b.serviceName}</td>
                                     <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-                                        {formatDateFR(b.bookingDate)}
+                                        {formatDateTimeFR(b.bookingDate)}
                                     </td>
                                     <td style={{ padding: "0.6rem 0.75rem", color: b.employeeName ? "var(--text-main)" : "var(--text-muted)" }}>
                                         {b.employeeName || "Non assigné"}
@@ -286,7 +301,7 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                         {localError && (
                             <p style={{ color: "#a23b3b", fontSize: "0.85rem" }}>{localError}</p>
                         )}
-                        <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.5rem" }}>
+                        <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
                             <button className="action-cta task-action-btn" type="submit" disabled={isSaving}>
                                 {isSaving ? "Enregistrement..." : "Enregistrer les modifications"}
                             </button>
@@ -298,6 +313,17 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                             >
                                 Annuler
                             </button>
+                            {onDelete ? (
+                                <button
+                                    className="action-cta"
+                                    type="button"
+                                    onClick={handleDelete}
+                                    disabled={isSaving}
+                                    style={{ background: "#f4e8e8", color: "#8e2d2d", marginLeft: "auto" }}
+                                >
+                                    Supprimer
+                                </button>
+                            ) : null}
                         </div>
                     </form>
                 )}

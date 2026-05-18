@@ -1,14 +1,19 @@
 "use client";
 
 import { use, useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import CatalogueView from "../../../components/user/prestations/CatalogueView";
 import MyBookingsView from "../../../components/user/prestations/MyBookingsView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
+import { buildServicesCatalogueUrl, filterServicesForRole } from "../../../lib/catalogueAudience";
+import { useCatalogueReadOnly } from "../../../lib/useCatalogueReadOnly";
 
 export default function PrestationsUserPage({ params }) {
     const { subpage } = use(params);
+    const router = useRouter();
+    const { readOnly, role, checked } = useCatalogueReadOnly();
 
     const activeModule = getModuleByKey("prestations");
     const activeSub = getSubNavItem("prestations", subpage);
@@ -28,10 +33,11 @@ export default function PrestationsUserPage({ params }) {
     };
 
     const loadCatalogue = useCallback(async () => {
-        const res = await fetch(apiUrl("/services"), { headers: buildAuthHeaders() });
+        const url = buildServicesCatalogueUrl(apiUrl("/services"), role);
+        const res = await fetch(url, { headers: buildAuthHeaders() });
         const data = await parseApiResponse(res);
-        setServices(data.items ?? []);
-    }, []);
+        setServices(filterServicesForRole(data.items ?? [], role));
+    }, [role]);
 
     const loadBookings = useCallback(async () => {
         const res = await fetch(apiUrl("/bookings/mine"), { headers: buildAuthHeaders() });
@@ -40,6 +46,8 @@ export default function PrestationsUserPage({ params }) {
     }, []);
 
     const refresh = useCallback(async () => {
+        if (subpage === "catalogue" && !checked) return;
+
         setLoading(true);
         setError("");
         try {
@@ -53,12 +61,28 @@ export default function PrestationsUserPage({ params }) {
         } finally {
             setLoading(false);
         }
-    }, [subpage, loadCatalogue, loadBookings]);
+    }, [subpage, loadCatalogue, loadBookings, checked]);
 
-    useEffect(() => { refresh(); }, [refresh]);
+    useEffect(() => {
+        refresh();
+    }, [refresh]);
+
+    useEffect(() => {
+        if (checked && readOnly && subpage === "mes-reservations") {
+            router.replace("/prestations/catalogue");
+        }
+    }, [checked, readOnly, subpage, router]);
 
     if (subpage === "catalogue") {
-        return <CatalogueView services={services} loading={loading} errorMessage={error} onReload={refresh} />;
+        return (
+            <CatalogueView
+                services={services}
+                loading={loading}
+                errorMessage={error}
+                onReload={refresh}
+                readOnly={readOnly}
+            />
+        );
     }
 
     if (subpage === "mes-reservations") {

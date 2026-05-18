@@ -6,6 +6,12 @@ import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import AdminModal from "../AdminModal";
 import { fieldStyle, labelStyle } from "../../../lib/styles";
 import { getFrenchPublicHolidays } from "../../../lib/holidays";
+import {
+    getPlanningItemEnd,
+    getPlanningItemLabel,
+    getPlanningItemStart,
+    getPlanningItemStyle,
+} from "../../../lib/planningBookings";
 
 const WEEKDAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
@@ -35,6 +41,7 @@ const isSameDay = (d1, d2) => toDayKey(d1) === toDayKey(d2);
 export default function PlanningAdminView({ 
     events = [], 
     slots = [], 
+    bookings = [],
     unavailabilities = [], 
     services = [], 
     onReload, 
@@ -125,17 +132,14 @@ export default function PlanningAdminView({
 
         events.forEach(e => add(e, "event"));
         slots.forEach(s => add(s, "slot"));
+        bookings.forEach(b => add(b, "booking"));
         unavailabilities.forEach(u => add(u, "unavail"));
 
         for (const dayItems of map.values()) {
-            dayItems.sort((a, b) => {
-                const da = new Date(a._type === "event" ? a.dateDebut : a.startTime);
-                const db = new Date(b._type === "event" ? b.dateDebut : b.startTime);
-                return da - db;
-            });
+            dayItems.sort((a, b) => getPlanningItemStart(a) - getPlanningItemStart(b));
         }
         return map;
-    }, [events, slots, unavailabilities]);
+    }, [events, slots, bookings, unavailabilities]);
 
     const calendarDays = useMemo(() => {
         if (viewMode === "month") {
@@ -226,7 +230,7 @@ export default function PlanningAdminView({
     };
 
     const openEditItem = (item) => {
-        if (item._type === "event" || item._type === "slot") return; // On ne modifie pas les événements ni les créneaux ici désormais
+        if (item._type === "event" || item._type === "slot" || item._type === "booking") return;
         
         console.log("Opening edit for unavailability:", item);
         setErrorMsg("");
@@ -354,12 +358,12 @@ export default function PlanningAdminView({
                                             }}
                                             style={{ 
                                                 fontSize: "0.65rem", padding: "2px 4px", borderRadius: "4px",
-                                                background: it._type === "event" ? "#E5FFBC" : it._type === "slot" ? "#EAF4FF" : "#FEE2E2",
+                                                background: getPlanningItemStyle(it._type).bg,
                                                 color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                                                 border: "1px solid rgba(0,0,0,0.05)", cursor: it._type === "unavail" || it._type === "event" ? "pointer" : "default"
                                             }}
                                         >
-                                            {it._type === "event" ? it.titre || it.name : (it._type === "unavail" ? it.reason : "Créneau")}
+                                            {getPlanningItemLabel(it)}
                                         </div>
                                     ))}
                                     {dayItems.length > 3 && <div style={{ fontSize: "0.6rem", color: "var(--text-muted)" }}>+ {dayItems.length - 3}</div>}
@@ -472,8 +476,8 @@ export default function PlanningAdminView({
                                             )}
 
                                             {dayItems.map((it, idx) => {
-                                                const start = new Date(it._type === "event" ? it.dateDebut : it.startTime);
-                                                const end = new Date(it._type === "event" ? it.dateFin : it.endTime);
+                                                const start = getPlanningItemStart(it);
+                                                const end = getPlanningItemEnd(it);
                                                 const startHour = start.getHours() + start.getMinutes() / 60;
                                                 const endHour = end.getHours() + end.getMinutes() / 60;
                                                 
@@ -495,14 +499,14 @@ export default function PlanningAdminView({
                                                         }}
                                                         style={{ 
                                                             position: "absolute", left: "4px", right: "4px", top: `${top}px`, height: `${Math.max(height, 20)}px`,
-                                                            background: it._type === "event" ? "#E5FFBC" : (it._type === "unavail" ? "#FEE2E2" : "#EAF4FF"),
+                                                            background: getPlanningItemStyle(it._type).bg,
                                                             color: "#333", padding: "4px", borderRadius: "6px", fontSize: "0.7rem", fontWeight: 600,
                                                             border: "1px solid rgba(0,0,0,0.1)", overflow: "hidden", zIndex: 10,
                                                             cursor: it._type === "unavail" || it._type === "event" ? "pointer" : "default"
                                                         }}
                                                     >
                                                         <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                                            {it._type === "event" ? it.titre || it.name : (it._type === "unavail" ? it.reason : "Créneau")}
+                                                            {getPlanningItemLabel(it)}
                                                         </div>
                                                         {height > 30 && <div style={{ fontSize: "0.6rem", opacity: 0.7 }}>{start.getHours()}h{String(start.getMinutes()).padStart(2, "0")}</div>}
                                                     </div>
@@ -529,28 +533,50 @@ export default function PlanningAdminView({
                         <div key={i} onClick={() => it._type === "unavail" && openEditItem(it)} style={{ 
                             display: "flex", justifyContent: "space-between", alignItems: "center", 
                             padding: "0.8rem", borderRadius: "10px", 
-                            background: it._type === "event" ? "#fdfefb" : it._type === "slot" ? "#fbfdff" : "#fffafa",
+                            background: getPlanningItemStyle(it._type).panel,
                             cursor: it._type === "unavail" ? "pointer" : "default",
                             border: "1px solid #f1f5f9"
                         }}>
                             <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
                                 <div style={{ 
                                     width: "8px", height: "40px", borderRadius: "4px",
-                                    background: it._type === "event" ? "#E5FFBC" : it._type === "slot" ? "#EAF4FF" : "#FEE2E2"
+                                    background: getPlanningItemStyle(it._type).bg
                                 }}></div>
                                 <div>
                                     <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>
-                                        {it._type === "event" ? it.titre || it.name : (it._type === "unavail" ? it.reason : "Créneau")}
+                                        {getPlanningItemLabel(it)}
                                     </div>
                                     <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                                        {new Date(it._type === "event" ? it.dateDebut : it.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} - {new Date(it._type === "event" ? it.dateFin : it.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                        {getPlanningItemStart(it).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} - {getPlanningItemEnd(it).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                                         {it._type === "slot" && ` • Capacité: ${it.capacity}`}
+                                        {it._type === "booking" && it.status ? ` • ${it.status === "confirmed" ? "Confirmée" : it.status === "pending" ? "En attente" : it.status}` : ""}
                                     </div>
                                 </div>
                             </div>
-                            {it._type === "unavail" && (
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteItem(it); }} style={{ background: "transparent", border: "none", color: "#8e2d2d", cursor: "pointer", fontSize: "0.8rem" }}>Supprimer</button>
-                            )}
+                            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexShrink: 0 }}>
+                                {it._type === "booking" && it.serviceId ? (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            router.push(`/prestations/catalogue/${it.serviceId}`);
+                                        }}
+                                        className="action-btn"
+                                        style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", whiteSpace: "nowrap" }}
+                                    >
+                                        Voir la prestation
+                                    </button>
+                                ) : null}
+                                {it._type === "unavail" ? (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteItem(it); }}
+                                        style={{ background: "transparent", border: "none", color: "#8e2d2d", cursor: "pointer", fontSize: "0.8rem" }}
+                                    >
+                                        Supprimer
+                                    </button>
+                                ) : null}
+                            </div>
                         </div>
                     ))}
                 </div>

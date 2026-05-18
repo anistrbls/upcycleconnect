@@ -1,3 +1,14 @@
+const TARGET_AUDIENCE_LABELS = {
+    tous: "Pour tous",
+    particulier: "Pour les particuliers",
+    professionnel: "Pour les professionnels",
+};
+
+export const formatTargetAudienceLabel = (value) => {
+    const key = String(value || "tous").toLowerCase().trim();
+    return TARGET_AUDIENCE_LABELS[key] || `Pour les ${key}`;
+};
+
 export const formatDateFR = (rawDate) => {
     if (!rawDate) {
         return "-";

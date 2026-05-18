@@ -88,3 +88,16 @@ func (r *Repository) Update(id int64, payload UpdatePayload) (PricingRule, error
 	}
 	return p, err
 }
+
+// Delete supprime une règle tarifaire.
+func (r *Repository) Delete(id int64) error {
+	res, err := r.db.Exec(`DELETE FROM pricing_rules WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}

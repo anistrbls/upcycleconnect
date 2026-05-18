@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
-import RefundPaymentDetailModal, { showEventRefundDetailsButton } from "../../finances/RefundPaymentDetailModal";
+import RefundPaymentDetailModal, { showRefundDetailsButton } from "../../finances/RefundPaymentDetailModal";
 
 export default function PaymentsAdminView() {
     const [payments, setPayments] = useState([]);
@@ -57,7 +57,11 @@ export default function PaymentsAdminView() {
         return { bg: "#fff1f2", color: "#e11d48", border: "#fda4af" };
     };
 
-    const showRefundLink = (p) => p.status === "refund_requested" && String(p.source || "").includes("événement");
+    const showRefundLink = (p) => {
+        if (p.status !== "refund_requested") return false;
+        const src = String(p.source || "").toLowerCase();
+        return src.includes("événement") || src.includes("réservation service") || src.includes("reservation service");
+    };
 
     const formatDate = (dateStr) => {
         if (!dateStr) return "N/A";
@@ -181,7 +185,7 @@ export default function PaymentsAdminView() {
                                                         Voir la demande
                                                     </Link>
                                                 ) : null}
-                                                {showEventRefundDetailsButton(p) ? (
+                                                {showRefundDetailsButton(p) ? (
                                                     <button
                                                         type="button"
                                                         className="action-cta task-action-btn"
@@ -191,7 +195,7 @@ export default function PaymentsAdminView() {
                                                         Voir le remboursement
                                                     </button>
                                                 ) : null}
-                                                {!showRefundLink(p) && !showEventRefundDetailsButton(p) ? (
+                                                {!showRefundLink(p) && !showRefundDetailsButton(p) ? (
                                                     <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>—</span>
                                                 ) : null}
                                             </div>

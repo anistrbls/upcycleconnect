@@ -24,6 +24,7 @@ import (
 	"upcycleconnect/api/projects"
 	"upcycleconnect/api/planning"
 	"upcycleconnect/api/reservations"
+	"upcycleconnect/api/servicecatalog"
 	"upcycleconnect/api/sirene"
 	"upcycleconnect/api/users"
 )
@@ -72,6 +73,9 @@ func main() {
 
 	if err := ensureOffersSchema(); err != nil {
 		log.Fatalf("Offers schema initialization error: %v", err)
+	}
+	if err := planning.EnsureProviderSchema(db); err != nil {
+		log.Fatalf("Service providers schema initialization error: %v", err)
 	}
 	log.Println("✓ Offers schema initialized")
 
@@ -267,11 +271,22 @@ func main() {
 
 	// Module reservations (dépend de users + services, doit venir après)
 	reservations.RegisterRoutes(mux, db, authMiddleware)
+
 	planning.RegisterRoutes(mux, db, authMiddleware)
 
 	// ── Endpoints publics prestations (catalogue utilisateur connecté) ──────────
 	mux.Handle("/api/services", authMiddleware(http.HandlerFunc(publicServicesListHandler)))
-	mux.Handle("/api/services/", authMiddleware(http.HandlerFunc(publicServiceByIDHandler)))
+	mux.Handle("/api/services/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/availability") && r.Method == http.MethodGet {
+			planning.ServiceAvailabilityHandler(db)(w, r)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/week-slots") && r.Method == http.MethodGet {
+			planning.ServiceWeekSlotsHandler(db)(w, r)
+			return
+		}
+		publicServiceByIDHandler(w, r)
+	})))
 
 	// Module projects (projets d'upcycling professionnels)
 	projects.RegisterRoutes(mux, db, authMiddleware)
@@ -576,6 +591,7 @@ type servicePayload struct {
 	ImageURL            string   `json:"imageUrl"`
 	Photos              []string `json:"photos"`
 	Status              string   `json:"status"`
+	EmployeeIDs         []int64  `json:"employeeIds"`
 }
 
 type eventPayload struct {
@@ -866,7 +882,8 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query(`
 			SELECT s.id, s.name, s.short_description, s.description,
 			       s.category_id, c.name, s.type, s.price, s.duration_minutes, s.target_audience,
-			       s.is_bookable, s.image_url, s.photos, s.status, s.created_at, s.updated_at
+			       s.is_bookable, s.image_url, s.photos, s.status, s.created_at, s.updated_at,
+			       COALESCE((SELECT COUNT(*)::int FROM service_bookings sb WHERE sb.service_id = s.id), 0)
 			FROM services s
 			JOIN service_categories c ON c.id = s.category_id
 			WHERE ($1 = '' OR s.name ILIKE '%' || $1 || '%' OR s.description ILIKE '%' || $1 || '%')
@@ -889,8 +906,9 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			var photos []string
 			var isBookable bool
 			var createdAt, updatedAt time.Time
+			var linkedBookings int
 
-			if err := rows.Scan(&id, &name, &shortDesc, &description, &catID, &categoryName, &svcType, &price, &durationMinutes, &targetAudience, &isBookable, &imageURL, pq.Array(&photos), &status, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &name, &shortDesc, &description, &catID, &categoryName, &svcType, &price, &durationMinutes, &targetAudience, &isBookable, &imageURL, pq.Array(&photos), &status, &createdAt, &updatedAt, &linkedBookings); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse services")
 				return
 			}
@@ -910,6 +928,7 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 				"imageUrl":            imageURL,
 				"photos":              photos,
 				"status":              status,
+				"linkedBookings":      linkedBookings,
 				"createdAt":           createdAt.UTC().Format(time.RFC3339),
 				"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 			})
@@ -946,6 +965,10 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid booking mode")
 			return
 		}
+		if bookingMode == "booking" && len(payload.EmployeeIDs) == 0 {
+			writeError(w, http.StatusBadRequest, "au moins un salarié est requis pour une prestation en mode réservation")
+			return
+		}
 		if status == "" {
 			status = "brouillon"
 		}
@@ -968,6 +991,13 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if err := planning.SyncServiceProviders(db, id, payload.EmployeeIDs); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		employeeIDs, providers := loadServiceProviderFields(id)
+
 		var categoryName string
 		_ = db.QueryRow(`SELECT name FROM service_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName)
 
@@ -986,6 +1016,8 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			"imageUrl":            payload.ImageURL,
 			"photos":              payload.Photos,
 			"status":              status,
+			"employeeIds":         employeeIDs,
+			"providers":           providers,
 			"createdAt":           createdAt.UTC().Format(time.RFC3339),
 			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 		})
@@ -1003,6 +1035,57 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
+	case http.MethodGet:
+		var svcID, catID int64
+		var name, shortDesc, description, detailedDesc, categoryName, svcType, status string
+		var price float64
+		var durationMinutes int
+		var targetAudience, imageURL string
+		var photos []string
+		var isBookable bool
+		var createdAt, updatedAt time.Time
+		err = db.QueryRow(`
+			SELECT s.id, s.name, s.short_description, s.description, COALESCE(s.detailed_description, ''),
+			       s.category_id, c.name, s.type, s.price, s.duration_minutes, s.target_audience,
+			       s.is_bookable, s.image_url, s.photos, s.status, s.created_at, s.updated_at
+			FROM services s
+			JOIN service_categories c ON c.id = s.category_id
+			WHERE s.id = $1
+		`, id).Scan(&svcID, &name, &shortDesc, &description, &detailedDesc, &catID, &categoryName, &svcType, &price, &durationMinutes, &targetAudience, &isBookable, &imageURL, pq.Array(&photos), &status, &createdAt, &updatedAt)
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not get service")
+			return
+		}
+		employeeIDs, providers := loadServiceProviderFields(svcID)
+		linkedBookings, _ := countLinkedServiceBookings(svcID)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":                    svcID,
+			"name":                  name,
+			"shortDescription":      shortDesc,
+			"description":           description,
+			"detailedDescription":   detailedDesc,
+			"categoryId":            catID,
+			"categoryName":          categoryName,
+			"type":                  svcType,
+			"bookingMode":           svcType,
+			"price":                 price,
+			"durationMinutes":       durationMinutes,
+			"targetAudience":        targetAudience,
+			"isBookable":            isBookable,
+			"imageUrl":              imageURL,
+			"photos":                photos,
+			"status":                status,
+			"employeeIds":           employeeIDs,
+			"providers":             providers,
+			"linkedBookings":        linkedBookings,
+			"createdAt":             createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":             updatedAt.UTC().Format(time.RFC3339),
+		})
+
 	case http.MethodPut:
 		var payload servicePayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -1013,8 +1096,7 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(payload.Name)
 		shortDesc := strings.TrimSpace(payload.ShortDescription)
 		description := strings.TrimSpace(payload.Description)
-		detailedDesc := strings.TrimSpace(payload.DetailedDescription)
-		bookingMode := normalizeBookingMode(payload.BookingMode)
+		bookingMode := normalizeBookingMode(payload.Type)
 		status := normalizeServiceStatus(payload.Status)
 		targetAudience := payload.TargetAudience
 		if targetAudience != "particulier" && targetAudience != "professionnel" && targetAudience != "tous" {
@@ -1031,6 +1113,10 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if bookingMode == "" {
 			writeError(w, http.StatusBadRequest, "invalid booking mode")
+			return
+		}
+		if bookingMode == "booking" && len(payload.EmployeeIDs) == 0 {
+			writeError(w, http.StatusBadRequest, "au moins un salarié est requis pour une prestation en mode réservation")
 			return
 		}
 		if status == "" {
@@ -1064,6 +1150,13 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if err := planning.SyncServiceProviders(db, id, payload.EmployeeIDs); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		employeeIDs, providers := loadServiceProviderFields(id)
+
 		var categoryName string
 		_ = db.QueryRow(`SELECT name FROM service_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName)
 
@@ -1083,11 +1176,23 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 			"imageUrl":            payload.ImageURL,
 			"photos":              payload.Photos,
 			"status":              status,
+			"employeeIds":         employeeIDs,
+			"providers":           providers,
 			"createdAt":           createdAt.UTC().Format(time.RFC3339),
 			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	case http.MethodDelete:
+		linkedBookings, err := countLinkedServiceBookings(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not verify linked bookings")
+			return
+		}
+		if linkedBookings > 0 {
+			writeError(w, http.StatusConflict, "impossible de supprimer : des réservations sont liées à cette prestation. Désactivez-la à la place.")
+			return
+		}
+
 		result, err := db.Exec(`DELETE FROM services WHERE id = $1`, id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not delete service")
@@ -1109,6 +1214,12 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 // ── Handlers publics prestations ──────────────────────────────────────────────
 
+func callerRoleFromRequest(r *http.Request) string {
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	role, _ := claims["role"].(string)
+	return role
+}
+
 // publicServicesListHandler gère GET /api/services (catalogue, utilisateur connecté)
 func publicServicesListHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -1118,16 +1229,13 @@ func publicServicesListHandler(w http.ResponseWriter, r *http.Request) {
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	categoryRaw := strings.TrimSpace(r.URL.Query().Get("categoryId"))
-	targetAudience := strings.TrimSpace(r.URL.Query().Get("targetAudience"))
+	targetAudience := servicecatalog.TargetAudienceFilterForRole(callerRoleFromRequest(r))
 
 	var categoryID interface{}
 	if categoryRaw != "" {
 		if id, err := strconv.ParseInt(categoryRaw, 10, 64); err == nil {
 			categoryID = id
 		}
-	}
-	if targetAudience != "particulier" && targetAudience != "professionnel" && targetAudience != "tous" {
-		targetAudience = ""
 	}
 
 	rows, err := db.Query(`
@@ -1196,12 +1304,11 @@ func publicServiceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var svcID, catID int64
-	var name, shortDesc, description, detailedDesc, categoryName, svcType, status string
+	var name, shortDesc, description, categoryName, svcType, status string
 	var price float64
 	var durationMinutes int
 	var targetAudience, imageURL string
 	var photos []string
-	var isBookable bool
 	var createdAt, updatedAt time.Time
 	err = db.QueryRow(`
 		SELECT s.id, s.name, s.short_description, s.description,
@@ -1219,6 +1326,11 @@ func publicServiceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not get service")
 		return
 	}
+	if !servicecatalog.IsVisibleToRole(targetAudience, callerRoleFromRequest(r)) {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+	_, providers := loadServiceProviderFields(svcID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":                  svcID,
 		"name":                name,
@@ -1235,9 +1347,28 @@ func publicServiceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		"imageUrl":            imageURL,
 		"photos":              photos,
 		"status":              status,
+		"providers":           providers,
 		"createdAt":           createdAt.UTC().Format(time.RFC3339),
 		"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 	})
+}
+
+func loadServiceProviderFields(serviceID int64) ([]int64, []planning.ProviderSummary) {
+	providers, err := planning.ListServiceProviders(db, serviceID)
+	if err != nil || len(providers) == 0 {
+		return []int64{}, []planning.ProviderSummary{}
+	}
+	ids := make([]int64, len(providers))
+	for i, p := range providers {
+		ids[i] = p.ID
+	}
+	return ids, providers
+}
+
+func countLinkedServiceBookings(serviceID int64) (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*)::int FROM service_bookings WHERE service_id = $1`, serviceID).Scan(&n)
+	return n, err
 }
 
 func parseIDFromPath(path string, prefix string) (int64, error) {
@@ -5535,14 +5666,22 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT 'Réservation service' AS source, sb.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id, 
 		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name, 
 		       s.name AS entity_name, sb.created_at AS date, sb.amount AS amount, 
-		       sb.payment_status AS status, '' AS transaction_ref,
-		       0::double precision AS refund_amount,
-		       '' AS stripe_refund_id,
-		       '' AS refund_error
+		       CASE
+		           WHEN sb.refund_status = 'requested' THEN 'refund_requested'
+		           WHEN sb.refund_status = 'refunded' OR sb.payment_status = 'refunded' THEN 'refunded'
+		           WHEN sb.refund_status = 'non_refundable' THEN 'non_refundable'
+		           WHEN sb.refund_status = 'failed' THEN 'refund_failed'
+		           ELSE sb.payment_status
+		       END AS status,
+		       COALESCE(NULLIF(sb.stripe_payment_intent_id, ''), sb.stripe_session_id, '') AS transaction_ref,
+		       COALESCE(sb.refund_amount, 0)::double precision AS refund_amount,
+		       COALESCE(TRIM(sb.stripe_refund_id), '') AS stripe_refund_id,
+		       COALESCE(TRIM(sb.refund_error), '') AS refund_error
 		FROM service_bookings sb
 		JOIN services s ON sb.service_id = s.id
 		JOIN users u ON sb.user_id = u.id
 		WHERE sb.amount > 0
+		  AND sb.payment_status <> 'pending'
 		
 		ORDER BY date DESC;
 	`
@@ -5659,14 +5798,23 @@ func myFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT 'Réservation service' AS source, sb.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id,
 		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name,
 		       s.name AS entity_name, sb.created_at AS date, sb.amount AS amount,
-		       sb.payment_status AS status, '' AS transaction_ref,
-		       0::double precision AS refund_amount,
-		       '' AS stripe_refund_id,
-		       '' AS refund_error
+		       CASE
+		           WHEN sb.refund_status = 'requested' THEN 'refund_requested'
+		           WHEN sb.refund_status = 'refunded' OR sb.payment_status = 'refunded' THEN 'refunded'
+		           WHEN sb.refund_status = 'non_refundable' THEN 'non_refundable'
+		           WHEN sb.refund_status = 'failed' THEN 'refund_failed'
+		           ELSE sb.payment_status
+		       END AS status,
+		       COALESCE(NULLIF(sb.stripe_payment_intent_id, ''), sb.stripe_session_id, '') AS transaction_ref,
+		       COALESCE(sb.refund_amount, 0)::double precision AS refund_amount,
+		       COALESCE(TRIM(sb.stripe_refund_id), '') AS stripe_refund_id,
+		       COALESCE(TRIM(sb.refund_error), '') AS refund_error
 		FROM service_bookings sb
 		JOIN services s ON sb.service_id = s.id
 		JOIN users u ON sb.user_id = u.id
-		WHERE sb.user_id = $1 AND sb.amount > 0
+		WHERE sb.user_id = $1
+		  AND sb.amount > 0
+		  AND sb.payment_status <> 'pending'
 
 		ORDER BY date DESC
 	`

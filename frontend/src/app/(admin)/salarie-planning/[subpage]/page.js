@@ -6,6 +6,7 @@ import PlanningAdminView from "../../../components/admin/planning/PlanningAdminV
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
+import { mapBookingsForPlanning } from "../../../lib/planningBookings";
 
 export default function SalariePlanningPage({ params }) {
     const { subpage } = use(params);
@@ -15,6 +16,7 @@ export default function SalariePlanningPage({ params }) {
     const [slots, setSlots] = useState([]);
     const [unavailabilities, setUnavailabilities] = useState([]);
     const [services, setServices] = useState([]);
+    const [bookings, setBookings] = useState([]);
     const [currentUser, setCurrentUser] = useState(null);
     const [loading, setLoading] = useState(false);
 
@@ -33,11 +35,13 @@ export default function SalariePlanningPage({ params }) {
             setCurrentUser(user);
 
             // 2. Fetch data parallelly
-            const [evRes, slRes, unRes, svRes] = await Promise.all([
+            const empId = user.id || user.userId || user.ID;
+            const [evRes, slRes, unRes, svRes, bkRes] = await Promise.all([
                 fetch(apiUrl("/admin/events"), { headers }),
-                fetch(apiUrl(`/admin/service-slots?employeeId=${user.id}`), { headers }),
-                fetch(apiUrl(`/admin/employee-unavailabilities?employeeId=${user.id}`), { headers }),
-                fetch(apiUrl("/admin/services"), { headers })
+                fetch(apiUrl(`/admin/service-slots?employeeId=${empId}`), { headers }),
+                fetch(apiUrl(`/admin/employee-unavailabilities?employeeId=${empId}`), { headers }),
+                fetch(apiUrl("/admin/services"), { headers }),
+                fetch(apiUrl(`/admin/reservations?employeeId=${empId}`), { headers }),
             ]);
 
             if (evRes.ok) {
@@ -54,7 +58,17 @@ export default function SalariePlanningPage({ params }) {
             }
             if (svRes.ok) {
                 const d = await svRes.json();
-                setServices(d.items || []);
+                const svcList = d.items || [];
+                setServices(svcList);
+                if (bkRes.ok) {
+                    const bk = await bkRes.json();
+                    setBookings(mapBookingsForPlanning(bk.items || [], svcList));
+                } else {
+                    setBookings([]);
+                }
+            } else if (bkRes.ok) {
+                const bk = await bkRes.json();
+                setBookings(mapBookingsForPlanning(bk.items || [], []));
             }
         } catch (err) {
             console.error("Failed to load planning data", err);
@@ -85,10 +99,12 @@ export default function SalariePlanningPage({ params }) {
                             key={empId}
                             events={events}
                             slots={slots}
+                            bookings={bookings}
                             unavailabilities={unavailabilities}
                             services={services}
                             employeeId={empId}
                             onReload={loadData}
+                            loading={loading}
                         />
                     );
                 })()}

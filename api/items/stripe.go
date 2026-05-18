@@ -404,6 +404,104 @@ func CreateStripeEventCheckoutSessionPublic(cfg *StripeConfig, eventID, userID i
 	return &StripeCheckoutSessionPublic{ID: session.ID, URL: session.URL}, nil
 }
 
+// StripeBookingSessionDetails détails d'une session Checkout pour une réservation prestation.
+type StripeBookingSessionDetails struct {
+	PaymentStatus string
+	BookingID     int64
+	UserID        int64
+	PaymentIntent string
+}
+
+// CreateStripeBookingCheckoutSessionPublic crée une session Stripe pour une réservation de prestation.
+func CreateStripeBookingCheckoutSessionPublic(cfg *StripeConfig, bookingID, userID int64, title string, amountCents int64) (*StripeCheckoutSessionPublic, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("invalid amount")
+	}
+
+	form := url.Values{}
+	form.Set("mode", "payment")
+	form.Set("success_url", cfg.SuccessURL)
+	form.Set("cancel_url", cfg.CancelURL)
+	form.Set("metadata[booking_id]", strconv.FormatInt(bookingID, 10))
+	form.Set("metadata[user_id]", strconv.FormatInt(userID, 10))
+	form.Set("line_items[0][quantity]", "1")
+	form.Set("line_items[0][price_data][currency]", "eur")
+	form.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(amountCents, 10))
+	form.Set("line_items[0][price_data][product_data][name]", title)
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe checkout creation failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session stripeCheckoutSession
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.URL) == "" {
+		return nil, fmt.Errorf("invalid stripe session response")
+	}
+	return &StripeCheckoutSessionPublic{ID: session.ID, URL: session.URL}, nil
+}
+
+// RetrieveStripeBookingSessionDetails récupère les métadonnées d'une session Checkout prestation.
+func RetrieveStripeBookingSessionDetails(secretKey, sessionID string) (*StripeBookingSessionDetails, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.stripe.com/v1/checkout/sessions/"+url.PathEscape(sessionID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe retrieve session failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session struct {
+		PaymentStatus string            `json:"payment_status"`
+		PaymentIntent string            `json:"payment_intent"`
+		Metadata      map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+
+	details := &StripeBookingSessionDetails{
+		PaymentStatus: session.PaymentStatus,
+		PaymentIntent: session.PaymentIntent,
+	}
+	if raw := strings.TrimSpace(session.Metadata["booking_id"]); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			details.BookingID = parsed
+		}
+	}
+	if raw := strings.TrimSpace(session.Metadata["user_id"]); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			details.UserID = parsed
+		}
+	}
+	return details, nil
+}
+
 // GetStripePaymentIntentFromSessionPublic retrieves the payment intent ID for a given session
 func GetStripePaymentIntentFromSessionPublic(cfg *StripeConfig, sessionID string) (string, error) {
 	session, err := fetchStripeCheckoutSession(cfg, sessionID)
@@ -460,6 +558,34 @@ func NewEventRefundStripeParams(operation string, eventID, userID int64, payment
 		key = key[:255]
 	}
 	recordEUR := ticketEUR
+	if cents > 0 {
+		recordEUR = float64(cents) / 100.0
+	}
+	return &RefundPaymentIntentParams{AmountCents: ac, IdempotencyKey: key}, recordEUR
+}
+
+// NewBookingRefundStripeParams construit remboursement + idempotence pour une réservation prestation.
+func NewBookingRefundStripeParams(operation string, bookingID, userID int64, paymentIntentID string, amountEUR float64, partialAmountCents *int64) (*RefundPaymentIntentParams, float64) {
+	pi := strings.TrimSpace(paymentIntentID)
+	var cents int64
+	if partialAmountCents != nil && *partialAmountCents > 0 {
+		cents = *partialAmountCents
+	} else {
+		cents = RefundEURToAmountCents(amountEUR)
+	}
+	var ac *int64
+	if cents > 0 {
+		ac = &cents
+	}
+	op := strings.TrimSpace(operation)
+	if op == "" {
+		op = "booking"
+	}
+	key := fmt.Sprintf("booking-refund-%s-%d-%d-%s-%d", op, bookingID, userID, pi, cents)
+	if len(key) > 255 {
+		key = key[:255]
+	}
+	recordEUR := amountEUR
 	if cents > 0 {
 		recordEUR = float64(cents) / 100.0
 	}

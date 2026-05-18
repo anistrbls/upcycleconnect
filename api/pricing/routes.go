@@ -31,10 +31,13 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 
 	// PUT /api/admin/pricing/:id — modifier une règle
 	mux.Handle("/api/admin/pricing/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
+		switch r.Method {
+		case http.MethodPut:
+			h.UpdateHandler(w, r)
+		case http.MethodDelete:
+			h.DeleteHandler(w, r)
+		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
 		}
-		h.UpdateHandler(w, r)
 	})))
 }

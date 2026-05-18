@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
-import RefundPaymentDetailModal, { showEventRefundDetailsButton } from "./RefundPaymentDetailModal";
+import RefundPaymentDetailModal, { showRefundDetailsButton } from "./RefundPaymentDetailModal";
 
 function statusLabel(status) {
     const s = String(status || "").toLowerCase();
@@ -204,7 +204,7 @@ export default function MyPaymentsView() {
                                                 </span>
                                             </td>
                                             <td style={{ ...tdStyle, verticalAlign: "middle" }}>
-                                                {showEventRefundDetailsButton(p) ? (
+                                                {showRefundDetailsButton(p) ? (
                                                     <button
                                                         type="button"
                                                         className="action-cta task-action-btn"

@@ -78,7 +78,7 @@ export const NAV_MODULES = [
         icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12.01l8.73-5.05 M12 22.08V12",
         subNav: [
             { key: "vue-ensemble", label: "Vue d'ensemble", shortLabel: "Vue" },
-            { key: "ajouter", label: "Ajouter une prestation", shortLabel: "Ajouter" },
+            { key: "ajouter", label: "Ajouter une prestation", shortLabel: "Ajouter", hideInTopbar: true },
             { key: "prestations", label: "Prestations", shortLabel: "Prestations" },
             { key: "categories-prestations", label: "Catégories de prestations", shortLabel: "Catégories" },
             { key: "reservations", label: "Réservations", shortLabel: "Réservations" },
@@ -285,6 +285,15 @@ export const SALARIE_MODULES = [
         icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2",
         subNav: [
             { key: "agenda", label: "Agenda", shortLabel: "Agenda" },
+        ],
+    },
+    {
+        key: "prestations",
+        label: "Prestations",
+        shortLabel: "Prestations",
+        icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z",
+        subNav: [
+            { key: "catalogue", label: "Catalogue", shortLabel: "Catalogue" },
         ],
     },
     {

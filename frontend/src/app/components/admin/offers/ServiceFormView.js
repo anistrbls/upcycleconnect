@@ -18,6 +18,7 @@ import {
     Plus
 } from "lucide-react";
 import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
+import { buildServiceFormInitialData, getCoverIndexForService } from "./serviceFormState";
 
 const styles = {
     container: {
@@ -118,34 +119,31 @@ const styles = {
     }
 };
 
-export default function ServiceFormView({ categories, initialData = null, onSubmit, onCancel, isSaving, externalError = "" }) {
-    const [formState, setFormState] = useState(initialData ? {
-        name: initialData.name || "",
-        shortDescription: initialData.shortDescription || "",
-        description: initialData.description || "",
-        categoryId: String(initialData.categoryId || ""),
-        type: initialData.bookingMode || (initialData.isBookable ? "booking" : "request"),
-        price: initialData.price || "0",
-        durationMinutes: initialData.durationMinutes || "60",
-        targetAudience: initialData.targetAudience || "tous",
-        imageUrl: initialData.imageUrl || "",
-        photos: initialData.photos || [],
-        status: initialData.status || "brouillon",
-    } : {
-        name: "",
-        shortDescription: "",
-        description: "",
-        categoryId: categories[0] ? String(categories[0].id) : "",
-        type: "request",
-        price: "0",
-        durationMinutes: "60",
-        targetAudience: "tous",
-        imageUrl: "",
-        photos: [],
-        status: "brouillon",
+export default function ServiceFormView({ categories, employees = [], initialData = null, onSubmit, onCancel, isSaving, externalError = "" }) {
+    const isEdit = Boolean(initialData?.id);
+    const normalizedInitial = initialData?.id ? buildServiceFormInitialData(initialData) : null;
+
+    const [formState, setFormState] = useState(() => {
+        if (normalizedInitial) return normalizedInitial;
+        return {
+            name: "",
+            shortDescription: "",
+            description: "",
+            categoryId: categories[0] ? String(categories[0].id) : "",
+            type: "request",
+            price: "0",
+            durationMinutes: "60",
+            targetAudience: "tous",
+            imageUrl: "",
+            photos: [],
+            status: "brouillon",
+            employeeIds: [],
+        };
     });
     const [localError, setLocalError] = useState("");
-    const [coverIndex, setCoverIndex] = useState(0);
+    const [coverIndex, setCoverIndex] = useState(() =>
+        normalizedInitial ? getCoverIndexForService(initialData, normalizedInitial.photos) : 0,
+    );
     const fileRef = useRef(null);
 
     const handleFiles = (files) => {
@@ -178,7 +176,6 @@ export default function ServiceFormView({ categories, initialData = null, onSubm
 
     const handleSubmit = (e) => {
         if (e) e.preventDefault();
-        console.log("Submit clicked. FormState:", formState);
         setLocalError("");
 
         if (!formState.name.trim()) {
@@ -196,15 +193,12 @@ export default function ServiceFormView({ categories, initialData = null, onSubm
             setLocalError("Le prix doit être un nombre positif.");
             return;
         }
+        if (formState.type === "booking" && (!formState.employeeIds || formState.employeeIds.length === 0)) {
+            setLocalError("Sélectionnez au moins un salarié pouvant réaliser cette prestation.");
+            return;
+        }
 
         const finalImageUrl = formState.photos.length > 0 ? formState.photos[coverIndex] : "";
-
-        console.log("Payload to submit:", {
-            ...formState,
-            name: formState.name.trim(),
-            price: parsedPrice,
-            bookingMode: formState.type
-        });
 
         onSubmit({
             ...formState,
@@ -215,8 +209,19 @@ export default function ServiceFormView({ categories, initialData = null, onSubm
             durationMinutes: Number(formState.durationMinutes) || 60,
             categoryId: Number(formState.categoryId),
             bookingMode: formState.type,
+            employeeIds: formState.employeeIds || [],
             imageUrl: finalImageUrl,
             photos: formState.photos,
+        });
+    };
+
+    const toggleEmployee = (employeeId) => {
+        setFormState((prev) => {
+            const ids = prev.employeeIds || [];
+            const next = ids.includes(employeeId)
+                ? ids.filter((id) => id !== employeeId)
+                : [...ids, employeeId];
+            return { ...prev, employeeIds: next };
         });
     };
 
@@ -345,7 +350,7 @@ export default function ServiceFormView({ categories, initialData = null, onSubm
                                 </select>
                             </div>
                             <div style={styles.formGroup}>
-                                <label style={styles.label}>Statut initial</label>
+                                <label style={styles.label}>{isEdit ? "Statut" : "Statut initial"}</label>
                                 <select
                                     value={formState.status}
                                     onChange={(e) => setFormState(p => ({ ...p, status: e.target.value }))}
@@ -357,6 +362,51 @@ export default function ServiceFormView({ categories, initialData = null, onSubm
                                 </select>
                             </div>
                         </div>
+
+                        {formState.type === "booking" ? (
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Salariés habilités *</label>
+                                <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: "0 0 0.75rem 0.2rem" }}>
+                                    Ces salariés pourront être choisis par le client lors de la réservation.
+                                </p>
+                                {employees.length === 0 ? (
+                                    <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0 }}>
+                                        Aucun salarié enregistré. Créez des comptes salarié dans l&apos;administration.
+                                    </p>
+                                ) : (
+                                    <div style={{ display: "grid", gap: "0.5rem" }}>
+                                        {employees.map((emp) => {
+                                            const empId = Number(emp.id);
+                                            const checked = (formState.employeeIds || []).includes(empId);
+                                            const label = [emp.firstname, emp.lastname].filter(Boolean).join(" ") || emp.email || `Salarié #${empId}`;
+                                            return (
+                                                <label
+                                                    key={empId}
+                                                    style={{
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: "0.75rem",
+                                                        padding: "0.85rem 1rem",
+                                                        borderRadius: "14px",
+                                                        background: checked ? "rgba(198, 255, 0, 0.25)" : "#FFFFFF",
+                                                        cursor: "pointer",
+                                                        fontSize: "0.92rem",
+                                                        fontWeight: checked ? 600 : 500,
+                                                    }}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={() => toggleEmployee(empId)}
+                                                    />
+                                                    {label}
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
 
@@ -449,7 +499,7 @@ export default function ServiceFormView({ categories, initialData = null, onSubm
                             disabled={isSaving} 
                             style={{ padding: "1.1rem", borderRadius: "20px", fontSize: "1rem" }}
                         >
-                            {isSaving ? "Enregistrement..." : (initialData ? "Enregistrer les modifications" : "Publier la prestation")}
+                            {isSaving ? "Enregistrement..." : (isEdit ? "Enregistrer les modifications" : "Publier la prestation")}
                         </button>
                         <button
                             className="action-cta"

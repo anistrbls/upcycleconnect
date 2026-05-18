@@ -643,6 +643,17 @@ func (r *Repository) SyncRefundFromStripeWebhook(ctx context.Context, paymentInt
 			return err
 		}
 		if _, err := r.db.ExecContext(ctx, `
+			UPDATE service_bookings
+			SET refund_status = 'refunded',
+			    stripe_refund_id = CASE WHEN $1 <> '' THEN $1 ELSE stripe_refund_id END,
+			    refund_amount = CASE WHEN $2 > 0 THEN ($2::numeric / 100.0) ELSE refund_amount END,
+			    refund_error = '',
+			    payment_status = 'refunded'
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $3
+		`, rid, amountCents, pi); err != nil {
+			return err
+		}
+		if _, err := r.db.ExecContext(ctx, `
 			UPDATE item_logistics
 			SET stripe_payment_status = 'refunded', updated_at = NOW()
 			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
@@ -654,6 +665,14 @@ func (r *Repository) SyncRefundFromStripeWebhook(ctx context.Context, paymentInt
 		errMsg := fmt.Sprintf("stripe refund %s: %s", rid, status)
 		if _, err := r.db.ExecContext(ctx, `
 			UPDATE event_registrations
+			SET refund_status = 'failed', refund_error = $1
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $2
+			  AND refund_status IS DISTINCT FROM 'refunded'
+		`, errMsg, pi); err != nil {
+			return err
+		}
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE service_bookings
 			SET refund_status = 'failed', refund_error = $1
 			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $2
 			  AND refund_status IS DISTINCT FROM 'refunded'

@@ -3,10 +3,14 @@
 import AdminModal from "../admin/AdminModal";
 import { labelStyle } from "../../lib/styles";
 
-/** Inscription événement : afficher le détail remboursement / demande / refus. */
-export function showEventRefundDetailsButton(p) {
-    const src = String(p.source || "").toLowerCase();
-    if (!src.includes("événement")) return false;
+function isRefundablePaymentSource(source) {
+    const src = String(source || "").toLowerCase();
+    return src.includes("événement") || src.includes("réservation service") || src.includes("reservation service");
+}
+
+/** Événement ou réservation prestation : afficher le détail remboursement / demande / refus. */
+export function showRefundDetailsButton(p) {
+    if (!isRefundablePaymentSource(p.source)) return false;
     const s = String(p.status || "").toLowerCase();
     if (["refunded", "refund_failed", "non_refundable", "refund_requested"].includes(s)) return true;
     if (Number(p.refundAmount) > 0) return true;
@@ -14,6 +18,9 @@ export function showEventRefundDetailsButton(p) {
     if (String(p.refundError || "").trim() !== "") return true;
     return false;
 }
+
+/** @deprecated Utiliser showRefundDetailsButton */
+export const showEventRefundDetailsButton = showRefundDetailsButton;
 
 function statusHuman(status) {
     const s = String(status || "").toLowerCase();
@@ -73,7 +80,15 @@ export default function RefundPaymentDetailModal({ open, onClose, payment }) {
 
                 <Row label="Statut">{statusHuman(payment.status)}</Row>
                 <Row label="Date de la transaction">{formatDate(payment.date)}</Row>
-                <Row label="Montant du billet (paiement initial)">{formatAmount(payment.amount)}</Row>
+                <Row
+                    label={
+                        isRefundablePaymentSource(payment.source) && String(payment.source || "").toLowerCase().includes("réservation")
+                            ? "Montant de la réservation (paiement initial)"
+                            : "Montant du billet (paiement initial)"
+                    }
+                >
+                    {formatAmount(payment.amount)}
+                </Row>
 
                 <Row label="Montant remboursé (effectif)">
                     {refAmt > 0 ? (

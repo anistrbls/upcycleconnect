@@ -38,7 +38,7 @@ function TypeBadge({ type }) {
 
 const emptyForm = { label: "", type: "commission", amount: "0", isActive: true };
 
-export default function PricingAdminView({ rules, loading, errorMessage, onReload, onCreate, onUpdate }) {
+export default function PricingAdminView({ rules, loading, errorMessage, onReload, onCreate, onUpdate, onDelete }) {
     const [formOpen, setFormOpen] = useState(false);
     const [editingRule, setEditingRule] = useState(null);
     const [formState, setFormState] = useState(emptyForm);
@@ -101,6 +101,16 @@ export default function PricingAdminView({ rules, loading, errorMessage, onReloa
             setLocalError(String(err?.message || "Une erreur est survenue."));
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleDelete = async (rule) => {
+        if (!onDelete) return;
+        if (!window.confirm(`Supprimer la règle « ${rule.label} » ?`)) return;
+        try {
+            await onDelete(rule.id);
+        } catch (err) {
+            window.alert(String(err?.message || "Impossible de supprimer la règle."));
         }
     };
 
@@ -242,14 +252,26 @@ export default function PricingAdminView({ rules, loading, errorMessage, onReloa
                                         · {formatDateFR(rule.createdAt)}
                                     </span>
                                 </div>
-                                <button
-                                    className="action-cta"
-                                    type="button"
-                                    onClick={() => handleEdit(rule)}
-                                    style={{ background: "#e8ecee", color: "var(--text-main)" }}
-                                >
-                                    Modifier
-                                </button>
+                                <div style={{ display: "flex", gap: "0.45rem" }}>
+                                    <button
+                                        className="action-cta"
+                                        type="button"
+                                        onClick={() => handleEdit(rule)}
+                                        style={{ background: "#e8ecee", color: "var(--text-main)" }}
+                                    >
+                                        Modifier
+                                    </button>
+                                    {onDelete ? (
+                                        <button
+                                            className="action-cta"
+                                            type="button"
+                                            onClick={() => handleDelete(rule)}
+                                            style={{ background: "#f4e8e8", color: "#8e2d2d" }}
+                                        >
+                                            Supprimer
+                                        </button>
+                                    ) : null}
+                                </div>
                             </div>
                         </article>
                     ))}

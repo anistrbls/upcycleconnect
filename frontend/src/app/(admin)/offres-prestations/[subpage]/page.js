@@ -11,6 +11,7 @@ import PricingAdminView from "../../../components/admin/offers/PricingAdminView"
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
+import { buildServiceCreatePayload } from "../../../components/admin/offers/serviceFormState";
 
 export default function OffersSubPage({ params }) {
     const { subpage } = use(params);
@@ -92,7 +93,7 @@ export default function OffersSubPage({ params }) {
         setOffersError("");
         try {
             if (subpage === "prestations" || subpage === "categories-prestations" || subpage === "ajouter") {
-                await Promise.all([loadServiceCategories(), loadServices()]);
+                await Promise.all([loadServiceCategories(), loadServices(), loadEmployees()]);
             } else if (subpage === "reservations") {
                 await Promise.all([loadBookings(), loadServices(), loadEmployees()]);
             } else if (subpage === "tarification") {
@@ -201,6 +202,23 @@ export default function OffersSubPage({ params }) {
         await loadServices();
     };
 
+    const duplicateService = async (id) => {
+        const getRes = await fetch(apiUrl(`/admin/services/${id}`), { headers: buildAuthHeaders() });
+        const service = await parseApiResponse(getRes);
+        const payload = buildServiceCreatePayload(service, {
+            name: `${service.name} (copie)`,
+            status: "brouillon",
+        });
+        const res = await fetch(apiUrl("/admin/services"), {
+            method: "POST",
+            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify(payload),
+        });
+        const created = await parseApiResponse(res);
+        await loadServices();
+        return created;
+    };
+
     // ------------------------------------------------------------------ //
     //  Handlers Réservations
     // ------------------------------------------------------------------ //
@@ -224,6 +242,15 @@ export default function OffersSubPage({ params }) {
         await loadBookings();
     };
 
+    const deleteBooking = async (id) => {
+        const res = await fetch(apiUrl(`/admin/reservations/${id}`), {
+            method: "DELETE",
+            headers: buildAuthHeaders(),
+        });
+        await parseApiResponse(res);
+        await loadBookings();
+    };
+
     // ------------------------------------------------------------------ //
     //  Handlers Tarification
     // ------------------------------------------------------------------ //
@@ -242,6 +269,15 @@ export default function OffersSubPage({ params }) {
             method: "PUT",
             headers: buildAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(payload),
+        });
+        await parseApiResponse(res);
+        await loadPricing();
+    };
+
+    const deletePricingRule = async (id) => {
+        const res = await fetch(apiUrl(`/admin/pricing/${id}`), {
+            method: "DELETE",
+            headers: buildAuthHeaders(),
         });
         await parseApiResponse(res);
         await loadPricing();
@@ -271,6 +307,7 @@ export default function OffersSubPage({ params }) {
                 </header>
                 <ServiceFormView
                     categories={serviceCategories}
+                    employees={employees}
                     onSubmit={createService}
                     onCancel={() => router.push("/offres-prestations/prestations")}
                     isSaving={isSaving}
@@ -302,10 +339,9 @@ export default function OffersSubPage({ params }) {
                 loading={offersLoading}
                 errorMessage={offersError}
                 onReload={refresh}
-                onCreate={createService}
-                onUpdate={updateService}
                 onDelete={deleteService}
                 onToggleStatus={toggleServiceStatus}
+                onDuplicate={duplicateService}
             />
         );
     }
@@ -321,6 +357,7 @@ export default function OffersSubPage({ params }) {
                 onReload={refresh}
                 onUpdateStatus={updateBookingStatus}
                 onAssignEmployee={assignEmployee}
+                onDelete={deleteBooking}
             />
         );
     }
@@ -334,6 +371,7 @@ export default function OffersSubPage({ params }) {
                 onReload={refresh}
                 onCreate={createPricingRule}
                 onUpdate={updatePricingRule}
+                onDelete={deletePricingRule}
             />
         );
     }

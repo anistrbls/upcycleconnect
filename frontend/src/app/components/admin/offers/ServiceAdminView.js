@@ -1,27 +1,285 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import AdminModal from "../AdminModal";
-import ServiceFormView from "./ServiceFormView";
-import { formatDateFR } from "../../../lib/formatters";
+import { formatDateFR, formatTargetAudienceLabel } from "../../../lib/formatters";
 import { pillInputStyle } from "../../../lib/styles";
 import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
+import { useAdminFeedback } from "../useAdminFeedback";
 
-export default function ServiceAdminView({ services, categories, loading, errorMessage, onReload, onCreate, onUpdate, onDelete, onToggleStatus }) {
+const STATUS_LABELS = { actif: "Actif", inactif: "Inactif", brouillon: "Brouillon" };
+const STATUS_BADGE = {
+    actif: { bg: "rgba(50,200,100,0.15)", color: "#E5FFBC", border: "rgba(50,200,100,0.3)" },
+    inactif: { bg: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.85)", border: "rgba(255,255,255,0.22)" },
+    brouillon: { bg: "rgba(245,158,11,0.18)", color: "#FCD34D", border: "rgba(245,158,11,0.35)" },
+};
+const FALLBACK_GRADIENT = "linear-gradient(135deg, #2E7D6E 0%, #1a4d44 100%)";
+
+const tagStyle = {
+    padding: "4px 12px",
+    borderRadius: "999px",
+    background: "rgba(255,255,255,0.12)",
+    fontSize: "0.75rem",
+    color: "rgba(255,255,255,0.9)",
+    fontWeight: 500,
+    border: "1px solid rgba(255,255,255,0.2)",
+    backdropFilter: "blur(4px)",
+    WebkitBackdropFilter: "blur(4px)",
+};
+
+const actionIconStyle = {
+    padding: "9px",
+    borderRadius: "50%",
+    border: "1px solid rgba(255,255,255,0.25)",
+    background: "rgba(255,255,255,0.12)",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    color: "white",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+};
+
+const IconPencil = () => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+);
+const IconTrash = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6l-1 14H6L5 6" />
+        <path d="M10 11v6M14 11v6" />
+        <path d="M9 6V4h6v2" />
+    </svg>
+);
+
+function ServiceCard({ item, index, onEdit, onDelete, onDuplicate, onToggleStatus, onOpen }) {
+    const statusKey = item.status || "brouillon";
+    const sBadge = STATUS_BADGE[statusKey] || STATUS_BADGE.brouillon;
+    const hasImage = Boolean(item.imageUrl);
+    const bookingMode = item.bookingMode || item.type || (item.isBookable ? "booking" : "inquiry");
+    const linkedBookings = Number(item.linkedBookings || 0);
+    const canDelete = linkedBookings === 0;
+
+    return (
+        <article
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpen(item)}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpen(item);
+                }
+            }}
+            style={{
+                position: "relative",
+                borderRadius: "28px",
+                overflow: "hidden",
+                height: "400px",
+                background: hasImage ? "#111" : undefined,
+                backgroundImage: hasImage ? undefined : FALLBACK_GRADIENT,
+                boxShadow: "0 4px 24px rgba(0,0,0,0.10)",
+                animation: "cardAppear 0.45s ease-out both",
+                animationDelay: `${(index ?? 0) * 0.06}s`,
+                cursor: "pointer",
+            }}
+        >
+            {hasImage ? (
+                <>
+                    {previewLooksLikeVideo(item.imageUrl) ? (
+                        <video
+                            src={item.imageUrl}
+                            muted
+                            playsInline
+                            preload="metadata"
+                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }}
+                            aria-label={item.name}
+                        />
+                    ) : (
+                        <img
+                            src={item.imageUrl}
+                            alt={item.name}
+                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }}
+                            onError={(e) => { e.target.style.display = "none"; }}
+                        />
+                    )}
+                </>
+            ) : null}
+            <GradientOverlay hasImage={hasImage} />
+
+            <div style={{ position: "absolute", top: "14px", right: "14px", zIndex: 2 }}>
+                <div
+                    style={{
+                        padding: "4px 12px",
+                        borderRadius: "20px",
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                        background: sBadge.bg,
+                        color: sBadge.color,
+                        backdropFilter: "blur(8px)",
+                        WebkitBackdropFilter: "blur(8px)",
+                        border: `1px solid ${sBadge.border}`,
+                        letterSpacing: "0.04em",
+                        textTransform: "capitalize",
+                    }}
+                >
+                    {STATUS_LABELS[statusKey] || statusKey}
+                </div>
+            </div>
+
+            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.65rem", zIndex: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "0.75rem" }}>
+                    <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }}>{item.name}</h3>
+                    <div style={{ padding: "5px 14px", borderRadius: "999px", background: "rgba(255,255,255,0.15)", color: "white", fontSize: "0.88rem", fontWeight: 700, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                        {Number(item.price || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    </div>
+                </div>
+                <p style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.85)", margin: 0, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                    {item.shortDescription || item.description || "—"}
+                </p>
+                <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.65)", margin: 0 }}>
+                    Créé le {formatDateFR(item.createdAt)}
+                </p>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <span style={tagStyle}>{item.categoryName || "Sans catégorie"}</span>
+                    {item.durationMinutes > 0 ? <span style={tagStyle}>{item.durationMinutes} min</span> : null}
+                    <span style={tagStyle}>{formatTargetAudienceLabel(item.targetAudience)}</span>
+                    <span style={tagStyle}>{bookingMode === "booking" ? "Réservation" : "Demande"}</span>
+                    {linkedBookings > 0 ? (
+                        <span style={tagStyle}>{linkedBookings} réservation{linkedBookings > 1 ? "s" : ""}</span>
+                    ) : null}
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(item); }} title="Modifier" style={actionIconStyle}>
+                        <IconPencil />
+                    </button>
+                    {onDuplicate ? (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onDuplicate(item); }}
+                            title="Dupliquer"
+                            style={actionIconStyle}
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                                <rect x="9" y="9" width="13" height="13" rx="2" />
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                            </svg>
+                        </button>
+                    ) : null}
+                    {canDelete ? (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onDelete(item); }}
+                            title="Supprimer"
+                            style={{
+                                ...actionIconStyle,
+                                border: "1px solid rgba(220,60,60,0.35)",
+                                background: "rgba(220,60,60,0.15)",
+                                color: "#ff8080",
+                            }}
+                        >
+                            <IconTrash />
+                        </button>
+                    ) : (
+                        <span
+                            title="Des réservations sont liées — désactivez la prestation plutôt que de la supprimer"
+                            style={{
+                                fontSize: "0.7rem",
+                                color: "rgba(255,255,255,0.75)",
+                                padding: "0.35rem 0.5rem",
+                                maxWidth: "140px",
+                                lineHeight: 1.3,
+                            }}
+                        >
+                            Suppression impossible
+                        </span>
+                    )}
+                    {onToggleStatus && item.status !== "actif" ? (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onToggleStatus(item.id, "actif"); }}
+                            style={{
+                                flex: 1,
+                                minWidth: "100px",
+                                padding: "0.72rem 0.75rem",
+                                borderRadius: "999px",
+                                border: "1px solid rgba(255,255,255,0.3)",
+                                background: "rgba(229,255,188,0.2)",
+                                color: "#E5FFBC",
+                                fontFamily: "inherit",
+                                fontSize: "0.82rem",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                backdropFilter: "blur(8px)",
+                                WebkitBackdropFilter: "blur(8px)",
+                            }}
+                        >
+                            Activer
+                        </button>
+                    ) : null}
+                    {onToggleStatus && item.status === "actif" ? (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onToggleStatus(item.id, "inactif"); }}
+                            style={{
+                                flex: 1,
+                                minWidth: "100px",
+                                padding: "0.72rem 0.75rem",
+                                borderRadius: "999px",
+                                border: "1px solid rgba(255,255,255,0.3)",
+                                background: "rgba(255,255,255,0.12)",
+                                color: "white",
+                                fontFamily: "inherit",
+                                fontSize: "0.82rem",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                backdropFilter: "blur(8px)",
+                                WebkitBackdropFilter: "blur(8px)",
+                            }}
+                        >
+                            Désactiver
+                        </button>
+                    ) : null}
+                </div>
+            </div>
+        </article>
+    );
+}
+
+function GradientOverlay({ hasImage }) {
+    return (
+        <div
+            style={{
+                position: "absolute",
+                inset: 0,
+                background: hasImage
+                    ? "linear-gradient(to top, rgba(5,10,5,0.95) 0%, rgba(5,10,5,0.6) 40%, transparent 100%)"
+                    : "linear-gradient(to top, rgba(5,10,5,0.75) 0%, rgba(5,10,5,0.25) 50%, transparent 100%)",
+                pointerEvents: "none",
+            }}
+        />
+    );
+}
+
+export default function ServiceAdminView({ services, categories, loading, errorMessage, onReload, onDelete, onToggleStatus, onDuplicate }) {
     const router = useRouter();
+    const { showToast, askConfirm, FeedbackUI } = useAdminFeedback();
     const [query, setQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [categoryFilter, setCategoryFilter] = useState("all");
-    const [formOpen, setFormOpen] = useState(false);
-    const [editingService, setEditingService] = useState(null);
-    const [hoveredServiceId, setHoveredServiceId] = useState(null);
-
     const hasCategories = categories.length > 0;
 
     const visibleServices = services.filter((item) => {
         const normalizedQuery = query.trim().toLowerCase();
-        const queryMatch = !normalizedQuery || item.name.toLowerCase().includes(normalizedQuery) || item.description.toLowerCase().includes(normalizedQuery);
+        const queryMatch = !normalizedQuery
+            || item.name.toLowerCase().includes(normalizedQuery)
+            || (item.description || "").toLowerCase().includes(normalizedQuery)
+            || (item.shortDescription || "").toLowerCase().includes(normalizedQuery);
         const statusMatch = statusFilter === "all" || item.status === statusFilter;
         const categoryMatch = categoryFilter === "all" || String(item.categoryId) === categoryFilter;
         return queryMatch && statusMatch && categoryMatch;
@@ -36,34 +294,55 @@ export default function ServiceAdminView({ services, categories, loading, errorM
     };
 
     const handleEdit = (item) => {
-        setEditingService(item);
-        setFormOpen(true);
+        router.push(`/offres-prestations/prestations/${item.id}/modifier`);
     };
 
-    const handleUpdateSubmit = async (payload) => {
-        try {
-            await onUpdate(editingService.id, payload);
-            setFormOpen(false);
-            setEditingService(null);
-        } catch (err) {
-            window.alert(String(err?.message || "Erreur lors de la mise à jour."));
-        }
+    const handleOpen = (item) => {
+        router.push(`/offres-prestations/prestations/${item.id}`);
     };
 
-    const handleDelete = async (item) => {
-        if (!window.confirm(`Supprimer la prestation ${item.name} ?`)) {
+    const handleDelete = (item) => {
+        const linked = Number(item.linkedBookings || 0);
+        if (linked > 0) {
+            showToast(
+                "Impossible de supprimer : des réservations sont liées à cette prestation. Désactivez-la à la place.",
+                "error",
+            );
             return;
         }
+        askConfirm({
+            title: "Supprimer la prestation",
+            message: `Êtes-vous sûr de vouloir supprimer « ${item.name} » ? Cette action est irréversible.`,
+            confirmLabel: "Supprimer",
+            tone: "danger",
+            onConfirm: async () => {
+                try {
+                    await onDelete(item.id);
+                    showToast("Prestation supprimée.", "success");
+                } catch (err) {
+                    showToast(String(err?.message || "Impossible de supprimer la prestation."), "error");
+                    throw err;
+                }
+            },
+        });
+    };
 
+    const handleDuplicate = async (item) => {
+        if (!onDuplicate) return;
+        if (!window.confirm(`Dupliquer la prestation « ${item.name} » en brouillon ?`)) return;
         try {
-            await onDelete(item.id);
+            const created = await onDuplicate(item.id);
+            if (created?.id) {
+                router.push(`/offres-prestations/prestations/${created.id}/modifier`);
+            }
         } catch (err) {
-            window.alert(String(err?.message || "Impossible de supprimer la prestation."));
+            window.alert(String(err?.message || "Impossible de dupliquer la prestation."));
         }
     };
 
     return (
         <>
+            {FeedbackUI}
             <div className="header-section">
                 <div className="title-area">
                     <span className="activities-label">Offres & prestations</span>
@@ -116,144 +395,39 @@ export default function ServiceAdminView({ services, categories, loading, errorM
                 )}
             </div>
 
-            <AdminModal
-                open={formOpen}
-                title="Modifier une prestation"
-                onClose={() => {
-                    setFormOpen(false);
-                    setEditingService(null);
-                }}
-            >
-                {editingService && (
-                    <ServiceFormView
-                        categories={categories}
-                        initialData={{
-                            ...editingService,
-                            price: String(editingService.price || 0),
-                            durationMinutes: String(editingService.durationMinutes || 60),
-                            categoryId: String(editingService.categoryId),
-                        }}
-                        onSubmit={handleUpdateSubmit}
-                        onCancel={() => {
-                            setFormOpen(false);
-                            setEditingService(null);
-                        }}
+            <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+                {loading
+                    ? [...Array(6)].map((_, i) => (
+                        <div key={i} style={{ borderRadius: "28px", height: "400px", background: "var(--surface-hover)", animation: "skeletonPulse 1.4s ease-in-out infinite" }} />
+                    ))
+                    : null}
+                {!loading && visibleServices.length === 0 ? (
+                    <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1 / -1" }}>Aucune prestation trouvée.</p>
+                ) : null}
+                {!loading && visibleServices.map((item, index) => (
+                    <ServiceCard
+                        key={item.id}
+                        item={item}
+                        index={index}
+                        onOpen={handleOpen}
+                        onEdit={handleEdit}
+                        onDelete={handleDelete}
+                        onDuplicate={onDuplicate ? handleDuplicate : null}
+                        onToggleStatus={onToggleStatus}
                     />
-                )}
-            </AdminModal>
-
-            <div style={{ display: "grid", gap: "1.25rem", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gridAutoRows: "1fr", alignItems: "stretch" }}>
-                {loading ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1 / -1" }}>Chargement...</p> : null}
-                {!loading && visibleServices.length === 0 ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", gridColumn: "1 / -1" }}>Aucune prestation trouvée.</p> : null}
-                {!loading && visibleServices.map((item) => {
-                    const isHovered = hoveredServiceId === item.id;
-                    return (
-                        <article
-                            key={item.id}
-                            onMouseEnter={() => setHoveredServiceId(item.id)}
-                            onMouseLeave={() => setHoveredServiceId(null)}
-                            style={{
-                                background: "var(--surface-hover)",
-                                borderRadius: "20px",
-                                padding: "1.25rem",
-                                display: "grid",
-                                gap: "0.85rem",
-                                height: "100%",
-                                minHeight: "340px",
-                            }}
-                        >
-                            {item.imageUrl && (
-                                <div style={{ width: "100%", height: "140px", borderRadius: "12px", overflow: "hidden", marginBottom: "0.5rem", background: "#111" }}>
-                                    {previewLooksLikeVideo(item.imageUrl) ? (
-                                        <video src={item.imageUrl} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
-                                    ) : (
-                                        <img src={item.imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                    )}
-                                </div>
-                            )}
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start" }}>
-                                <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>{item.name}</h3>
-                                <span className="db-badge" style={{ background: item.status === "actif" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>
-                                    {item.status}
-                                </span>
-                            </div>
-                            <p style={{ color: "var(--text-muted)", fontSize: "0.87rem", lineHeight: 1.5, minHeight: "2.6rem", maxHeight: "2.6rem", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                                {item.shortDescription || item.description || "-"}
-                            </p>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem", fontSize: "0.78rem", alignItems: "center" }}>
-                                <span style={{ background: "#cad6d8", color: "#233B3D", borderRadius: "999px", padding: "0.24rem 0.65rem", fontWeight: 600 }}>
-                                    {item.categoryName || "Sans catégorie"}
-                                </span>
-                                <span style={{ background: "#E8ECEE", color: "#2B4548", borderRadius: "999px", padding: "0.24rem 0.65rem", fontWeight: 600 }}>
-                                    {item.durationMinutes} min
-                                </span>
-                                <span style={{ background: "#F1F5F9", color: "#334155", borderRadius: "999px", padding: "0.24rem 0.65rem", fontWeight: 600 }}>
-                                    Cible: {item.targetAudience}
-                                </span>
-                            </div>
-                            <div style={{ display: "grid", gap: "0.6rem", alignContent: "start" }}>
-                                {!isHovered ? (
-                                    <>
-                                        <div style={{ background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", fontSize: "0.96rem", color: "#1f3335", display: "flex", alignItems: "center", gap: "0.58rem", minHeight: "52px" }}>
-                                            <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                                            </span>
-                                            <span style={{ fontWeight: 700, fontSize: "1rem" }}>{Number(item.price || 0).toFixed(2)} €</span>
-                                        </div>
-                                        <div style={{ background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", fontSize: "0.95rem", color: "#1f3335", display: "flex", alignItems: "center", gap: "0.58rem", minHeight: "52px" }}>
-                                            <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-                                            </span>
-                                            <span style={{ textTransform: "capitalize" }}>
-                                                {item.bookingMode === "booking" ? "Réservation" : "Demande"}
-                                            </span>
-                                        </div>
-                                        <div style={{ background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", fontSize: "0.95rem", color: "#2b4548", display: "flex", alignItems: "center", gap: "0.58rem", minHeight: "52px" }}>
-                                            <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                                            </span>
-                                            <span>{formatDateFR(item.createdAt)}</span>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", minHeight: "52px" }}>
-                                            <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                                            </span>
-                                            <span style={{ fontSize: "0.92rem", color: "#1f3335" }}>
-                                                {item.bookingMode === "booking" ? "Réservable en ligne" : "Demande simple"}
-                                            </span>
-                                        </div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", minHeight: "52px" }}>
-                                            <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                                            </span>
-                                            <span style={{ fontSize: "0.92rem", color: "#1f3335", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.categoryName || "Sans catégorie"}</span>
-                                        </div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", minHeight: "52px" }}>
-                                            <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                            </span>
-                                            <span style={{ fontSize: "0.92rem", color: "#1f3335" }}>Créé le {formatDateFR(item.createdAt)}</span>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                            <div style={{ marginTop: "auto", display: "flex", gap: "0.55rem", alignItems: "center", flexWrap: "wrap" }}>
-                                <button className="action-cta" type="button" onClick={() => handleEdit(item)} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Modifier</button>
-                                {onToggleStatus && item.status !== "actif" && (
-                                    <button className="action-cta" type="button" onClick={() => onToggleStatus(item.id, "actif")} style={{ background: "#E5FFBC", color: "#233B3D" }}>Activer</button>
-                                )}
-                                {onToggleStatus && item.status === "actif" && (
-                                    <button className="action-cta" type="button" onClick={() => onToggleStatus(item.id, "inactif")} style={{ background: "#EAF0F1", color: "#4F6163" }}>Désactiver</button>
-                                )}
-                                <button className="action-cta" type="button" onClick={() => handleDelete(item)} style={{ background: "#f4e8e8", color: "#8e2d2d" }}>Supprimer</button>
-                            </div>
-                        </article>
-                    );
-                })}
+                ))}
             </div>
+
+            <style jsx global>{`
+                @keyframes cardAppear {
+                    from { opacity: 0; transform: translateY(18px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                @keyframes skeletonPulse {
+                    0%, 100% { opacity: 0.5; }
+                    50% { opacity: 0.8; }
+                }
+            `}</style>
         </>
     );
 }
