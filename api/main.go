@@ -16,12 +16,13 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 
 	"upcycleconnect/api/items"
 	"upcycleconnect/api/pricing"
 	"upcycleconnect/api/projects"
+	"upcycleconnect/api/planning"
 	"upcycleconnect/api/reservations"
 	"upcycleconnect/api/sirene"
 	"upcycleconnect/api/users"
@@ -78,6 +79,11 @@ func main() {
 		log.Fatalf("Events schema initialization error: %v", err)
 	}
 	log.Println("✓ Events schema initialized")
+
+	if err := ensurePlanningRulesSchema(); err != nil {
+		log.Fatalf("Planning rules schema initialization error: %v", err)
+	}
+	log.Println("✓ Planning rules schema initialized")
 
 	if err := ensureItemCategoriesSchema(); err != nil {
 		log.Fatalf("Item categories schema initialization error: %v", err)
@@ -261,6 +267,11 @@ func main() {
 
 	// Module reservations (dépend de users + services, doit venir après)
 	reservations.RegisterRoutes(mux, db, authMiddleware)
+	planning.RegisterRoutes(mux, db, authMiddleware)
+
+	// ── Endpoints publics prestations (catalogue utilisateur connecté) ──────────
+	mux.Handle("/api/services", authMiddleware(http.HandlerFunc(publicServicesListHandler)))
+	mux.Handle("/api/services/", authMiddleware(http.HandlerFunc(publicServiceByIDHandler)))
 
 	// Module projects (projets d'upcycling professionnels)
 	projects.RegisterRoutes(mux, db, authMiddleware)
@@ -554,13 +565,17 @@ type serviceCategoryPayload struct {
 }
 
 type servicePayload struct {
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	CategoryID  int64   `json:"categoryId"`
-	Type        string  `json:"type"`
-	Price       float64 `json:"price"`
-	IsBookable  bool    `json:"isBookable"`
-	Status      string  `json:"status"`
+	Name                string   `json:"name"`
+	ShortDescription    string   `json:"shortDescription"`
+	Description         string   `json:"description"`
+	CategoryID          int64    `json:"categoryId"`
+	Type                string   `json:"bookingMode"`
+	Price               float64  `json:"price"`
+	DurationMinutes     int      `json:"durationMinutes"`
+	TargetAudience      string   `json:"targetAudience"`
+	ImageURL            string   `json:"imageUrl"`
+	Photos              []string `json:"photos"`
+	Status              string   `json:"status"`
 }
 
 type eventPayload struct {
@@ -615,6 +630,19 @@ func ensureOffersSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_service_categories_status ON service_categories(status)`,
 		// Migration douce : ajoute is_bookable si la colonne n'existe pas encore
 		`ALTER TABLE services ADD COLUMN IF NOT EXISTS is_bookable BOOLEAN NOT NULL DEFAULT true`,
+		// Nouvelles colonnes prestations
+		`ALTER TABLE services ADD COLUMN IF NOT EXISTS short_description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE services ADD COLUMN IF NOT EXISTS detailed_description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE services ADD COLUMN IF NOT EXISTS photos TEXT[] NOT NULL DEFAULT '{}'`,
+		// Migration Mode de fonctionnement : request vs booking
+		`DO $$ BEGIN
+			IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'services_type_check') THEN
+				ALTER TABLE services DROP CONSTRAINT services_type_check;
+			END IF;
+		END $$`,
+		`UPDATE services SET type = 'booking' WHERE type NOT IN ('request', 'booking') AND is_bookable = true`,
+		`UPDATE services SET type = 'request' WHERE type NOT IN ('request', 'booking') AND is_bookable = false`,
+		`ALTER TABLE services ADD CONSTRAINT services_type_check CHECK (type IN ('request', 'booking'))`,
 	}
 
 	for _, statement := range statements {
@@ -836,7 +864,9 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		rows, err := db.Query(`
-			SELECT s.id, s.name, s.description, s.category_id, c.name, s.type, s.price, s.is_bookable, s.status, s.created_at, s.updated_at
+			SELECT s.id, s.name, s.short_description, s.description,
+			       s.category_id, c.name, s.type, s.price, s.duration_minutes, s.target_audience,
+			       s.is_bookable, s.image_url, s.photos, s.status, s.created_at, s.updated_at
 			FROM services s
 			JOIN service_categories c ON c.id = s.category_id
 			WHERE ($1 = '' OR s.name ILIKE '%' || $1 || '%' OR s.description ILIKE '%' || $1 || '%')
@@ -853,28 +883,35 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		result := make([]map[string]interface{}, 0)
 		for rows.Next() {
 			var id, catID int64
-			var name, description, categoryName, svcType, status string
+			var name, shortDesc, description, categoryName, svcType, targetAudience, imageURL, status string
 			var price float64
+			var durationMinutes int
+			var photos []string
 			var isBookable bool
 			var createdAt, updatedAt time.Time
 
-			if err := rows.Scan(&id, &name, &description, &catID, &categoryName, &svcType, &price, &isBookable, &status, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &name, &shortDesc, &description, &catID, &categoryName, &svcType, &price, &durationMinutes, &targetAudience, &isBookable, &imageURL, pq.Array(&photos), &status, &createdAt, &updatedAt); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse services")
 				return
 			}
 
 			result = append(result, map[string]interface{}{
-				"id":           id,
-				"name":         name,
-				"description":  description,
-				"categoryId":   catID,
-				"categoryName": categoryName,
-				"type":         svcType,
-				"price":        price,
-				"isBookable":   isBookable,
-				"status":       status,
-				"createdAt":    createdAt.UTC().Format(time.RFC3339),
-				"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+				"id":                  id,
+				"name":                name,
+				"shortDescription":    shortDesc,
+				"description":         description,
+				"categoryId":          catID,
+				"categoryName":        categoryName,
+				"type":                svcType,
+				"price":               price,
+				"durationMinutes":     durationMinutes,
+				"targetAudience":      targetAudience,
+				"isBookable":          isBookable,
+				"imageUrl":            imageURL,
+				"photos":              photos,
+				"status":              status,
+				"createdAt":           createdAt.UTC().Format(time.RFC3339),
+				"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 			})
 		}
 
@@ -888,9 +925,14 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		name := strings.TrimSpace(payload.Name)
+		shortDesc := strings.TrimSpace(payload.ShortDescription)
 		description := strings.TrimSpace(payload.Description)
-		svcType := normalizeServiceType(payload.Type)
+		bookingMode := normalizeBookingMode(payload.Type)
 		status := normalizeServiceStatus(payload.Status)
+		targetAudience := payload.TargetAudience
+		if targetAudience != "particulier" && targetAudience != "professionnel" && targetAudience != "tous" {
+			targetAudience = "tous"
+		}
 
 		if name == "" {
 			writeError(w, http.StatusBadRequest, "name is required")
@@ -900,8 +942,8 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "categoryId is required")
 			return
 		}
-		if svcType == "" {
-			writeError(w, http.StatusBadRequest, "invalid type")
+		if bookingMode == "" {
+			writeError(w, http.StatusBadRequest, "invalid booking mode")
 			return
 		}
 		if status == "" {
@@ -917,10 +959,10 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		var id int64
 		var createdAt, updatedAt time.Time
 		err := db.QueryRow(`
-			INSERT INTO services (name, description, category_id, type, price, is_bookable, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			INSERT INTO services (name, short_description, description, category_id, type, price, duration_minutes, target_audience, is_bookable, image_url, photos, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING id, created_at, updated_at
-		`, name, description, payload.CategoryID, svcType, payload.Price, payload.IsBookable, status).Scan(&id, &createdAt, &updatedAt)
+		`, name, shortDesc, description, payload.CategoryID, bookingMode, payload.Price, payload.DurationMinutes, targetAudience, bookingMode == "booking", payload.ImageURL, pq.Array(payload.Photos), status).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create service")
 			return
@@ -930,17 +972,22 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT name FROM service_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName)
 
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"id":           id,
-			"name":         name,
-			"description":  description,
-			"categoryId":   payload.CategoryID,
-			"categoryName": categoryName,
-			"type":         svcType,
-			"price":        payload.Price,
-			"isBookable":   payload.IsBookable,
-			"status":       status,
-			"createdAt":    createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+			"id":                  id,
+			"name":                name,
+			"shortDescription":    shortDesc,
+			"description":         description,
+			"categoryId":          payload.CategoryID,
+			"categoryName":        categoryName,
+			"bookingMode":         bookingMode,
+			"price":               payload.Price,
+			"durationMinutes":     payload.DurationMinutes,
+			"targetAudience":      targetAudience,
+			"isBookable":          bookingMode == "booking",
+			"imageUrl":            payload.ImageURL,
+			"photos":              payload.Photos,
+			"status":              status,
+			"createdAt":           createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	default:
@@ -964,9 +1011,15 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		name := strings.TrimSpace(payload.Name)
+		shortDesc := strings.TrimSpace(payload.ShortDescription)
 		description := strings.TrimSpace(payload.Description)
-		svcType := normalizeServiceType(payload.Type)
+		detailedDesc := strings.TrimSpace(payload.DetailedDescription)
+		bookingMode := normalizeBookingMode(payload.BookingMode)
 		status := normalizeServiceStatus(payload.Status)
+		targetAudience := payload.TargetAudience
+		if targetAudience != "particulier" && targetAudience != "professionnel" && targetAudience != "tous" {
+			targetAudience = "tous"
+		}
 
 		if name == "" {
 			writeError(w, http.StatusBadRequest, "name is required")
@@ -976,8 +1029,8 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "categoryId is required")
 			return
 		}
-		if svcType == "" {
-			writeError(w, http.StatusBadRequest, "invalid type")
+		if bookingMode == "" {
+			writeError(w, http.StatusBadRequest, "invalid booking mode")
 			return
 		}
 		if status == "" {
@@ -994,10 +1047,13 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		var createdAt, updatedAt time.Time
 		result := db.QueryRow(`
 			UPDATE services
-			SET name = $1, description = $2, category_id = $3, type = $4, price = $5, is_bookable = $6, status = $7, updated_at = NOW()
-			WHERE id = $8
+			SET name = $1, short_description = $2, description = $3,
+			    category_id = $4, type = $5, price = $6, duration_minutes = $7,
+			    target_audience = $8, is_bookable = $9, image_url = $10, photos = $11, status = $12, updated_at = NOW()
+			WHERE id = $13
 			RETURNING created_at, updated_at
-		`, name, description, payload.CategoryID, svcType, payload.Price, payload.IsBookable, status, id)
+		`, name, shortDesc, description, payload.CategoryID, bookingMode, payload.Price,
+			payload.DurationMinutes, targetAudience, bookingMode == "booking", payload.ImageURL, pq.Array(payload.Photos), status, id)
 
 		if err := result.Scan(&createdAt, &updatedAt); err != nil {
 			if err == sql.ErrNoRows {
@@ -1012,17 +1068,23 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT name FROM service_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":           id,
-			"name":         name,
-			"description":  description,
-			"categoryId":   payload.CategoryID,
-			"categoryName": categoryName,
-			"type":         svcType,
-			"price":        payload.Price,
-			"isBookable":   payload.IsBookable,
-			"status":       status,
-			"createdAt":    createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":    updatedAt.UTC().Format(time.RFC3339),
+			"id":                  id,
+			"name":                name,
+			"shortDescription":    shortDesc,
+			"description":         description,
+			"categoryId":          payload.CategoryID,
+			"categoryName":        categoryName,
+			"type":                bookingMode,
+			"bookingMode":         bookingMode,
+			"price":               payload.Price,
+			"durationMinutes":     payload.DurationMinutes,
+			"targetAudience":      targetAudience,
+			"isBookable":          bookingMode == "booking",
+			"imageUrl":            payload.ImageURL,
+			"photos":              payload.Photos,
+			"status":              status,
+			"createdAt":           createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	case http.MethodDelete:
@@ -1043,6 +1105,139 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// ── Handlers publics prestations ──────────────────────────────────────────────
+
+// publicServicesListHandler gère GET /api/services (catalogue, utilisateur connecté)
+func publicServicesListHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	categoryRaw := strings.TrimSpace(r.URL.Query().Get("categoryId"))
+	targetAudience := strings.TrimSpace(r.URL.Query().Get("targetAudience"))
+
+	var categoryID interface{}
+	if categoryRaw != "" {
+		if id, err := strconv.ParseInt(categoryRaw, 10, 64); err == nil {
+			categoryID = id
+		}
+	}
+	if targetAudience != "particulier" && targetAudience != "professionnel" && targetAudience != "tous" {
+		targetAudience = ""
+	}
+
+	rows, err := db.Query(`
+		SELECT s.id, s.name, s.short_description, s.description,
+		       s.category_id, c.name, s.type, s.price, s.duration_minutes, s.target_audience,
+		       s.image_url, s.photos, s.status, s.created_at, s.updated_at
+		FROM services s
+		JOIN service_categories c ON c.id = s.category_id
+		WHERE s.status = 'actif'
+		AND ($1 = '' OR s.name ILIKE '%' || $1 || '%' OR s.short_description ILIKE '%' || $1 || '%')
+		AND ($2::BIGINT IS NULL OR s.category_id = $2)
+		AND ($3 = '' OR s.target_audience = $3 OR s.target_audience = 'tous')
+		ORDER BY s.created_at DESC
+	`, q, categoryID, targetAudience)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list services")
+		return
+	}
+	defer rows.Close()
+
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id, catID int64
+		var name, shortDesc, description, categoryName, svcType, status string
+		var price float64
+		var durationMinutes int
+		var targetAud, imageURL string
+		var photos []string
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&id, &name, &shortDesc, &description, &catID, &categoryName, &svcType, &price, &durationMinutes, &targetAud, &imageURL, pq.Array(&photos), &status, &createdAt, &updatedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not parse services")
+			return
+		}
+		result = append(result, map[string]interface{}{
+			"id":                  id,
+			"name":                name,
+			"shortDescription":    shortDesc,
+			"description":         description,
+			"categoryId":          catID,
+			"categoryName":        categoryName,
+			"type":                svcType,
+			"bookingMode":         svcType,
+			"price":               price,
+			"durationMinutes":     durationMinutes,
+			"targetAudience":      targetAud,
+			"isBookable":          svcType == "booking",
+			"imageUrl":            imageURL,
+			"photos":              photos,
+			"status":              status,
+			"createdAt":           createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+}
+
+// publicServiceByIDHandler gère GET /api/services/:id (fiche détail)
+func publicServiceByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	id, err := parseIDFromPath(r.URL.Path, "/api/services/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid service id")
+		return
+	}
+	var svcID, catID int64
+	var name, shortDesc, description, detailedDesc, categoryName, svcType, status string
+	var price float64
+	var durationMinutes int
+	var targetAudience, imageURL string
+	var photos []string
+	var isBookable bool
+	var createdAt, updatedAt time.Time
+	err = db.QueryRow(`
+		SELECT s.id, s.name, s.short_description, s.description,
+		       s.category_id, c.name, s.type, s.price, s.duration_minutes, s.target_audience,
+		       s.image_url, s.photos, s.status, s.created_at, s.updated_at
+		FROM services s
+		JOIN service_categories c ON c.id = s.category_id
+		WHERE s.id = $1 AND s.status = 'actif'
+	`, id).Scan(&svcID, &name, &shortDesc, &description, &catID, &categoryName, &svcType, &price, &durationMinutes, &targetAudience, &imageURL, pq.Array(&photos), &status, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not get service")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":                  svcID,
+		"name":                name,
+		"shortDescription":    shortDesc,
+		"description":         description,
+		"categoryId":          catID,
+		"categoryName":        categoryName,
+		"type":                svcType,
+		"bookingMode":         svcType,
+		"price":               price,
+		"durationMinutes":     durationMinutes,
+		"targetAudience":      targetAudience,
+		"isBookable":          svcType == "booking",
+		"imageUrl":            imageURL,
+		"photos":              photos,
+		"status":              status,
+		"createdAt":           createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+	})
 }
 
 func parseIDFromPath(path string, prefix string) (int64, error) {
@@ -1211,12 +1406,12 @@ func normalizeServiceStatus(raw string) string {
 	return ""
 }
 
-func normalizeServiceType(raw string) string {
+func normalizeBookingMode(raw string) string {
 	value := strings.ToLower(strings.TrimSpace(raw))
-	if value == "service" || value == "atelier" || value == "formation" || value == "evenement" {
+	if value == "request" || value == "booking" {
 		return value
 	}
-	return ""
+	return "request"
 }
 
 func normalizeEventCategoryStatus(raw string) string {
@@ -1225,6 +1420,59 @@ func normalizeEventCategoryStatus(raw string) string {
 		return value
 	}
 	return ""
+}
+
+func ensurePlanningRulesSchema() error {
+	// Table des règles de travail
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS employee_working_rules (
+			employee_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			mon_active BOOLEAN DEFAULT TRUE, mon_start TEXT DEFAULT '09:00', mon_end TEXT DEFAULT '18:00',
+			tue_active BOOLEAN DEFAULT TRUE, tue_start TEXT DEFAULT '09:00', tue_end TEXT DEFAULT '18:00',
+			wed_active BOOLEAN DEFAULT TRUE, wed_start TEXT DEFAULT '09:00', wed_end TEXT DEFAULT '18:00',
+			thu_active BOOLEAN DEFAULT TRUE, thu_start TEXT DEFAULT '09:00', thu_end TEXT DEFAULT '18:00',
+			fri_active BOOLEAN DEFAULT TRUE, fri_start TEXT DEFAULT '09:00', fri_end TEXT DEFAULT '18:00',
+			sat_active BOOLEAN DEFAULT FALSE, sat_start TEXT DEFAULT '09:00', sat_end TEXT DEFAULT '18:00',
+			sun_active BOOLEAN DEFAULT FALSE, sun_start TEXT DEFAULT '09:00', sun_end TEXT DEFAULT '18:00',
+			works_public_holidays BOOLEAN DEFAULT FALSE,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Table des créneaux de prestation (Slots)
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS service_slots (
+			id BIGSERIAL PRIMARY KEY,
+			service_id BIGINT REFERENCES services(id) ON DELETE CASCADE,
+			employee_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+			start_time TIMESTAMPTZ NOT NULL,
+			end_time TIMESTAMPTZ NOT NULL,
+			capacity INT NOT NULL DEFAULT 1,
+			is_available BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Table des indisponibilités
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS employee_unavailabilities (
+			id BIGSERIAL PRIMARY KEY,
+			employee_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			start_time TIMESTAMPTZ NOT NULL,
+			end_time TIMESTAMPTZ NOT NULL,
+			reason TEXT NOT NULL DEFAULT 'Indisponibilité',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+	`)
+	return err
 }
 
 func ensureEventsSchema() error {

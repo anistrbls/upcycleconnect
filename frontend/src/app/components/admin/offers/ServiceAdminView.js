@@ -1,27 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import AdminModal from "../AdminModal";
+import ServiceFormView from "./ServiceFormView";
 import { formatDateFR } from "../../../lib/formatters";
-import { fieldStyle, labelStyle, pillInputStyle } from "../../../lib/styles";
+import { pillInputStyle } from "../../../lib/styles";
+import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
 
 export default function ServiceAdminView({ services, categories, loading, errorMessage, onReload, onCreate, onUpdate, onDelete, onToggleStatus }) {
+    const router = useRouter();
     const [query, setQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [formOpen, setFormOpen] = useState(false);
     const [editingService, setEditingService] = useState(null);
-    const [formState, setFormState] = useState({
-        name: "",
-        description: "",
-        categoryId: "",
-        type: "service",
-        price: "0",
-        isBookable: true,
-        status: "brouillon",
-    });
-    const [localError, setLocalError] = useState("");
-    const [isSaving, setIsSaving] = useState(false);
     const [hoveredServiceId, setHoveredServiceId] = useState(null);
 
     const hasCategories = categories.length > 0;
@@ -34,88 +27,26 @@ export default function ServiceAdminView({ services, categories, loading, errorM
         return queryMatch && statusMatch && categoryMatch;
     });
 
-    const resetForm = () => {
-        setEditingService(null);
-        setFormState({
-            name: "",
-            description: "",
-            categoryId: categories[0] ? String(categories[0].id) : "",
-            type: "service",
-            price: "0",
-            isBookable: true,
-            status: "brouillon",
-        });
-        setLocalError("");
-    };
-
     const handleNew = () => {
         if (!hasCategories) {
             window.alert("Aucune catégorie disponible. Créez une catégorie avant d'ajouter une prestation.");
             return;
         }
-        resetForm();
-        setFormOpen(true);
+        router.push("/offres-prestations/ajouter");
     };
 
     const handleEdit = (item) => {
         setEditingService(item);
-        setFormState({
-            name: item.name || "",
-            description: item.description || "",
-            categoryId: String(item.categoryId),
-            type: item.type || "service",
-            price: String(item.price ?? 0),
-            isBookable: item.isBookable !== false,
-            status: item.status || "brouillon",
-        });
-        setLocalError("");
         setFormOpen(true);
     };
 
-    const handleSubmit = async (event) => {
-        event.preventDefault();
-        setLocalError("");
-
-        if (!formState.name.trim()) {
-            setLocalError("Le nom de la prestation est requis.");
-            return;
-        }
-
-        if (!formState.categoryId) {
-            setLocalError("Une catégorie est obligatoire.");
-            return;
-        }
-
-        const parsedPrice = Number(formState.price);
-        if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
-            setLocalError("Le prix doit être un nombre positif.");
-            return;
-        }
-
-        setIsSaving(true);
+    const handleUpdateSubmit = async (payload) => {
         try {
-            const payload = {
-                name: formState.name.trim(),
-                description: formState.description.trim(),
-                categoryId: Number(formState.categoryId),
-                type: formState.type,
-                price: parsedPrice,
-                isBookable: formState.isBookable,
-                status: formState.status,
-            };
-
-            if (editingService) {
-                await onUpdate(editingService.id, payload);
-            } else {
-                await onCreate(payload);
-            }
-
+            await onUpdate(editingService.id, payload);
             setFormOpen(false);
-            resetForm();
+            setEditingService(null);
         } catch (err) {
-            setLocalError(String(err?.message || "Une erreur est survenue."));
-        } finally {
-            setIsSaving(false);
+            window.alert(String(err?.message || "Erreur lors de la mise à jour."));
         }
     };
 
@@ -180,120 +111,35 @@ export default function ServiceAdminView({ services, categories, loading, errorM
                     <button className="action-cta task-action-btn" type="button" onClick={onReload}>Actualiser</button>
                     <button className="action-cta task-action-btn" type="button" onClick={handleNew}>Ajouter une prestation</button>
                 </div>
-                {(errorMessage || localError) ? (
-                    <p style={{ marginTop: "0.75rem", color: "#a23b3b", fontSize: "0.85rem" }}>{errorMessage || localError}</p>
-                ) : null}
+                {errorMessage && (
+                    <p style={{ marginTop: "0.75rem", color: "#a23b3b", fontSize: "0.85rem" }}>{errorMessage}</p>
+                )}
             </div>
 
             <AdminModal
                 open={formOpen}
-                title={editingService ? "Modifier une prestation" : "Créer une prestation"}
+                title="Modifier une prestation"
                 onClose={() => {
                     setFormOpen(false);
-                    resetForm();
+                    setEditingService(null);
                 }}
             >
-                <form onSubmit={handleSubmit} style={{ display: "grid", gap: "0.75rem" }}>
-                    <label style={labelStyle}>
-                        Nom de la prestation
-                        <input
-                            type="text"
-                            placeholder="Ex: Atelier couture"
-                            value={formState.name}
-                            onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
-                            style={fieldStyle}
-                            required
-                        />
-                    </label>
-                    <label style={labelStyle}>
-                        Description
-                        <textarea
-                            placeholder="Description de la prestation"
-                            value={formState.description}
-                            onChange={(event) => setFormState((prev) => ({ ...prev, description: event.target.value }))}
-                            rows={3}
-                            style={{ ...fieldStyle, resize: "vertical" }}
-                        />
-                    </label>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.65rem" }}>
-                        <label style={labelStyle}>
-                            Catégorie
-                            <select
-                                value={formState.categoryId}
-                                onChange={(event) => setFormState((prev) => ({ ...prev, categoryId: event.target.value }))}
-                                style={{ ...fieldStyle, appearance: "none" }}
-                                required
-                            >
-                                <option value="">Choisir une catégorie</option>
-                                {categories.map((item) => (
-                                    <option key={item.id} value={String(item.id)}>{item.name}</option>
-                                ))}
-                            </select>
-                        </label>
-                        <label style={labelStyle}>
-                            Type
-                            <select
-                                value={formState.type}
-                                onChange={(event) => setFormState((prev) => ({ ...prev, type: event.target.value }))}
-                                style={{ ...fieldStyle, appearance: "none" }}
-                            >
-                                <option value="service">service</option>
-                                <option value="atelier">atelier</option>
-                                <option value="formation">formation</option>
-                                <option value="evenement">événement</option>
-                            </select>
-                        </label>
-                        <label style={labelStyle}>
-                            Prix (€)
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                placeholder="0.00"
-                                value={formState.price}
-                                onChange={(event) => setFormState((prev) => ({ ...prev, price: event.target.value }))}
-                                style={fieldStyle}
-                            />
-                        </label>
-                        <label style={labelStyle}>
-                            Statut
-                            <select
-                                value={formState.status}
-                                onChange={(event) => setFormState((prev) => ({ ...prev, status: event.target.value }))}
-                                style={{ ...fieldStyle, appearance: "none" }}
-                            >
-                                <option value="actif">actif</option>
-                                <option value="inactif">inactif</option>
-                                <option value="brouillon">brouillon</option>
-                            </select>
-                        </label>
-                    </div>
-                    <label style={{ ...labelStyle, flexDirection: "row", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-                        <input
-                            type="checkbox"
-                            checked={formState.isBookable}
-                            onChange={(event) => setFormState((prev) => ({ ...prev, isBookable: event.target.checked }))}
-                            style={{ width: "1rem", height: "1rem", accentColor: "#3E686C" }}
-                        />
-                        Réservable en ligne
-                    </label>
-                    <div style={{ display: "flex", gap: "0.6rem" }}>
-                        <button className="action-cta task-action-btn" type="submit" disabled={isSaving}>
-                            {isSaving ? "Enregistrement..." : (editingService ? "Mettre à jour" : "Créer")}
-                        </button>
-                        <button
-                            className="action-cta"
-                            type="button"
-                            onClick={() => {
-                                setFormOpen(false);
-                                resetForm();
-                            }}
-                            style={{ background: "#e8ecee", color: "var(--text-main)" }}
-                        >
-                            Annuler
-                        </button>
-                    </div>
-                </form>
+                {editingService && (
+                    <ServiceFormView
+                        categories={categories}
+                        initialData={{
+                            ...editingService,
+                            price: String(editingService.price || 0),
+                            durationMinutes: String(editingService.durationMinutes || 60),
+                            categoryId: String(editingService.categoryId),
+                        }}
+                        onSubmit={handleUpdateSubmit}
+                        onCancel={() => {
+                            setFormOpen(false);
+                            setEditingService(null);
+                        }}
+                    />
+                )}
             </AdminModal>
 
             <div style={{ display: "grid", gap: "1.25rem", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gridAutoRows: "1fr", alignItems: "stretch" }}>
@@ -316,6 +162,15 @@ export default function ServiceAdminView({ services, categories, loading, errorM
                                 minHeight: "340px",
                             }}
                         >
+                            {item.imageUrl && (
+                                <div style={{ width: "100%", height: "140px", borderRadius: "12px", overflow: "hidden", marginBottom: "0.5rem", background: "#111" }}>
+                                    {previewLooksLikeVideo(item.imageUrl) ? (
+                                        <video src={item.imageUrl} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
+                                    ) : (
+                                        <img src={item.imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                    )}
+                                </div>
+                            )}
                             <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start" }}>
                                 <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>{item.name}</h3>
                                 <span className="db-badge" style={{ background: item.status === "actif" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>
@@ -323,11 +178,17 @@ export default function ServiceAdminView({ services, categories, loading, errorM
                                 </span>
                             </div>
                             <p style={{ color: "var(--text-muted)", fontSize: "0.87rem", lineHeight: 1.5, minHeight: "2.6rem", maxHeight: "2.6rem", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                                {item.description || "-"}
+                                {item.shortDescription || item.description || "-"}
                             </p>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem", fontSize: "0.78rem", alignItems: "center" }}>
                                 <span style={{ background: "#cad6d8", color: "#233B3D", borderRadius: "999px", padding: "0.24rem 0.65rem", fontWeight: 600 }}>
                                     {item.categoryName || "Sans catégorie"}
+                                </span>
+                                <span style={{ background: "#E8ECEE", color: "#2B4548", borderRadius: "999px", padding: "0.24rem 0.65rem", fontWeight: 600 }}>
+                                    {item.durationMinutes} min
+                                </span>
+                                <span style={{ background: "#F1F5F9", color: "#334155", borderRadius: "999px", padding: "0.24rem 0.65rem", fontWeight: 600 }}>
+                                    Cible: {item.targetAudience}
                                 </span>
                             </div>
                             <div style={{ display: "grid", gap: "0.6rem", alignContent: "start" }}>
@@ -343,7 +204,9 @@ export default function ServiceAdminView({ services, categories, loading, errorM
                                             <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
                                             </span>
-                                            <span style={{ textTransform: "capitalize" }}>{item.type}</span>
+                                            <span style={{ textTransform: "capitalize" }}>
+                                                {item.bookingMode === "booking" ? "Réservation" : "Demande"}
+                                            </span>
                                         </div>
                                         <div style={{ background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", fontSize: "0.95rem", color: "#2b4548", display: "flex", alignItems: "center", gap: "0.58rem", minHeight: "52px" }}>
                                             <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
@@ -358,7 +221,9 @@ export default function ServiceAdminView({ services, categories, loading, errorM
                                             <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                                             </span>
-                                            <span style={{ fontSize: "0.92rem", color: "#1f3335" }}>{item.isBookable !== false ? "Réservable en ligne" : "Non réservable"}</span>
+                                            <span style={{ fontSize: "0.92rem", color: "#1f3335" }}>
+                                                {item.bookingMode === "booking" ? "Réservable en ligne" : "Demande simple"}
+                                            </span>
                                         </div>
                                         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", background: "#ffffff", borderRadius: "14px", padding: "0.72rem 0.8rem", border: "1px solid rgba(47, 79, 83, 0.08)", minHeight: "52px" }}>
                                             <span style={{ minWidth: "1.8rem", height: "1.8rem", borderRadius: "999px", background: "#111111", color: "#ffffff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>

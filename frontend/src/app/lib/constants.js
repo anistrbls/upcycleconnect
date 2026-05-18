@@ -68,10 +68,7 @@ export const NAV_MODULES = [
         icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
         subNav: [
             { key: "tous-utilisateurs", label: "Tous les utilisateurs", shortLabel: "Tous" },
-            { key: "particuliers", label: "Particuliers", shortLabel: "Particuliers" },
-            { key: "professionnels", label: "Professionnels", shortLabel: "Professionnels" },
-            { key: "salaries", label: "Salariés", shortLabel: "Salariés" },
-            { key: "admins", label: "Admins", shortLabel: "Admins" },
+            { key: "planning-equipe", label: "Planning Équipe", shortLabel: "Planning" },
         ],
     },
     {
@@ -81,6 +78,7 @@ export const NAV_MODULES = [
         icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12.01l8.73-5.05 M12 22.08V12",
         subNav: [
             { key: "vue-ensemble", label: "Vue d'ensemble", shortLabel: "Vue" },
+            { key: "ajouter", label: "Ajouter une prestation", shortLabel: "Ajouter" },
             { key: "prestations", label: "Prestations", shortLabel: "Prestations" },
             { key: "categories-prestations", label: "Catégories de prestations", shortLabel: "Catégories" },
             { key: "reservations", label: "Réservations", shortLabel: "Réservations" },
@@ -207,6 +205,16 @@ export const PRO_MODULES = [
             { key: "postes", label: "Projets postés", shortLabel: "Postés" },
             { key: "participes", label: "My Upcycle", shortLabel: "Participés" },
             { key: "favoris", label: "Projets favoris", shortLabel: "Favoris" },
+        ],
+    },
+    {
+        key: "prestations",
+        label: "Prestations",
+        shortLabel: "Prestations",
+        icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z",
+        subNav: [
+            { key: "catalogue", label: "Catalogue", shortLabel: "Catalogue" },
+            { key: "mes-reservations", label: "Mes réservations", shortLabel: "Réservations" },
         ],
     },
     {
@@ -339,6 +347,16 @@ export const PARTICULIER_MODULES = [
             { key: "deposer", label: "Déposer une annonce", shortLabel: "Déposer" },
             { key: "mes-annonces", label: "Mes annonces", shortLabel: "Mes" },
             { key: "brouillons", label: "Brouillons", shortLabel: "Brouillons" },
+        ],
+    },
+    {
+        key: "prestations",
+        label: "Prestations",
+        shortLabel: "Prestations",
+        icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z",
+        subNav: [
+            { key: "catalogue", label: "Catalogue", shortLabel: "Catalogue" },
+            { key: "mes-reservations", label: "Mes réservations", shortLabel: "Réservations" },
         ],
     },
     {

@@ -36,7 +36,7 @@ function Badge({ value, map }) {
     );
 }
 
-export default function ReservationsAdminView({ bookings, services, loading, errorMessage, onReload, onUpdateStatus }) {
+export default function ReservationsAdminView({ bookings, services, employees, loading, errorMessage, onReload, onUpdateStatus, onAssignEmployee }) {
     const [statusFilter, setStatusFilter] = useState("all");
     const [paymentFilter, setPaymentFilter] = useState("all");
     const [serviceFilter, setServiceFilter] = useState("all");
@@ -44,7 +44,7 @@ export default function ReservationsAdminView({ bookings, services, loading, err
     // Modal de changement de statut
     const [statusModalOpen, setStatusModalOpen] = useState(false);
     const [selectedBooking, setSelectedBooking] = useState(null);
-    const [statusForm, setStatusForm] = useState({ status: "", paymentStatus: "" });
+    const [statusForm, setStatusForm] = useState({ status: "", paymentStatus: "", employeeId: "" });
     const [localError, setLocalError] = useState("");
     const [isSaving, setIsSaving] = useState(false);
 
@@ -58,7 +58,11 @@ export default function ReservationsAdminView({ bookings, services, loading, err
 
     const handleOpenStatusModal = (booking) => {
         setSelectedBooking(booking);
-        setStatusForm({ status: booking.status, paymentStatus: booking.paymentStatus });
+        setStatusForm({ 
+            status: booking.status, 
+            paymentStatus: booking.paymentStatus,
+            employeeId: booking.employeeId ? String(booking.employeeId) : ""
+        });
         setLocalError("");
         setStatusModalOpen(true);
     };
@@ -68,10 +72,18 @@ export default function ReservationsAdminView({ bookings, services, loading, err
         setLocalError("");
         setIsSaving(true);
         try {
+            // Update status and payment status
             await onUpdateStatus(selectedBooking.id, {
                 status:        statusForm.status,
                 paymentStatus: statusForm.paymentStatus,
             });
+
+            // Update assignment if changed
+            const currentEmployeeId = selectedBooking.employeeId ? String(selectedBooking.employeeId) : "";
+            if (statusForm.employeeId !== currentEmployeeId) {
+                await onAssignEmployee(selectedBooking.id, Number(statusForm.employeeId));
+            }
+
             setStatusModalOpen(false);
         } catch (err) {
             setLocalError(String(err?.message || "Une erreur est survenue."));
@@ -142,7 +154,7 @@ export default function ReservationsAdminView({ bookings, services, loading, err
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
                         <thead>
                             <tr style={{ borderBottom: "1px solid #E2EAEA" }}>
-                                {["Utilisateur", "Prestation", "Date résa.", "Statut", "Paiement", "Montant", "Actions"].map((col) => (
+                                {["Type", "Utilisateur", "Prestation", "Date résa.", "Salarié", "Statut", "Paiement", "Montant", "Actions"].map((col) => (
                                     <th key={col} style={{
                                         textAlign: "left",
                                         padding: "0.55rem 0.75rem",
@@ -159,10 +171,16 @@ export default function ReservationsAdminView({ bookings, services, loading, err
                         <tbody>
                             {visible.map((b) => (
                                 <tr key={b.id} style={{ borderBottom: "1px solid #F0F5F5" }}>
+                                    <td style={{ padding: "0.6rem 0.75rem", fontWeight: 600, color: b.bookingType === "request" ? "#7A5E00" : "#233B3D" }}>
+                                        {b.bookingType === "request" ? "Demande" : "Créneau"}
+                                    </td>
                                     <td style={{ padding: "0.6rem 0.75rem", fontWeight: 500 }}>{b.userName}</td>
                                     <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)" }}>{b.serviceName}</td>
                                     <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                                         {formatDateFR(b.bookingDate)}
+                                    </td>
+                                    <td style={{ padding: "0.6rem 0.75rem", color: b.employeeName ? "var(--text-main)" : "var(--text-muted)" }}>
+                                        {b.employeeName || "Non assigné"}
                                     </td>
                                     <td style={{ padding: "0.6rem 0.75rem" }}>
                                         <Badge value={b.status} map={BOOKING_STATUS_COLORS} />
@@ -185,7 +203,7 @@ export default function ReservationsAdminView({ bookings, services, loading, err
                                                 background: "#233B3D", color: "#E5FFBC",
                                             }}
                                         >
-                                            Modifier
+                                            Gérer
                                         </button>
                                     </td>
                                 </tr>
@@ -195,48 +213,82 @@ export default function ReservationsAdminView({ bookings, services, loading, err
                 </div>
             )}
 
-            {/* Modal : changer statut */}
+            {/* Modal : gérer la réservation */}
             <AdminModal
                 open={statusModalOpen}
-                title="Modifier le statut de la réservation"
+                title="Gérer la réservation"
                 onClose={() => setStatusModalOpen(false)}
             >
                 {selectedBooking && (
                     <form onSubmit={handleStatusSubmit} style={{ display: "grid", gap: "0.75rem" }}>
-                        <p style={{ fontSize: "0.88rem", color: "var(--text-muted)" }}>
-                            {selectedBooking.userName} — {selectedBooking.serviceName}
-                        </p>
+                        <div style={{ background: "var(--surface-hover)", padding: "1rem", borderRadius: "12px", display: "grid", gap: "0.5rem" }}>
+                            <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", fontWeight: 600 }}>
+                                Client : <span style={{ fontWeight: 400 }}>{selectedBooking.userName}</span>
+                            </p>
+                            <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", fontWeight: 600 }}>
+                                Prestation : <span style={{ fontWeight: 400 }}>{selectedBooking.serviceName}</span>
+                            </p>
+                            <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", fontWeight: 600 }}>
+                                Type : <span style={{ fontWeight: 400 }}>{selectedBooking.bookingType === "request" ? "Demande libre" : "Réservation de créneau"}</span>
+                            </p>
+                            {selectedBooking.message && (
+                                <div style={{ marginTop: "0.5rem" }}>
+                                    <p style={{ margin: "0 0 0.25rem 0", fontSize: "0.85rem", fontWeight: 600 }}>Message du client :</p>
+                                    <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)", background: "#fff", padding: "0.5rem", borderRadius: "8px", border: "1px solid #E2EAEA" }}>
+                                        {selectedBooking.message}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                            <label style={labelStyle}>
+                                Statut
+                                <select
+                                    value={statusForm.status}
+                                    onChange={(e) => setStatusForm((prev) => ({ ...prev, status: e.target.value }))}
+                                    style={{ ...fieldStyle, appearance: "none" }}
+                                >
+                                    <option value="pending">En attente</option>
+                                    <option value="confirmed">Confirmée</option>
+                                    <option value="cancelled">Annulée</option>
+                                    <option value="completed">Terminée</option>
+                                </select>
+                            </label>
+                            <label style={labelStyle}>
+                                Paiement
+                                <select
+                                    value={statusForm.paymentStatus}
+                                    onChange={(e) => setStatusForm((prev) => ({ ...prev, paymentStatus: e.target.value }))}
+                                    style={{ ...fieldStyle, appearance: "none" }}
+                                >
+                                    <option value="pending">En attente</option>
+                                    <option value="paid">Payé</option>
+                                    <option value="refunded">Remboursé</option>
+                                </select>
+                            </label>
+                        </div>
+
                         <label style={labelStyle}>
-                            Statut de la réservation
+                            Assigner un salarié
                             <select
-                                value={statusForm.status}
-                                onChange={(e) => setStatusForm((prev) => ({ ...prev, status: e.target.value }))}
+                                value={statusForm.employeeId}
+                                onChange={(e) => setStatusForm((prev) => ({ ...prev, employeeId: e.target.value }))}
                                 style={{ ...fieldStyle, appearance: "none" }}
                             >
-                                <option value="pending">En attente</option>
-                                <option value="confirmed">Confirmée</option>
-                                <option value="cancelled">Annulée</option>
-                                <option value="completed">Terminée</option>
+                                <option value="">Non assigné</option>
+                                {employees && employees.map((emp) => (
+                                    <option key={emp.id} value={String(emp.id)}>{emp.firstname} {emp.lastname} ({emp.employeeRole || "Salarié"})</option>
+                                ))}
                             </select>
                         </label>
-                        <label style={labelStyle}>
-                            Statut du paiement
-                            <select
-                                value={statusForm.paymentStatus}
-                                onChange={(e) => setStatusForm((prev) => ({ ...prev, paymentStatus: e.target.value }))}
-                                style={{ ...fieldStyle, appearance: "none" }}
-                            >
-                                <option value="pending">En attente</option>
-                                <option value="paid">Payé</option>
-                                <option value="refunded">Remboursé</option>
-                            </select>
-                        </label>
+
                         {localError && (
                             <p style={{ color: "#a23b3b", fontSize: "0.85rem" }}>{localError}</p>
                         )}
-                        <div style={{ display: "flex", gap: "0.6rem" }}>
+                        <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.5rem" }}>
                             <button className="action-cta task-action-btn" type="submit" disabled={isSaving}>
-                                {isSaving ? "Enregistrement..." : "Mettre à jour"}
+                                {isSaving ? "Enregistrement..." : "Enregistrer les modifications"}
                             </button>
                             <button
                                 className="action-cta"
@@ -253,3 +305,4 @@ export default function ReservationsAdminView({ bookings, services, loading, err
         </>
     );
 }
+

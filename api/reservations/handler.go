@@ -1,6 +1,7 @@
 package reservations
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -71,7 +72,6 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /api/admin/reservations/42/status → on retire /status pour extraire l'ID
 	cleanPath := strings.TrimSuffix(r.URL.Path, "/status")
 	id, err := parseID(cleanPath+"/", "/api/admin/reservations/")
 	if err != nil {
@@ -110,7 +110,97 @@ func (h *Handler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, booking)
 }
 
-// --- Helpers locaux (dupliqués volontairement pour ne pas coupler ce package à main) ---
+// AssignEmployeeHandler gère PATCH /api/admin/reservations/:id/assign
+func (h *Handler) AssignEmployeeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	cleanPath := strings.TrimSuffix(r.URL.Path, "/assign")
+	id, err := parseID(cleanPath+"/", "/api/admin/reservations/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid booking id")
+		return
+	}
+
+	var payload struct {
+		EmployeeID int64 `json:"employeeId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if payload.EmployeeID <= 0 {
+		writeError(w, http.StatusBadRequest, "employeeId is required")
+		return
+	}
+
+	booking, err := h.repo.AssignEmployee(id, payload.EmployeeID)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "booking not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not assign employee")
+		return
+	}
+	writeJSON(w, http.StatusOK, booking)
+}
+
+// CreateHandler gère POST /api/bookings — crée une demande/réservation (utilisateur connecté)
+func (h *Handler) CreateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	userID := userIDFromContext(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var payload CreateBookingPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if payload.ServiceID <= 0 {
+		writeError(w, http.StatusBadRequest, "serviceId is required")
+		return
+	}
+
+	booking, err := h.repo.CreateBooking(userID, payload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create booking")
+		return
+	}
+	writeJSON(w, http.StatusCreated, booking)
+}
+
+// ListMineHandler gère GET /api/bookings/mine — historique utilisateur connecté
+func (h *Handler) ListMineHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	userID := userIDFromContext(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	bookings, err := h.repo.List(ListFilters{UserID: userID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list bookings")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": bookings, "total": len(bookings)})
+}
+
+// --- Helpers locaux ---
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -133,4 +223,18 @@ func parseID(path, prefix string) (int64, error) {
 		return 0, fmt.Errorf("invalid id")
 	}
 	return id, nil
+}
+
+// userIDFromContext extrait l'ID utilisateur depuis les claims JWT du contexte.
+type contextKey string
+
+const authClaimsContextKey contextKey = "authClaims"
+
+func userIDFromContext(ctx context.Context) int64 {
+	claims, _ := ctx.Value("authClaims").(map[string]interface{})
+	if claims == nil {
+		return 0
+	}
+	val, _ := claims["userId"].(float64)
+	return int64(val)
 }

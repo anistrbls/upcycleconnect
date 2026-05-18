@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import EventPlanningView from "../../../components/admin/events/EventPlanningView";
+import PlanningAdminView from "../../../components/admin/planning/PlanningAdminView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
@@ -10,42 +10,89 @@ import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 export default function SalariePlanningPage({ params }) {
     const { subpage } = use(params);
     const router = useRouter();
+    
     const [events, setEvents] = useState([]);
+    const [slots, setSlots] = useState([]);
+    const [unavailabilities, setUnavailabilities] = useState([]);
+    const [services, setServices] = useState([]);
+    const [currentUser, setCurrentUser] = useState(null);
     const [loading, setLoading] = useState(false);
 
     const activeModule = getModuleByKey("salarie-planning");
     const activeSub = getSubNavItem(activeModule.key, subpage);
 
-    useEffect(() => {
-        const load = async () => {
-            setLoading(true);
-            try {
-                const res = await fetch(apiUrl("/admin/events"), { headers: buildAuthHeaders() });
-                if (res.ok) {
-                    const d = await res.json();
-                    setEvents((d.items || []).filter(e => e.validationStatus !== "rejected"));
-                }
-            } catch { /* silencieux */ }
-            finally { setLoading(false); }
-        };
-        load();
+    const loadData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const headers = buildAuthHeaders();
+            
+            // 1. Get current user
+            const meRes = await fetch(apiUrl("/auth/me"), { headers });
+            const meData = await meRes.json();
+            const user = meData.user || meData; // Fallback just in case
+            setCurrentUser(user);
+
+            // 2. Fetch data parallelly
+            const [evRes, slRes, unRes, svRes] = await Promise.all([
+                fetch(apiUrl("/admin/events"), { headers }),
+                fetch(apiUrl(`/admin/service-slots?employeeId=${user.id}`), { headers }),
+                fetch(apiUrl(`/admin/employee-unavailabilities?employeeId=${user.id}`), { headers }),
+                fetch(apiUrl("/admin/services"), { headers })
+            ]);
+
+            if (evRes.ok) {
+                const d = await evRes.json();
+                setEvents((d.items || []).filter(e => e.validationStatus !== "rejected" && (e.intervenantId === user.id || !e.intervenantId)));
+            }
+            if (slRes.ok) {
+                const d = await slRes.json();
+                setSlots(d.items || []);
+            }
+            if (unRes.ok) {
+                const d = await unRes.json();
+                setUnavailabilities(d.items || []);
+            }
+            if (svRes.ok) {
+                const d = await svRes.json();
+                setServices(d.items || []);
+            }
+        } catch (err) {
+            console.error("Failed to load planning data", err);
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    // Le planning réutilise directement EventPlanningView existant
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
+
     if (subpage === "agenda") {
         return (
-            <>
+            <div style={{ display: "grid", gap: "1.5rem" }}>
                 <div className="header-section">
                     <div className="title-area">
                         <span className="activities-label">Espace salarié</span>
-                        <h1>Planning</h1>
+                        <h1>Mon Planning</h1>
                     </div>
                 </div>
-                {loading
-                    ? <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>
-                    : <EventPlanningView events={events} onOpenEvent={(item) => router.push(`/evenements/tous-evenements?id=${item.id}`)} />
-                }
-            </>
+                {!currentUser ? (
+                    <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement du profil…</p>
+                ) : (() => {
+                    const empId = currentUser.id || currentUser.userId || currentUser.ID;
+                    return (
+                        <PlanningAdminView 
+                            key={empId}
+                            events={events}
+                            slots={slots}
+                            unavailabilities={unavailabilities}
+                            services={services}
+                            employeeId={empId}
+                            onReload={loadData}
+                        />
+                    );
+                })()}
+            </div>
         );
     }
 

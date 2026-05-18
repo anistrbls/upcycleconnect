@@ -210,7 +210,7 @@ export default function UserForm({ open, editingUser, onClose, onSubmit, default
                     : null,
                 // Salarié
                 employmentStatus: role === "salarie" ? form.employmentStatus : "",
-                jobFunction:      role === "salarie" ? form.jobFunction : "",
+                jobFunction:      role === "salarie" ? form.employeeRole : "", // On utilise la même valeur que le rôle
                 employeeRole:     role === "salarie" ? form.employeeRole : "",
                 siteLocation:     role === "salarie" ? form.siteLocation.trim() : "",
                 skills:           role === "salarie" ? form.skills.trim() : "",
@@ -372,15 +372,17 @@ export default function UserForm({ open, editingUser, onClose, onSubmit, default
                 {role === "salarie" && (
                     <div style={sectionStyle}>
                         <p style={sectionTitleStyle}>Informations salarié</p>
+                        
+                        <label style={labelStyle}>
+                            Poste / Fonction <span style={{ color: "#B91C1C" }}>*</span>
+                            <select style={fieldStyle} value={form.employeeRole} onChange={set("employeeRole")} required>
+                                {EMPLOYEE_ROLES.map((r) => (
+                                    <option key={r.value} value={r.value}>{r.label}</option>
+                                ))}
+                            </select>
+                        </label>
+
                         <div style={grid2}>
-                            <label style={labelStyle}>
-                                Type de rôle <span style={{ color: "#B91C1C" }}>*</span>
-                                <select style={fieldStyle} value={form.employeeRole} onChange={set("employeeRole")} required>
-                                    {EMPLOYEE_ROLES.map((r) => (
-                                        <option key={r.value} value={r.value}>{r.label}</option>
-                                    ))}
-                                </select>
-                            </label>
                             <label style={labelStyle}>
                                 Statut d'emploi
                                 <select style={fieldStyle} value={form.employmentStatus} onChange={set("employmentStatus")}>
@@ -389,21 +391,12 @@ export default function UserForm({ open, editingUser, onClose, onSubmit, default
                                     ))}
                                 </select>
                             </label>
-                        </div>
-                        <div style={grid2}>
-                            <label style={labelStyle}>
-                                Fonction
-                                <select style={fieldStyle} value={form.jobFunction} onChange={set("jobFunction")}>
-                                    {JOB_FUNCTIONS.map((f) => (
-                                        <option key={f.value} value={f.value}>{f.label}</option>
-                                    ))}
-                                </select>
-                            </label>
                             <label style={labelStyle}>
                                 Site rattaché <span style={{ color: "var(--text-muted)" }}>(optionnel)</span>
                                 <input style={fieldStyle} value={form.siteLocation} onChange={set("siteLocation")} placeholder="Agence Paris Nord" />
                             </label>
                         </div>
+
                         <label style={labelStyle}>
                             Domaines de compétence <span style={{ color: "var(--text-muted)" }}>(optionnel)</span>
                             <textarea

@@ -15,6 +15,11 @@ const (
 	PaymentRefunded = "refunded"
 )
 
+const (
+	BookingTypeBooking = "booking"
+	BookingTypeRequest = "request"
+)
+
 type Booking struct {
 	ID            int64     `json:"id"`
 	UserID        int64     `json:"userId"`
@@ -26,7 +31,13 @@ type Booking struct {
 	PaymentStatus string    `json:"paymentStatus"`
 	Amount        float64   `json:"amount"`
 	Notes         string    `json:"notes"`
-	CreatedAt     time.Time `json:"createdAt"`
+	// Nouveaux champs
+	SlotID       *int64  `json:"slotId,omitempty"`
+	EmployeeID   *int64  `json:"employeeId,omitempty"`
+	EmployeeName string  `json:"employeeName,omitempty"`
+	Message      string  `json:"message"`
+	BookingType  string  `json:"bookingType"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type UpdateStatusPayload struct {
@@ -34,10 +45,19 @@ type UpdateStatusPayload struct {
 	PaymentStatus string `json:"paymentStatus"`
 }
 
+type CreateBookingPayload struct {
+	ServiceID   int64  `json:"serviceId"`
+	SlotID      *int64 `json:"slotId,omitempty"`
+	EmployeeID  *int64 `json:"employeeId,omitempty"`
+	Message     string `json:"message"`
+	BookingType string `json:"bookingType"`
+}
+
 type ListFilters struct {
 	Status        string
 	PaymentStatus string
 	ServiceID     int64
+	UserID        int64
 }
 
 func NormalizeStatus(raw string) string {
@@ -54,4 +74,12 @@ func NormalizePaymentStatus(raw string) string {
 		return raw
 	}
 	return ""
+}
+
+func NormalizeBookingType(raw string) string {
+	switch raw {
+	case BookingTypeBooking, BookingTypeRequest:
+		return raw
+	}
+	return BookingTypeBooking
 }

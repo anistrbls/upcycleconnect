@@ -11,7 +11,9 @@ import {
     MAX_VIDEO_FILE_BYTES,
     getVideoDurationFromFile,
     previewLooksLikeVideo,
-} from "../../../lib/mediaUploadLimits"; = ["evenement", "atelier", "formation"];
+} from "../../../lib/mediaUploadLimits";
+
+const ADMIN_TYPES = ["evenement", "atelier", "formation"];
 const TYPE_LABELS = { atelier: "Atelier", formation: "Formation", evenement: "Événement", conference: "Conférence" };
 const TYPE_COLORS = {
     atelier:    { bg: "#EAF4FF", color: "#2563EB" },
