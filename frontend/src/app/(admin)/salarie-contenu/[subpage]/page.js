@@ -45,26 +45,6 @@ export default function SalarieContenuPage({ params }) {
 
     useEffect(() => { loadContents(); }, [subpage]);
 
-    const handleCreate = async (payload) => {
-        const res = await fetch(apiUrl("/salarie/contents"), {
-            method: "POST",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseResponse(res);
-        await loadContents();
-    };
-
-    const handleUpdate = async (id, payload) => {
-        const res = await fetch(apiUrl(`/salarie/contents/${id}`), {
-            method: "PUT",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseResponse(res);
-        await loadContents();
-    };
-
     const handleDelete = async (id) => {
         const res = await fetch(apiUrl(`/salarie/contents/${id}`), {
             method: "DELETE",
@@ -81,8 +61,6 @@ export default function SalarieContenuPage({ params }) {
                 ownItems={contents}
                 loading={loading}
                 errorMessage={error}
-                onCreate={handleCreate}
-                onUpdate={handleUpdate}
                 onDelete={handleDelete}
             />
         );
@@ -96,8 +74,6 @@ export default function SalarieContenuPage({ params }) {
                 ownItems={drafts}
                 loading={loading}
                 errorMessage={error}
-                onCreate={handleCreate}
-                onUpdate={handleUpdate}
                 onDelete={handleDelete}
                 draftOnly
             />

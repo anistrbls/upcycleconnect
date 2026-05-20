@@ -1,50 +1,22 @@
 "use client";
 
-import { useRef, useState } from "react";
-import AdminModal from "../AdminModal";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { StatusBadge } from "../../conseils/ConseilMetaDisplay";
+import ConseilRejectModal from "../../conseils/ConseilRejectModal";
+import {
+    CONSEIL_LIST_ALL,
+    CONSEIL_LIST_PENDING,
+    conseilDetailHref,
+} from "../../../lib/conseilDetailRoutes";
+import ConseilFeedCardText from "../../conseils/ConseilFeedCardText";
 import { formatDateFR } from "../../../lib/formatters";
-import { buildAuthHeaders } from "../../../lib/api";
-
-// ─── Constantes ────────────────────────────────────────────────────────────────
-
-const STATUS_LABELS = {
-    brouillon: "Brouillon",
-    en_attente: "En attente",
-    publie: "Publié",
-    archive: "Archivé",
-};
-
-const STATUS_COLORS = {
-    brouillon:  { bg: "#E6EDEE",  color: "#556" },
-    en_attente: { bg: "#FFF3E0",  color: "#A56A2A" },
-    publie:     { bg: "#E5FFBC",  color: "#2E7D32" },
-    archive:    { bg: "#F0F0F0",  color: "#888" },
-};
-
-const EMPTY_FORM = { title: "", body: "", status: "brouillon", imageUrl: "" };
+import ConseilFilterFields from "../../conseils/ConseilFilterFields";
 
 // ─── Styles inline partagés ────────────────────────────────────────────────────
 
-const S = {
-    container: { width: "100%", padding: "1rem 2rem 3rem 0", animation: "fadeIn 0.5s ease-out" },
-    grid: { display: "grid", gridTemplateColumns: "1fr 300px", gap: "2rem", alignItems: "start" },
-    card: { background: "var(--surface-hover)", borderRadius: "28px", padding: "2rem", marginBottom: "1.5rem" },
-    sectionTitle: { fontSize: "1rem", fontWeight: 700, margin: "0 0 1.25rem 0" },
-    label: { display: "flex", flexDirection: "column", gap: "0.4rem", fontSize: "0.85rem", fontWeight: 500, color: "var(--text-muted)", marginBottom: "0.75rem" },
-    input: { padding: "0.75rem 1rem", borderRadius: "14px", border: "none", background: "#fff", fontSize: "0.92rem", outline: "none", width: "100%", boxSizing: "border-box" },
-    select: { padding: "0.75rem 1rem", borderRadius: "14px", border: "none", background: "#fff", fontSize: "0.92rem", outline: "none", width: "100%", appearance: "none", cursor: "pointer" },
-    textarea: { padding: "0.75rem 1rem", borderRadius: "14px", border: "none", background: "#fff", fontSize: "0.92rem", outline: "none", width: "100%", resize: "vertical", minHeight: "160px", boxSizing: "border-box", fontFamily: "inherit" },
-    btnPrimary: { padding: "0.75rem 1.5rem", borderRadius: "20px", border: "none", background: "var(--black)", color: "#fff", fontSize: "0.9rem", fontWeight: 700, cursor: "pointer", width: "100%" },
-    btnSecondary: { padding: "0.6rem 1.25rem", borderRadius: "20px", border: "none", background: "#e8ecee", color: "var(--text-main)", fontSize: "0.88rem", fontWeight: 600, cursor: "pointer", width: "100%", marginTop: "0.65rem" },
-    errorBox: { padding: "0.75rem 1rem", borderRadius: "14px", background: "#FDE8E8", color: "#B24A4A", fontSize: "0.83rem", marginTop: "0.75rem" },
-    photoBox: { border: "2px dashed #d0d8da", borderRadius: "20px", padding: "2rem 1rem", textAlign: "center", cursor: "pointer", background: "rgba(255,255,255,0.75)", color: "var(--text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" },
-};
-
 // ─── Icônes ────────────────────────────────────────────────────────────────────
 
-const IconChevronLeft = () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-);
 const IconPencil = () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
 );
@@ -74,9 +46,6 @@ const IcVerified = () => (
 
 function AdminConseilCard({ item, onDetail, onEdit, onValidate, onOpenReject, onDelete, delay = 0 }) {
     const [expanded, setExpanded] = useState(false);
-    const body = item.body || "";
-    const needsTrunc = body.length > 300;
-    const displayBody = needsTrunc && !expanded ? body.slice(0, 300) + "\u2026" : body;
 
     return (
         <div className="x-card" style={{ animationDelay: `${delay}s` }}>
@@ -85,24 +54,21 @@ function AdminConseilCard({ item, onDetail, onEdit, onValidate, onOpenReject, on
                     <IconPin /> <span style={{ fontWeight: 600 }}>Conseil épinglé</span>
                 </div>
             )}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", marginBottom: "0.2rem", flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 700, fontSize: "0.93rem", color: "#0F1419" }}>{item.authorName}</span>
+            <div className="conseil-card-head">
+                <div className="conseil-card-head__author">
+                    <span className="conseil-card-head__name">{item.authorName}</span>
                     <IcVerified />
                     <span style={{ color: "#71767B", fontSize: "0.84rem" }}>·</span>
-                    <span style={{ color: "#71767B", fontSize: "0.84rem", whiteSpace: "nowrap" }}>{formatDateFR(item.createdAt)}</span>
+                    <span className="conseil-card-head__date">{formatDateFR(item.createdAt)}</span>
                 </div>
                 <StatusBadge status={item.status} />
             </div>
-            {item.title && (
-                <p style={{ fontWeight: 700, fontSize: "1rem", color: "#0F1419", marginBottom: "0.35rem", lineHeight: 1.4 }}>{item.title}</p>
-            )}
-            <p style={{ fontSize: "0.93rem", lineHeight: 1.65, color: "#0F1419", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: "0 0 0.5rem 0" }}>{displayBody}</p>
-            {needsTrunc && (
-                <button type="button" onClick={() => setExpanded((p) => !p)} style={{ fontSize: "0.82rem", color: "#1D9BF0", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit", fontWeight: 500 }}>
-                    {expanded ? "Voir moins" : "Lire la suite"}
-                </button>
-            )}
+            <ConseilFeedCardText
+                item={item}
+                expanded={expanded}
+                onToggleExpand={() => setExpanded((p) => !p)}
+                preferFullBody
+            />
             {item.imageUrl && (
                 <div style={{ marginTop: "0.85rem", borderRadius: "16px", overflow: "hidden", border: "1px solid #EFF3F4" }}>
                     <img src={item.imageUrl} alt={item.title || "Image"} style={{ width: "100%", maxHeight: "260px", objectFit: "cover", display: "block" }} onError={(e) => { e.target.parentElement.style.display = "none"; }} />
@@ -133,225 +99,13 @@ function AdminConseilCard({ item, onDetail, onEdit, onValidate, onOpenReject, on
     );
 }
 
-// ─── Badge statut ──────────────────────────────────────────────────────────────
-
-function StatusBadge({ status }) {
-    const s = STATUS_COLORS[status] || { bg: "#E6EDEE", color: "#556" };
-    return (
-        <span className="db-badge" style={{ background: s.bg, color: s.color, flexShrink: 0 }}>
-            {STATUS_LABELS[status] || status}
-        </span>
-    );
-}
-
-// ─── Formulaire pleine-page ────────────────────────────────────────────────────
-
-function ConseilForm({ editingItem, formState, setFormState, onSubmit, onCancel, isSaving, localError }) {
-    const fileRef = useRef();
-    const set = (key) => (e) => setFormState((p) => ({ ...p, [key]: e.target.value }));
-
-    const handleFileDrop = (file) => {
-        if (!file || !file.type.startsWith("image/")) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => setFormState((p) => ({ ...p, imageUrl: ev.target.result }));
-        reader.readAsDataURL(file);
-    };
-
-    return (
-        <div style={S.container}>
-            <div style={{ marginBottom: "2rem" }}>
-                <button type="button" onClick={onCancel} style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.88rem", marginBottom: "1.25rem", padding: 0 }}>
-                    <IconChevronLeft /> Retour
-                </button>
-                <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>Conseils</span>
-                <h1 style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800 }}>
-                    {editingItem ? "Modifier le conseil" : "Créer un conseil"}
-                </h1>
-            </div>
-            <form onSubmit={onSubmit}>
-                <div style={S.grid}>
-                    {/* Colonne principale */}
-                    <div>
-                        <div style={S.card}>
-                            <h2 style={S.sectionTitle}>Contenu</h2>
-                            <label style={S.label}>
-                                Titre *
-                                <input type="text" value={formState.title} onChange={set("title")} style={S.input} required placeholder="Ex. Comment trier les matériaux en bois…" />
-                            </label>
-                            <label style={S.label}>
-                                Contenu *
-                                <textarea value={formState.body} onChange={set("body")} style={S.textarea} required placeholder="Rédigez le conseil…" />
-                            </label>
-                        </div>
-
-                        <div style={S.card}>
-                            <h2 style={S.sectionTitle}>Image de couverture</h2>
-                            {formState.imageUrl ? (
-                                <div style={{ position: "relative", borderRadius: "16px", overflow: "hidden", marginBottom: "0.75rem" }}>
-                                    <img src={formState.imageUrl} alt="Aperçu" style={{ width: "100%", maxHeight: "220px", objectFit: "cover", display: "block" }} />
-                                    <button type="button" onClick={() => setFormState((p) => ({ ...p, imageUrl: "" }))} style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "1rem" }}>×</button>
-                                </div>
-                            ) : (
-                                <div style={S.photoBox} onClick={() => fileRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFileDrop(e.dataTransfer.files[0]); }}>
-                                    <IconCamera />
-                                    <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>Cliquer ou glisser une image</span>
-                                    <span style={{ fontSize: "0.78rem" }}>JPG, PNG, WEBP</span>
-                                </div>
-                            )}
-                            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileDrop(e.target.files[0])} />
-                            <div style={{ marginTop: "0.75rem" }}>
-                                <label style={{ ...S.label, fontSize: "0.78rem" }}>
-                                    URL externe (facultatif)
-                                    <input type="url" value={formState.imageUrl} onChange={set("imageUrl")} style={{ ...S.input, fontSize: "0.82rem" }} placeholder="https://…" />
-                                </label>
-                            </div>
-                        </div>
-
-                        {localError && <div style={S.errorBox}>{localError}</div>}
-                    </div>
-
-                    {/* Colonne latérale */}
-                    <div style={{ position: "sticky", top: "1rem" }}>
-                        <div style={S.card}>
-                            <h2 style={S.sectionTitle}>Publication</h2>
-                            <label style={{ ...S.label, marginBottom: "1rem" }}>
-                                Statut
-                                <select value={formState.status} onChange={set("status")} style={S.select}>
-                                    <option value="brouillon">Brouillon</option>
-                                    <option value="en_attente">En attente</option>
-                                    <option value="publie">Publié</option>
-                                    <option value="archive">Archivé</option>
-                                </select>
-                            </label>
-                            <button type="submit" disabled={isSaving} style={S.btnPrimary}>
-                                {isSaving ? "Enregistrement…" : editingItem ? "Mettre à jour" : "Créer le conseil"}
-                            </button>
-                            <button type="button" onClick={onCancel} style={S.btnSecondary}>Annuler</button>
-                        </div>
-                        <div style={{ ...S.card, background: "#E5FFBC", marginTop: 0 }}>
-                            <p style={{ fontSize: "0.83rem", color: "#166534", margin: 0, lineHeight: 1.55 }}>
-                                En tant qu'admin, vous pouvez publier directement un conseil sans validation.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </form>
-        </div>
-    );
-}
-
-// ─── Vue détail ────────────────────────────────────────────────────────────────
-
-function ConseilDetailView({ item, onBack, onEdit, onDelete, onValidate, onOpenReject }) {
-    return (
-        <div style={S.container}>
-            <div style={{ marginBottom: "2rem" }}>
-                <button type="button" onClick={onBack} style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.88rem", marginBottom: "1.25rem", padding: 0 }}>
-                    <IconChevronLeft /> Retour
-                </button>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-                    <div>
-                        <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>Conseils</span>
-                        <h1 style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            {item.isPinned && <span title="Conseil épinglé" style={{ color: "#A56A2A" }}><IconPin /></span>}
-                            {item.title}
-                        </h1>
-                    </div>
-                    <StatusBadge status={item.status} />
-                </div>
-            </div>
-
-            <div style={S.grid}>
-                <div>
-                    {item.imageUrl && (
-                        <div style={{ borderRadius: "24px", overflow: "hidden", marginBottom: "1.5rem" }}>
-                            <img src={item.imageUrl} alt={item.title} style={{ width: "100%", maxHeight: "320px", objectFit: "cover", display: "block" }} />
-                        </div>
-                    )}
-                    <div style={{ ...S.card }}>
-                        <p style={{ fontSize: "0.95rem", lineHeight: 1.75, whiteSpace: "pre-wrap", margin: 0 }}>{item.body}</p>
-                    </div>
-                    {item.status === "brouillon" && item.rejectionComment && (
-                        <div style={{ ...S.card, background: "#FDE8E8", border: "1px solid #f5c6c6" }}>
-                            <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "#B24A4A", margin: "0 0 0.35rem 0" }}>Motif de refus</p>
-                            <p style={{ fontSize: "0.88rem", color: "#B24A4A", margin: 0, lineHeight: 1.6 }}>{item.rejectionComment}</p>
-                        </div>
-                    )}
-                </div>
-
-                {/* Sidebar métadonnées + actions */}
-                <div style={{ position: "sticky", top: "1rem" }}>
-                    <div style={S.card}>
-                        <h3 style={{ fontSize: "0.9rem", fontWeight: 700, marginBottom: "1rem" }}>Informations</h3>
-                        <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.84rem" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--text-muted)" }}>Auteur</span>
-                                <span style={{ fontWeight: 600 }}>{item.authorName}</span>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <span style={{ color: "var(--text-muted)" }}>Statut</span>
-                                <StatusBadge status={item.status} />
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--text-muted)" }}>Créé le</span>
-                                <span>{formatDateFR(item.createdAt)}</span>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--text-muted)" }}>Modifié le</span>
-                                <span>{formatDateFR(item.updatedAt)}</span>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--text-muted)" }}>J&apos;aime</span>
-                                <span style={{ fontWeight: 600 }}>{item.likeCount ?? 0}</span>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--text-muted)" }}>Favoris</span>
-                                <span style={{ fontWeight: 600 }}>{item.favoriteCount ?? 0}</span>
-                            </div>
-                            {item.isPinned && (
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.25rem", padding: "0.45rem 0.65rem", borderRadius: "10px", background: "#FFF8EC", border: "1px solid #f3d9a0" }}>
-                                    <IconPin />
-                                    <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#A56A2A" }}>Conseil épinglé du jour</span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div style={{ ...S.card, display: "grid", gap: "0.5rem" }}>
-                        <h3 style={{ fontSize: "0.9rem", fontWeight: 700, marginBottom: "0.5rem", marginTop: 0 }}>Actions rapides</h3>
-                        <button type="button" onClick={onEdit} className="action-cta task-action-btn" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem" }}>
-                            <IconPencil /> Modifier
-                        </button>
-                        {item.status === "en_attente" && (
-                            <>
-                                <button type="button" onClick={() => onValidate(item)} className="action-cta task-action-btn" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem", background: "#E5FFBC", color: "#2E7D32" }}>
-                                    <IconCheck /> Valider
-                                </button>
-                                <button type="button" onClick={() => onOpenReject(item)} className="action-cta" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem", background: "#FDE8E8", color: "#B24A4A" }}>
-                                    <IconX /> Refuser
-                                </button>
-                            </>
-                        )}
-                        <button type="button" onClick={() => onDelete(item)} className="action-cta" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem", background: "#FDE8E8", color: "#B24A4A" }}>
-                            <IconTrash /> Supprimer
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
 // ─── Vue principale ────────────────────────────────────────────────────────────
 
-export default function ConseilsAdminView({ items = [], loading, errorMessage, filterPending, onReload, onCreate, onUpdate, onDelete, onValidate, onReject }) {
-    const [view, setView] = useState("list"); // "list" | "form" | "detail"
-    const [editingItem, setEditingItem] = useState(null);
-    const [detailItem, setDetailItem] = useState(null);
-    const [formState, setFormState] = useState(EMPTY_FORM);
-    const [isSaving, setIsSaving] = useState(false);
-    const [localError, setLocalError] = useState("");
+export default function ConseilsAdminView({ items = [], loading, errorMessage, filterPending, onReload, onDelete, onValidate, onReject }) {
+    const router = useRouter();
+    const listBack = filterPending ? CONSEIL_LIST_PENDING : CONSEIL_LIST_ALL;
     const [query, setQuery] = useState("");
+    const [listFilters, setListFilters] = useState({ category: "", difficulty: "", material: "", audience: "" });
 
     // Modal refus
     const [rejectOpen, setRejectOpen] = useState(false);
@@ -373,44 +127,19 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
-    const resetForm = () => { setEditingItem(null); setFormState(EMPTY_FORM); setLocalError(""); };
+    const openCreate = () => router.push("/conseils/nouveau");
 
-    const openCreate = () => { resetForm(); setView("form"); };
+    const openEdit = (item) => router.push(`/conseils/modifier/${item.id}`);
 
-    const openEdit = (item) => {
-        setEditingItem(item);
-        setFormState({ title: item.title || "", body: item.body || "", status: item.status || "brouillon", imageUrl: item.imageUrl || "" });
-        setLocalError("");
-        setView("form");
-    };
-
-    const openDetail = (item) => { setDetailItem(item); setView("detail"); };
-
-    const handleFormSubmit = async (e) => {
-        e.preventDefault();
-        setLocalError("");
-        if (!formState.title.trim()) { setLocalError("Le titre est requis."); return; }
-        if (!formState.body.trim()) { setLocalError("Le contenu est requis."); return; }
-        setIsSaving(true);
-        try {
-            const payload = { title: formState.title.trim(), body: formState.body.trim(), status: formState.status, imageUrl: formState.imageUrl.trim(), type: "conseil" };
-            if (editingItem) { await onUpdate(editingItem.id, payload); } else { await onCreate(payload); }
-            setView("list");
-            resetForm();
-        } catch (err) {
-            setLocalError(String(err?.message || "Une erreur est survenue."));
-        } finally {
-            setIsSaving(false);
-        }
-    };
+    const openDetail = (item) => router.push(conseilDetailHref(item.id, listBack));
 
     const handleDelete = async (item) => {
         if (!window.confirm(`Supprimer le conseil "${item.title}" ?`)) return;
-        try { await onDelete(item.id); setView("list"); } catch (err) { window.alert(String(err?.message || "Impossible de supprimer.")); }
+        try { await onDelete(item.id); } catch (err) { window.alert(String(err?.message || "Impossible de supprimer.")); }
     };
 
     const handleValidate = async (item) => {
-        try { await onValidate(item.id); if (view === "detail") setView("list"); } catch (err) { window.alert(String(err?.message || "Erreur lors de la validation.")); }
+        try { await onValidate(item.id); } catch (err) { window.alert(String(err?.message || "Erreur lors de la validation.")); }
     };
 
     const openRejectModal = (item) => { setRejectTarget(item); setRejectComment(""); setRejectError(""); setRejectOpen(true); };
@@ -423,7 +152,6 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
         try {
             await onReject(rejectTarget.id, rejectComment.trim());
             setRejectOpen(false);
-            if (view === "detail") setView("list");
         } catch (err) {
             setRejectError(String(err?.message || "Erreur lors du refus."));
         } finally {
@@ -431,57 +159,11 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
         }
     };
 
-    // ── Vue formulaire ───────────────────────────────────────────────────────────
-
-    if (view === "form") {
-        return (
-            <ConseilForm
-                editingItem={editingItem}
-                formState={formState}
-                setFormState={setFormState}
-                onSubmit={handleFormSubmit}
-                onCancel={() => { setView("list"); resetForm(); }}
-                isSaving={isSaving}
-                localError={localError}
-            />
-        );
-    }
-
-    // ── Vue détail ───────────────────────────────────────────────────────────────
-
-    if (view === "detail" && detailItem) {
-        // Récupérer la version à jour depuis la liste (après reload)
-        const freshItem = items.find((i) => i.id === detailItem.id) || detailItem;
-        return (
-            <>
-                <ConseilDetailView
-                    item={freshItem}
-                    onBack={() => setView("list")}
-                    onEdit={() => openEdit(freshItem)}
-                    onDelete={handleDelete}
-                    onValidate={handleValidate}
-                    onOpenReject={openRejectModal}
-                />
-                <RejectModal
-                    open={rejectOpen}
-                    comment={rejectComment}
-                    setComment={setRejectComment}
-                    saving={rejectSaving}
-                    error={rejectError}
-                    onSubmit={handleRejectSubmit}
-                    onClose={() => setRejectOpen(false)}
-                />
-            </>
-        );
-    }
-
-    // ── Vue liste ────────────────────────────────────────────────────────────────
-
     return (
         <>
             <style>{`
                 @keyframes cardIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-                .x-card { background:#fff; border:1px solid #EFF3F4; border-radius:20px; padding:1.1rem 1.25rem 0.7rem; box-shadow:0 1px 8px rgba(0,0,0,0.06); transition:box-shadow 0.18s; animation:cardIn 0.22s ease both; }
+                .x-card { background:#fff; border:1px solid #EFF3F4; border-radius:20px; padding:1.2rem 1.35rem 0.85rem; box-shadow:0 1px 8px rgba(0,0,0,0.06); transition:box-shadow 0.18s; animation:cardIn 0.22s ease both; }
                 .x-card:hover { box-shadow:0 4px 18px rgba(0,0,0,0.10); }
             `}</style>
             {/* En-tête */}
@@ -507,15 +189,18 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
 
             {/* Barre d'outils */}
             <div className="panel" style={{ marginBottom: "1rem" }}>
-                <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap", alignItems: "center" }}>
+                <div className="conseil-toolbar">
                     <input
                         type="text"
+                        className="conseil-filter-input"
                         placeholder="Rechercher par titre ou auteur…"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        style={{ flex: "1 1 220px", minWidth: 0, padding: "0.65rem 1.1rem", borderRadius: "999px", border: "none", background: "var(--surface-hover)", fontSize: "0.88rem", outline: "none" }}
                     />
-                    <button className="action-cta task-action-btn" type="button" onClick={onReload}>Actualiser</button>
+                    {!filterPending && (
+                        <ConseilFilterFields filters={listFilters} onChange={setListFilters} />
+                    )}
+                    <button className="action-cta task-action-btn" type="button" onClick={() => onReload(listFilters)}>Actualiser</button>
                     {!filterPending && (
                         <button className="action-cta task-action-btn" type="button" onClick={openCreate}>+ Créer un conseil</button>
                     )}
@@ -554,7 +239,7 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
             )}
 
             {/* Modal refus */}
-            <RejectModal
+            <ConseilRejectModal
                 open={rejectOpen}
                 comment={rejectComment}
                 setComment={setRejectComment}
@@ -567,40 +252,9 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
     );
 }
 
-// ─── Bouton icône partagé ─────────────────────────────────────────────────────
-
 const btnIcon = {
     display: "inline-flex", alignItems: "center", justifyContent: "center",
     width: "30px", height: "30px", borderRadius: "50%",
     border: "none", background: "#e8ecee", color: "var(--text-main)",
     cursor: "pointer", flexShrink: 0,
 };
-
-// ─── Modal refus ───────────────────────────────────────────────────────────────
-
-function RejectModal({ open, comment, setComment, saving, error, onSubmit, onClose }) {
-    return (
-        <AdminModal open={open} title="Refuser le conseil" onClose={onClose}>
-            <form onSubmit={onSubmit} style={{ display: "grid", gap: "0.75rem" }}>
-                <label style={{ display: "grid", gap: "0.35rem", fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 500 }}>
-                    Motif de refus *
-                    <textarea
-                        rows={4}
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="Expliquez pourquoi ce conseil est refusé…"
-                        style={{ padding: "0.7rem 0.85rem", borderRadius: "14px", border: "none", background: "#EAF0F1", fontSize: "0.9rem", outline: "none", resize: "vertical", fontFamily: "inherit" }}
-                        required
-                    />
-                </label>
-                {error && <p style={{ color: "#B24A4A", fontSize: "0.82rem", margin: 0 }}>{error}</p>}
-                <div style={{ display: "flex", gap: "0.6rem" }}>
-                    <button className="action-cta" type="submit" disabled={saving} style={{ background: "#FDE8E8", color: "#B24A4A" }}>
-                        {saving ? "Refus en cours…" : "Confirmer le refus"}
-                    </button>
-                    <button className="action-cta" type="button" onClick={onClose} style={{ background: "#e8ecee", color: "var(--text-main)" }}>Annuler</button>
-                </div>
-            </form>
-        </AdminModal>
-    );
-}

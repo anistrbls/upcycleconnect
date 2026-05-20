@@ -1,9 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Tag, Plus, Pencil, Trash2, Check, X, GripVertical, Package, Shield, Layers, Loader2, MapPin, QrCode } from "lucide-react";
+import { Tag, Plus, Pencil, Trash2, Check, X, GripVertical, Package, Shield, Layers, Loader2, MapPin, QrCode, Lightbulb } from "lucide-react";
 import AdminModal from "../../../components/admin/AdminModal";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import {
+    loadDismissedConseilMaterialSuggestions,
+    dismissConseilMaterialSuggestion,
+    filterVisibleConseilMaterialSuggestions,
+} from "../../../lib/materialConseilSuggestions";
 
 // Les entités n'utilisent plus de slug. Le label fait foi.
 
@@ -151,6 +156,54 @@ function ConditionRow({ cond, onSave, onDelete }) {
     );
 }
 
+function MaterialConseilSuggestionRow({ label, onAccept, onDismiss, accepting }) {
+    return (
+        <div style={{
+            ...rowStyle,
+            background: "rgba(229, 255, 188, 0.35)",
+            border: "1px solid rgba(46, 125, 50, 0.25)",
+            flexWrap: "wrap",
+        }}>
+            <span style={{ flex: "1 1 200px", fontSize: "0.88rem", lineHeight: 1.45 }}>
+                Le matériau « <strong style={{ color: "var(--text-main)" }}>{label}</strong> » a été saisi dans un conseil mais n&apos;est pas dans cette liste.
+                L&apos;ajouter ici pour qu&apos;il soit proposé dans les futurs formulaires de conseils ?
+            </span>
+            <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0 }}>
+                <button
+                    type="button"
+                    onClick={() => onAccept(label)}
+                    disabled={accepting}
+                    style={{
+                        ...iconBtn,
+                        width: "auto",
+                        padding: "0.4rem 0.85rem",
+                        background: "var(--forest-deep)",
+                        color: "white",
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                    }}
+                >
+                    {accepting ? <Loader2 size={14} style={spinStyle} /> : "Oui"}
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onDismiss(label)}
+                    disabled={accepting}
+                    style={{
+                        ...iconBtn,
+                        width: "auto",
+                        padding: "0.4rem 0.85rem",
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                    }}
+                >
+                    Non
+                </button>
+            </div>
+        </div>
+    );
+}
+
 function MaterialRow({ material, onSave, onDelete }) {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState({
@@ -234,6 +287,9 @@ function ConfigSection({ icon: Icon, title, description, count, loading, childre
                 <Icon size={18} strokeWidth={2} style={{ color: "var(--forest-deep)" }} />
                 <h2 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-main)" }}>{title}</h2>
             </div>
+            {description && (
+                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 0.5rem 0", lineHeight: 1.4 }}>{description}</p>
+            )}
             <div style={{ background: "var(--surface-hover)", borderRadius: "24px", padding: "1.5rem", flex: 1, display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
                     <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
@@ -386,6 +442,9 @@ export default function ConfigurationPage() {
     const [addMatModal, setAddMatModal] = useState(false);
     const [newMat, setNewMat] = useState({ label: "", impactCoefficient: "1" });
     const [addingMat, setAddingMat] = useState(false);
+    const [conseilMaterialSuggestions, setConseilMaterialSuggestions] = useState([]);
+    const [dismissedMaterialSuggestions, setDismissedMaterialSuggestions] = useState(new Set());
+    const [acceptingMaterialSuggestion, setAcceptingMaterialSuggestion] = useState("");
 
     // Pays
     const [countries, setCountries] = useState([]);
@@ -401,6 +460,13 @@ export default function ConfigurationPage() {
     const [newDpType, setNewDpType] = useState({ label: "" });
     const [addingDpType, setAddingDpType] = useState(false);
 
+    // Catégories de conseils
+    const [conseilCategories, setConseilCategories] = useState([]);
+    const [conseilCatLoading, setConseilCatLoading] = useState(true);
+    const [addConseilCatModal, setAddConseilCatModal] = useState(false);
+    const [newConseilCat, setNewConseilCat] = useState({ label: "" });
+    const [addingConseilCat, setAddingConseilCat] = useState(false);
+
     // Motifs de moderation
     const [moderationReasons, setModerationReasons] = useState([]);
     const [reasonLoading, setReasonLoading] = useState(true);
@@ -411,6 +477,15 @@ export default function ConfigurationPage() {
     const [toast, setToast] = useState(null);
 
     const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
+
+    useEffect(() => {
+        setDismissedMaterialSuggestions(loadDismissedConseilMaterialSuggestions());
+    }, []);
+
+    const visibleMaterialSuggestions = filterVisibleConseilMaterialSuggestions(
+        conseilMaterialSuggestions,
+        dismissedMaterialSuggestions
+    );
 
     // ── Fetch catégories
     const fetchCategories = useCallback(async () => {
@@ -444,6 +519,7 @@ export default function ConfigurationPage() {
             if (!res.ok) throw new Error();
             const data = await res.json();
             setMaterials(data.items || []);
+            setConseilMaterialSuggestions(data.conseilSuggestions || []);
         } catch { showToast("Impossible de charger les matériaux.", "error"); }
         finally { setMatLoading(false); }
     }, []);
@@ -472,6 +548,18 @@ export default function ConfigurationPage() {
         finally { setDpTypeLoading(false); }
     }, []);
 
+    // ── Fetch catégories de conseils
+    const fetchConseilCategories = useCallback(async () => {
+        setConseilCatLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/conseil-categories"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setConseilCategories(data.items || []);
+        } catch { showToast("Impossible de charger les catégories de conseils.", "error"); }
+        finally { setConseilCatLoading(false); }
+    }, []);
+
     // ── Fetch motifs de moderation
     const fetchModerationReasons = useCallback(async () => {
         setReasonLoading(true);
@@ -484,7 +572,28 @@ export default function ConfigurationPage() {
         finally { setReasonLoading(false); }
     }, []);
 
-    useEffect(() => { fetchCategories(); fetchConditions(); fetchMaterials(); fetchCountries(); fetchDpTypes(); fetchModerationReasons(); }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries, fetchDpTypes, fetchModerationReasons]);
+    useEffect(() => {
+        fetchCategories();
+        fetchConditions();
+        fetchMaterials();
+        fetchCountries();
+        fetchDpTypes();
+        fetchConseilCategories();
+        fetchModerationReasons();
+    }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries, fetchDpTypes, fetchConseilCategories, fetchModerationReasons]);
+
+    // Recharger les suggestions après publication d'un conseil (autre onglet / retour sur la page).
+    useEffect(() => {
+        const refreshMaterials = () => {
+            if (document.visibilityState === "visible") fetchMaterials();
+        };
+        document.addEventListener("visibilitychange", refreshMaterials);
+        window.addEventListener("focus", refreshMaterials);
+        return () => {
+            document.removeEventListener("visibilitychange", refreshMaterials);
+            window.removeEventListener("focus", refreshMaterials);
+        };
+    }, [fetchMaterials]);
 
     // ── CRUD catégories
     const handleSaveCat = async (updated) => {
@@ -571,6 +680,33 @@ export default function ConfigurationPage() {
             showToast("Matériau supprimé.");
         } catch { showToast("Impossible de supprimer.", "error"); }
     };
+    const handleDismissMaterialSuggestion = (label) => {
+        dismissConseilMaterialSuggestion(label);
+        setDismissedMaterialSuggestions(loadDismissedConseilMaterialSuggestions());
+    };
+
+    const handleAcceptMaterialSuggestion = async (label) => {
+        setAcceptingMaterialSuggestion(label);
+        try {
+            const res = await fetch(apiUrl("/admin/item-materials"), {
+                method: "POST",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ label: label.trim(), impactCoefficient: 1 }),
+            });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setMaterials(prev => [...prev, created]);
+            const key = materialSuggestionKey(label);
+            setConseilMaterialSuggestions(prev => prev.filter(l => materialSuggestionKey(l) !== key));
+            showToast(`« ${label} » ajouté au référentiel.`);
+        } catch (e) {
+            showToast(e.message === "material label already exists" ? "Libellé déjà présent." : "Impossible d'ajouter.", "error");
+            await fetchMaterials();
+        } finally {
+            setAcceptingMaterialSuggestion("");
+        }
+    };
+
     const handleAddMat = async () => {
         if (!newMat.label.trim()) return;
         const parsed = Number.parseFloat(String(newMat.impactCoefficient).replace(",", "."));
@@ -658,6 +794,48 @@ export default function ConfigurationPage() {
         finally { setAddingDpType(false); }
     };
 
+    // ── CRUD catégories de conseils
+    const handleSaveConseilCat = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/conseil-categories/${updated.id}`), {
+                method: "PUT",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ label: updated.label }),
+            });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setConseilCategories(prev => prev.map(c => c.id === saved.id ? { ...c, ...saved } : c));
+            showToast("Catégorie de conseil mise à jour.");
+        } catch (e) { showToast(e.message || "Erreur de mise à jour.", "error"); }
+    };
+    const handleDeleteConseilCat = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/conseil-categories/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            setConseilCategories(prev => prev.filter(c => c.id !== id));
+            showToast("Catégorie de conseil supprimée.");
+        } catch { showToast("Impossible de supprimer.", "error"); }
+    };
+    const handleAddConseilCat = async () => {
+        if (!newConseilCat.label.trim()) return;
+        setAddingConseilCat(true);
+        try {
+            const res = await fetch(apiUrl("/admin/conseil-categories"), {
+                method: "POST",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ label: newConseilCat.label.trim() }),
+            });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setConseilCategories(prev => [...prev, created]);
+            setNewConseilCat({ label: "" });
+            setAddConseilCatModal(false);
+            showToast("Catégorie de conseil ajoutée.");
+        } catch (e) {
+            showToast(e.message === "category label already exists" ? "Libellé déjà utilisé." : "Impossible de créer.", "error");
+        } finally { setAddingConseilCat(false); }
+    };
+
     // ── CRUD motifs de moderation
     const handleSaveReason = async (updated) => {
         try {
@@ -725,9 +903,29 @@ export default function ConfigurationPage() {
                 {/* ── Matériaux des objets ── */}
                 <ConfigSection
                     icon={Layers} title="Matériaux des objets" addLabel="Nouveau matériau"
+                    description="Liste proposée dans les formulaires de conseils. Les matériaux saisis à la main dans un conseil apparaissent ci-dessous pour ajout éventuel."
                     count={materials.length} loading={matLoading} onAdd={() => setAddMatModal(true)}
                 >
+                    {visibleMaterialSuggestions.map((label) => (
+                        <MaterialConseilSuggestionRow
+                            key={`suggestion-${label}`}
+                            label={label}
+                            onAccept={handleAcceptMaterialSuggestion}
+                            onDismiss={handleDismissMaterialSuggestion}
+                            accepting={acceptingMaterialSuggestion === label}
+                        />
+                    ))}
                     {materials.map(mat => <MaterialRow key={mat.id} material={mat} onSave={handleSaveMat} onDelete={handleDeleteMat} />)}
+                </ConfigSection>
+
+                {/* ── Catégories de conseils ── */}
+                <ConfigSection
+                    icon={Lightbulb} title="Catégories de conseils" addLabel="Nouvelle catégorie"
+                    count={conseilCategories.length} loading={conseilCatLoading} onAdd={() => setAddConseilCatModal(true)}
+                >
+                    {conseilCategories.map(cat => (
+                        <ConditionRow key={cat.id} cond={cat} onSave={handleSaveConseilCat} onDelete={handleDeleteConseilCat} />
+                    ))}
                 </ConfigSection>
 
                 {/* ── Pays supportés ── */}
@@ -794,6 +992,24 @@ export default function ConfigurationPage() {
                         <button onClick={handleAddCond} disabled={!newCond.label.trim() || addingCond}
                             style={{ border: "none", background: newCond.label.trim() ? "var(--black)" : "var(--border)", color: newCond.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newCond.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
                             {addingCond ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Modal ajout catégorie de conseil ── */}
+            <AdminModal open={addConseilCatModal} title="Nouvelle catégorie de conseil" onClose={() => { setAddConseilCatModal(false); setNewConseilCat({ label: "" }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Libellé *</label>
+                        <input autoFocus placeholder="Ex : Réparation, Tutoriel DIY…" value={newConseilCat.label} onChange={e => setNewConseilCat({ label: e.target.value })} onKeyDown={e => { if (e.key === "Enter") handleAddConseilCat(); }}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddConseilCatModal(false); setNewConseilCat({ label: "" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddConseilCat} disabled={!newConseilCat.label.trim() || addingConseilCat}
+                            style={{ border: "none", background: newConseilCat.label.trim() ? "var(--black)" : "var(--border)", color: newConseilCat.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newConseilCat.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingConseilCat ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
                         </button>
                     </div>
                 </div>

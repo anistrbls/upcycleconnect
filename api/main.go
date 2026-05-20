@@ -219,6 +219,11 @@ func main() {
 	mux.Handle("/api/admin/item-materials", authMiddleware(http.HandlerFunc(itemMaterialsAdminHandler)))
 	mux.Handle("/api/admin/item-materials/", authMiddleware(http.HandlerFunc(itemMaterialByIDAdminHandler)))
 
+	// Catégories de conseils (référentiel pédagogique)
+	mux.HandleFunc("GET /api/conseil-categories", conseilCategoriesPublicHandler)
+	mux.Handle("/api/admin/conseil-categories", authMiddleware(http.HandlerFunc(conseilCategoriesAdminHandler)))
+	mux.Handle("/api/admin/conseil-categories/", authMiddleware(http.HandlerFunc(conseilCategoryByIDAdminHandler)))
+
 	// === Item Countries ===
 	mux.HandleFunc("GET /api/item-countries", itemCountriesPublicHandler)
 	mux.Handle("/api/admin/item-countries", authMiddleware(http.HandlerFunc(itemCountriesAdminHandler)))
@@ -3259,6 +3264,9 @@ func ensureSalarieContentsSchema() error {
 	if _, err = db.Exec(`ALTER TABLE salarie_contents ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
 		return err
 	}
+	if err := ensureConseilExtendedSchema(); err != nil {
+		return err
+	}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS conseil_likes (
 		user_id    BIGINT NOT NULL,
 		content_id BIGINT NOT NULL,
@@ -3287,7 +3295,11 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rows, err := db.Query(`
-			SELECT id, user_id, type, title, body, status, rejection_comment, image_url, created_at, updated_at
+			SELECT id, user_id, type, title, body, status, rejection_comment, image_url, photos, is_pinned,
+			       category, target_audience, difficulty_level,
+			       estimated_time, estimated_time_minutes, estimated_time_value, estimated_time_unit,
+			       materials, safety_tips, summary, tags, external_url, scheduled_publish_at,
+			       created_at, updated_at
 			FROM salarie_contents
 			WHERE user_id = $1
 			ORDER BY created_at DESC
@@ -3299,20 +3311,24 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 		items := make([]map[string]interface{}, 0)
 		for rows.Next() {
-			var id, userID int64
-			var contentType, title, body, status, rejectionComment, imageURL string
-			var createdAt, updatedAt time.Time
-			if err := rows.Scan(&id, &userID, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &createdAt, &updatedAt); err != nil {
+			var row conseilContentRow
+			if err := rows.Scan(
+				&row.ID, &row.UserID, &row.ContentType, &row.Title, &row.Body, &row.Status,
+				&row.RejectionComment, &row.ImageURL, &row.PhotosJSON, &row.IsPinned,
+				&row.Category, &row.TargetAudienceJSON, &row.DifficultyLevel,
+				&row.EstimatedTime, &row.EstimatedTimeMinutes, &row.EstimatedTimeValue, &row.EstimatedTimeUnit,
+				&row.MaterialsJSON, &row.SafetyTips, &row.Summary, &row.TagsJSON, &row.ExternalURL,
+				&row.ScheduledPublishAt, &row.CreatedAt, &row.UpdatedAt,
+			); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse content")
 				return
 			}
-			items = append(items, map[string]interface{}{
-				"id": id, "userId": userID, "type": contentType, "title": title,
-				"body": body, "status": status, "rejectionComment": rejectionComment,
-				"imageUrl":  imageURL,
-				"createdAt": createdAt.UTC().Format(time.RFC3339),
-				"updatedAt": updatedAt.UTC().Format(time.RFC3339),
-			})
+			item, err := buildContentItemFromRow(row, "", 0, 0, row.ContentType == "conseil")
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not load content tools")
+				return
+			}
+			items = append(items, item)
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 
@@ -3335,11 +3351,13 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var payload struct {
-			Type     string `json:"type"`
-			Title    string `json:"title"`
-			Body     string `json:"body"`
-			Status   string `json:"status"`
-			ImageUrl string `json:"imageUrl"`
+			Type     string   `json:"type"`
+			Title    string   `json:"title"`
+			Body     string   `json:"body"`
+			Status   string   `json:"status"`
+			ImageUrl string   `json:"imageUrl"`
+			Photos   []string `json:"photos"`
+			ConseilMetaPayload
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -3353,6 +3371,10 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "title is required")
 			return
 		}
+		if strings.TrimSpace(payload.Body) == "" {
+			writeError(w, http.StatusBadRequest, "body is required")
+			return
+		}
 		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
 		if payload.Status == "" {
 			payload.Status = "brouillon"
@@ -3361,31 +3383,42 @@ func salarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid status")
 			return
 		}
+		if payload.Type == "conseil" {
+			normalizeConseilMeta(&payload.ConseilMetaPayload)
+			if err := validateConseilMeta(payload.ConseilMetaPayload, true); err != nil {
+				writeConseilValidationError(w, err)
+				return
+			}
+		}
 
-		var id int64
-		var createdAt, updatedAt time.Time
-		// Un salarié ne peut pas publier directement : force en_attente si le statut demandé est publie
 		postStatus := payload.Status
 		if postStatus == "publie" {
 			postStatus = "en_attente"
 		}
-		err := db.QueryRow(`
-			INSERT INTO salarie_contents (user_id, type, title, body, status, image_url)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			RETURNING id, created_at, updated_at
-		`, userID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), postStatus, strings.TrimSpace(payload.ImageUrl)).Scan(&id, &createdAt, &updatedAt)
+		coverURL, photosJSON := resolveConseilMedia(payload.ImageUrl, payload.Photos)
+		id, createdAt, updatedAt, err := insertSalarieContentWithMeta(
+			userID, payload.Type,
+			strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body),
+			postStatus, coverURL, photosJSON, payload.ConseilMetaPayload,
+		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create content")
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
+		resp := map[string]interface{}{
 			"id": id, "userId": userID, "type": payload.Type,
 			"title": strings.TrimSpace(payload.Title), "body": strings.TrimSpace(payload.Body),
-			"imageUrl":  strings.TrimSpace(payload.ImageUrl),
-			"status":    postStatus,
+			"imageUrl": coverURL, "photos": parseStringArrayJSON(photosJSON), "status": postStatus,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
-		})
+		}
+		if payload.Type == "conseil" {
+			for k, v := range conseilMetaToMap(conseilContentRowFromMeta(payload.ConseilMetaPayload), nil) {
+				resp[k] = v
+			}
+			resp["tools"] = payload.Tools
+		}
+		writeJSON(w, http.StatusCreated, resp)
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -3405,12 +3438,26 @@ func salarieContentsFeedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	favoritesOnly := r.URL.Query().Get("favorites") == "true"
+	callerRole := ""
+	if claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims); ok {
+		callerRole, _ = claims["role"].(string)
+	}
+	filterExtra, filterArgs := buildConseilFilterClause(map[string]string{
+		"category":   r.URL.Query().Get("category"),
+		"difficulty": r.URL.Query().Get("difficulty"),
+		"material":   r.URL.Query().Get("material"),
+		"audience":   r.URL.Query().Get("audience"),
+	}, 2)
+	scheduledClause := feedScheduledClause()
+	audienceClause := conseilFeedAudienceClause(callerRole)
 
 	var query string
 	var args []interface{}
+	metaCols := `sc.summary, sc.category, sc.difficulty_level, sc.estimated_time, sc.estimated_time_minutes, sc.estimated_time_value, sc.estimated_time_unit, sc.target_audience, sc.tags, sc.materials`
 	if favoritesOnly && callerUserID != 0 {
 		query = `
 			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.title, sc.body, sc.image_url, sc.is_pinned, sc.created_at,
+			       ` + metaCols + `,
 			       (SELECT COUNT(*) FROM conseil_likes cl WHERE cl.content_id = sc.id) AS like_count,
 			       (SELECT COUNT(*) FROM conseil_favorites cf WHERE cf.content_id = sc.id) AS favorite_count,
 			       EXISTS(SELECT 1 FROM conseil_likes cl2 WHERE cl2.content_id = sc.id AND cl2.user_id = $1) AS liked_by_me,
@@ -3418,23 +3465,24 @@ func salarieContentsFeedHandler(w http.ResponseWriter, r *http.Request) {
 			FROM salarie_contents sc
 			JOIN users u ON u.id = sc.user_id
 			JOIN conseil_favorites fav ON fav.content_id = sc.id AND fav.user_id = $1
-			WHERE sc.type = 'conseil' AND sc.status = 'publie'
+			WHERE sc.type = 'conseil' AND sc.status = 'publie'` + scheduledClause + audienceClause + filterExtra + `
 			ORDER BY sc.is_pinned DESC, sc.created_at DESC
 		`
-		args = []interface{}{callerUserID}
+		args = append([]interface{}{callerUserID}, filterArgs...)
 	} else {
 		query = `
 			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.title, sc.body, sc.image_url, sc.is_pinned, sc.created_at,
+			       ` + metaCols + `,
 			       (SELECT COUNT(*) FROM conseil_likes cl WHERE cl.content_id = sc.id) AS like_count,
 			       (SELECT COUNT(*) FROM conseil_favorites cf WHERE cf.content_id = sc.id) AS favorite_count,
 			       COALESCE((SELECT TRUE FROM conseil_likes cl2 WHERE cl2.content_id = sc.id AND cl2.user_id = $1), FALSE) AS liked_by_me,
 			       COALESCE((SELECT TRUE FROM conseil_favorites cf2 WHERE cf2.content_id = sc.id AND cf2.user_id = $1), FALSE) AS favorited_by_me
 			FROM salarie_contents sc
 			JOIN users u ON u.id = sc.user_id
-			WHERE sc.type = 'conseil' AND sc.status = 'publie'
+			WHERE sc.type = 'conseil' AND sc.status = 'publie'` + scheduledClause + audienceClause + filterExtra + `
 			ORDER BY sc.is_pinned DESC, sc.created_at DESC
 		`
-		args = []interface{}{callerUserID}
+		args = append([]interface{}{callerUserID}, filterArgs...)
 	}
 
 	rows, err := db.Query(query, args...)
@@ -3447,29 +3495,51 @@ func salarieContentsFeedHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, userID int64
 		var firstname, lastname, title, body, imageURL string
+		var summary, category, difficultyLevel, estimatedTime, estimatedTimeUnit string
+		var estimatedTimeMinutes int64
+		var estimatedTimeValue float64
+		var targetAudienceJSON, tagsJSON, materialsJSON string
 		var isPinned, likedByMe, favoritedByMe bool
 		var likeCount, favoriteCount int64
 		var createdAt time.Time
 		if err := rows.Scan(&id, &userID, &firstname, &lastname, &title, &body, &imageURL, &isPinned, &createdAt,
+			&summary, &category, &difficultyLevel, &estimatedTime, &estimatedTimeMinutes, &estimatedTimeValue, &estimatedTimeUnit,
+			&targetAudienceJSON, &tagsJSON, &materialsJSON,
 			&likeCount, &favoriteCount, &likedByMe, &favoritedByMe); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not parse feed item")
 			return
 		}
-		items = append(items, map[string]interface{}{
-			"id":            id,
-			"userId":        userID,
-			"authorName":    strings.TrimSpace(firstname + " " + lastname),
-			"title":         title,
-			"body":          body,
-			"imageUrl":      imageURL,
-			"isPinned":      isPinned,
-			"isOwn":         userID == callerUserID,
-			"likeCount":     likeCount,
-			"favoriteCount": favoriteCount,
-			"likedByMe":     likedByMe,
-			"favoritedByMe": favoritedByMe,
-			"createdAt":     createdAt.UTC().Format(time.RFC3339),
+		displayBody := body
+		if strings.TrimSpace(summary) != "" {
+			displayBody = summary
+		}
+		feedItem := map[string]interface{}{
+			"id":              id,
+			"userId":          userID,
+			"authorName":      strings.TrimSpace(firstname + " " + lastname),
+			"title":           title,
+			"body":            body,
+			"summary":         summary,
+			"displayBody":     displayBody,
+			"imageUrl":        imageURL,
+			"category":        category,
+			"difficultyLevel": difficultyLevel,
+			"targetAudience":  parseStringArrayJSON(targetAudienceJSON),
+			"tags":            parseStringArrayJSON(tagsJSON),
+			"materials":       parseStringArrayJSON(materialsJSON),
+			"isPinned":        isPinned,
+			"isOwn":           userID == callerUserID,
+			"likeCount":       likeCount,
+			"favoriteCount":   favoriteCount,
+			"likedByMe":       likedByMe,
+			"favoritedByMe":   favoritedByMe,
+			"createdAt":       createdAt.UTC().Format(time.RFC3339),
+		}
+		appendEstimatedTimeToMap(feedItem, conseilContentRow{
+			EstimatedTime: estimatedTime, EstimatedTimeMinutes: estimatedTimeMinutes,
+			EstimatedTimeValue: estimatedTimeValue, EstimatedTimeUnit: estimatedTimeUnit,
 		})
+		items = append(items, feedItem)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 }
@@ -3548,16 +3618,87 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
+	case http.MethodGet:
+		var row conseilContentRow
+		var firstname, lastname string
+		err := db.QueryRow(`
+			SELECT sc.id, sc.user_id, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.photos, sc.is_pinned,
+			       sc.category, sc.target_audience, sc.difficulty_level,
+			       sc.estimated_time, sc.estimated_time_minutes, sc.estimated_time_value, sc.estimated_time_unit,
+			       sc.materials, sc.safety_tips, sc.summary, sc.tags, sc.external_url, sc.scheduled_publish_at,
+			       sc.created_at, sc.updated_at,
+			       u.firstname, u.lastname
+			FROM salarie_contents sc
+			JOIN users u ON u.id = sc.user_id
+			WHERE sc.id = $1
+		`, id).Scan(
+			&row.ID, &row.UserID, &row.ContentType, &row.Title, &row.Body, &row.Status,
+			&row.RejectionComment, &row.ImageURL, &row.PhotosJSON, &row.IsPinned,
+			&row.Category, &row.TargetAudienceJSON, &row.DifficultyLevel,
+			&row.EstimatedTime, &row.EstimatedTimeMinutes, &row.EstimatedTimeValue, &row.EstimatedTimeUnit,
+			&row.MaterialsJSON, &row.SafetyTips, &row.Summary, &row.TagsJSON, &row.ExternalURL,
+			&row.ScheduledPublishAt, &row.CreatedAt, &row.UpdatedAt,
+			&firstname, &lastname,
+		)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not fetch content")
+			return
+		}
+		putClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+		putRole, _ := putClaims["role"].(string)
+		email, _ := putClaims["sub"].(string)
+		var callerID int64
+		db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&callerID)
+
+		if row.ContentType == "conseil" && row.Status != "publie" {
+			if callerID != row.UserID && putRole != "admin" && putRole != "salarie" {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+		}
+		if row.ContentType == "conseil" && row.Status == "publie" {
+			if row.ScheduledPublishAt.Valid && row.ScheduledPublishAt.Time.After(time.Now().UTC()) {
+				if callerID != row.UserID {
+					writeError(w, http.StatusNotFound, "content not found")
+					return
+				}
+			}
+			if callerID != row.UserID && !conseilVisibleForRole(row.TargetAudienceJSON, putRole) {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+		}
+		item, err := buildContentItemFromRow(row, strings.TrimSpace(firstname+" "+lastname), 0, 0, row.ContentType == "conseil")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load content")
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
+
 	case http.MethodPut:
 		var payload struct {
-			Title    string `json:"title"`
-			Body     string `json:"body"`
-			Status   string `json:"status"`
-			Type     string `json:"type"`
-			ImageUrl string `json:"imageUrl"`
+			Title    string   `json:"title"`
+			Body     string   `json:"body"`
+			Status   string   `json:"status"`
+			Type     string   `json:"type"`
+			ImageUrl string   `json:"imageUrl"`
+			Photos   []string `json:"photos"`
+			ConseilMetaPayload
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if strings.TrimSpace(payload.Title) == "" {
+			writeError(w, http.StatusBadRequest, "title is required")
+			return
+		}
+		if strings.TrimSpace(payload.Body) == "" {
+			writeError(w, http.StatusBadRequest, "body is required")
 			return
 		}
 		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
@@ -3565,18 +3706,37 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid status")
 			return
 		}
-		// Un salarié ne peut pas se publier lui-même
+		var contentType string
+		if err := db.QueryRow(`SELECT type FROM salarie_contents WHERE id = $1`, id).Scan(&contentType); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not load content")
+			return
+		}
+		if contentType == "conseil" {
+			normalizeConseilMeta(&payload.ConseilMetaPayload)
+			if err := validateConseilMeta(payload.ConseilMetaPayload, true); err != nil {
+				writeConseilValidationError(w, err)
+				return
+			}
+		}
 		putClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
 		putRole, _ := putClaims["role"].(string)
 		if putRole == "salarie" && payload.Status == "publie" {
 			payload.Status = "en_attente"
 		}
-		var updatedAt time.Time
-		res := db.QueryRow(`
-			UPDATE salarie_contents SET title = $1, body = $2, status = $3, image_url = $4, rejection_comment = CASE WHEN $3 = 'en_attente' THEN '' ELSE rejection_comment END, updated_at = NOW()
-			WHERE id = $5 RETURNING updated_at
-		`, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, strings.TrimSpace(payload.ImageUrl), id)
-		if err := res.Scan(&updatedAt); err != nil {
+		_, err = db.Exec(`UPDATE salarie_contents SET rejection_comment = CASE WHEN $1 = 'en_attente' THEN '' ELSE rejection_comment END WHERE id = $2`, payload.Status, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update content")
+			return
+		}
+		coverURL, photosJSON := resolveConseilMedia(payload.ImageUrl, payload.Photos)
+		updatedAt, err := updateSalarieContentWithMeta(id,
+			strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status,
+			coverURL, photosJSON, nil, payload.ConseilMetaPayload)
+		if err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "content not found")
 				return
@@ -3613,17 +3773,27 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
 		typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
+		filterExtra, filterArgs := buildConseilFilterClause(map[string]string{
+			"category":   r.URL.Query().Get("category"),
+			"difficulty": r.URL.Query().Get("difficulty"),
+			"material":   r.URL.Query().Get("material"),
+			"audience":   r.URL.Query().Get("audience"),
+		}, 3)
 
 		rows, err := db.Query(`
-			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.is_pinned, sc.created_at, sc.updated_at,
+			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.photos, sc.is_pinned,
+			       sc.category, sc.target_audience, sc.difficulty_level,
+			       sc.estimated_time, sc.estimated_time_minutes, sc.estimated_time_value, sc.estimated_time_unit,
+			       sc.materials, sc.safety_tips, sc.summary, sc.tags, sc.external_url, sc.scheduled_publish_at,
+			       sc.created_at, sc.updated_at,
 			       (SELECT COUNT(*) FROM conseil_likes cl WHERE cl.content_id = sc.id) AS like_count,
 			       (SELECT COUNT(*) FROM conseil_favorites cf WHERE cf.content_id = sc.id) AS favorite_count
 			FROM salarie_contents sc
 			JOIN users u ON u.id = sc.user_id
 			WHERE ($1 = '' OR sc.status = $1)
-			AND ($2 = '' OR sc.type = $2)
+			AND ($2 = '' OR sc.type = $2)`+filterExtra+`
 			ORDER BY sc.is_pinned DESC, sc.created_at DESC
-		`, statusFilter, typeFilter)
+		`, append([]interface{}{statusFilter, typeFilter}, filterArgs...)...)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list contents")
 			return
@@ -3632,30 +3802,27 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 
 		items := make([]map[string]interface{}, 0)
 		for rows.Next() {
-			var id, userID int64
-			var firstname, lastname, contentType, title, body, status, rejectionComment, imageURL string
-			var isPinned bool
+			var row conseilContentRow
+			var firstname, lastname string
 			var likeCount, favoriteCount int64
-			var createdAt, updatedAt time.Time
-			if err := rows.Scan(&id, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &isPinned, &createdAt, &updatedAt, &likeCount, &favoriteCount); err != nil {
+			if err := rows.Scan(
+				&row.ID, &row.UserID, &firstname, &lastname, &row.ContentType, &row.Title, &row.Body, &row.Status,
+				&row.RejectionComment, &row.ImageURL, &row.PhotosJSON, &row.IsPinned,
+				&row.Category, &row.TargetAudienceJSON, &row.DifficultyLevel,
+				&row.EstimatedTime, &row.EstimatedTimeMinutes, &row.EstimatedTimeValue, &row.EstimatedTimeUnit,
+				&row.MaterialsJSON, &row.SafetyTips, &row.Summary, &row.TagsJSON, &row.ExternalURL,
+				&row.ScheduledPublishAt, &row.CreatedAt, &row.UpdatedAt,
+				&likeCount, &favoriteCount,
+			); err != nil {
 				writeError(w, http.StatusInternalServerError, "could not parse content")
 				return
 			}
-			items = append(items, map[string]interface{}{
-				"id": id, "userId": userID,
-				"authorName":       strings.TrimSpace(firstname + " " + lastname),
-				"type":             contentType,
-				"title":            title,
-				"body":             body,
-				"status":           status,
-				"rejectionComment": rejectionComment,
-				"imageUrl":         imageURL,
-				"isPinned":         isPinned,
-				"likeCount":        likeCount,
-				"favoriteCount":    favoriteCount,
-				"createdAt":        createdAt.UTC().Format(time.RFC3339),
-				"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
-			})
+			item, err := buildContentItemFromRow(row, strings.TrimSpace(firstname+" "+lastname), likeCount, favoriteCount, false)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not build content item")
+				return
+			}
+			items = append(items, item)
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 
@@ -3669,11 +3836,13 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var payload struct {
-			Type     string `json:"type"`
-			Title    string `json:"title"`
-			Body     string `json:"body"`
-			Status   string `json:"status"`
-			ImageURL string `json:"imageUrl"`
+			Type     string   `json:"type"`
+			Title    string   `json:"title"`
+			Body     string   `json:"body"`
+			Status   string   `json:"status"`
+			ImageURL string   `json:"imageUrl"`
+			Photos   []string `json:"photos"`
+			ConseilMetaPayload
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -3690,6 +3859,10 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "title is required")
 			return
 		}
+		if strings.TrimSpace(payload.Body) == "" {
+			writeError(w, http.StatusBadRequest, "body is required")
+			return
+		}
 		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
 		if payload.Status == "" {
 			payload.Status = "brouillon"
@@ -3698,25 +3871,35 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid status")
 			return
 		}
-		var id int64
-		var createdAt, updatedAt time.Time
-		err := db.QueryRow(`
-			INSERT INTO salarie_contents (user_id, type, title, body, status, image_url)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			RETURNING id, created_at, updated_at
-		`, adminUserID, payload.Type, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, strings.TrimSpace(payload.ImageURL)).Scan(&id, &createdAt, &updatedAt)
+		if payload.Type == "conseil" {
+			normalizeConseilMeta(&payload.ConseilMetaPayload)
+			if err := validateConseilMeta(payload.ConseilMetaPayload, true); err != nil {
+				writeConseilValidationError(w, err)
+				return
+			}
+		}
+		coverURL, photosJSON := resolveConseilMedia(payload.ImageURL, payload.Photos)
+		id, createdAt, updatedAt, err := insertSalarieContentWithMeta(
+			adminUserID, payload.Type,
+			strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body),
+			payload.Status, coverURL, photosJSON, payload.ConseilMetaPayload,
+		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create content")
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
+		resp := map[string]interface{}{
 			"id": id, "userId": adminUserID, "type": payload.Type,
 			"title": strings.TrimSpace(payload.Title), "body": strings.TrimSpace(payload.Body),
-			"status": payload.Status, "imageUrl": strings.TrimSpace(payload.ImageURL),
-			"isPinned":  false,
-			"createdAt": createdAt.UTC().Format(time.RFC3339),
+			"status": payload.Status, "imageUrl": coverURL, "photos": parseStringArrayJSON(photosJSON),
+			"isPinned": false, "createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
-		})
+		}
+		if payload.Type == "conseil" {
+			tools, _ := loadConseilTools(id)
+			appendConseilMetaToItem(resp, conseilContentRowFromMeta(payload.ConseilMetaPayload), tools)
+		}
+		writeJSON(w, http.StatusCreated, resp)
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -3731,16 +3914,25 @@ func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		var itemID, userID int64
-		var firstname, lastname, contentType, title, body, status, rejectionComment, imageURL string
-		var isPinned bool
-		var createdAt, updatedAt time.Time
+		var row conseilContentRow
+		var firstname, lastname string
 		err := db.QueryRow(`
-			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.is_pinned, sc.created_at, sc.updated_at
+			SELECT sc.id, sc.user_id, u.firstname, u.lastname, sc.type, sc.title, sc.body, sc.status, sc.rejection_comment, sc.image_url, sc.photos, sc.is_pinned,
+			       sc.category, sc.target_audience, sc.difficulty_level,
+			       sc.estimated_time, sc.estimated_time_minutes, sc.estimated_time_value, sc.estimated_time_unit,
+			       sc.materials, sc.safety_tips, sc.summary, sc.tags, sc.external_url, sc.scheduled_publish_at,
+			       sc.created_at, sc.updated_at
 			FROM salarie_contents sc
 			JOIN users u ON u.id = sc.user_id
 			WHERE sc.id = $1
-		`, id).Scan(&itemID, &userID, &firstname, &lastname, &contentType, &title, &body, &status, &rejectionComment, &imageURL, &isPinned, &createdAt, &updatedAt)
+		`, id).Scan(
+			&row.ID, &row.UserID, &firstname, &lastname, &row.ContentType, &row.Title, &row.Body, &row.Status,
+			&row.RejectionComment, &row.ImageURL, &row.PhotosJSON, &row.IsPinned,
+			&row.Category, &row.TargetAudienceJSON, &row.DifficultyLevel,
+			&row.EstimatedTime, &row.EstimatedTimeMinutes, &row.EstimatedTimeValue, &row.EstimatedTimeUnit,
+			&row.MaterialsJSON, &row.SafetyTips, &row.Summary, &row.TagsJSON, &row.ExternalURL,
+			&row.ScheduledPublishAt, &row.CreatedAt, &row.UpdatedAt,
+		)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "content not found")
@@ -3749,27 +3941,22 @@ func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not fetch content")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id": itemID, "userId": userID,
-			"authorName":       strings.TrimSpace(firstname + " " + lastname),
-			"type":             contentType,
-			"title":            title,
-			"body":             body,
-			"status":           status,
-			"rejectionComment": rejectionComment,
-			"imageUrl":         imageURL,
-			"isPinned":         isPinned,
-			"createdAt":        createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
-		})
+		item, err := buildContentItemFromRow(row, strings.TrimSpace(firstname+" "+lastname), 0, 0, row.ContentType == "conseil")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load content")
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
 
 	case http.MethodPut:
 		var payload struct {
-			Title    string `json:"title"`
-			Body     string `json:"body"`
-			Status   string `json:"status"`
-			ImageURL string `json:"imageUrl"`
-			IsPinned *bool  `json:"isPinned"`
+			Title    string   `json:"title"`
+			Body     string   `json:"body"`
+			Status   string   `json:"status"`
+			ImageURL string   `json:"imageUrl"`
+			Photos   []string `json:"photos"`
+			IsPinned *bool    `json:"isPinned"`
+			ConseilMetaPayload
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -3779,26 +3966,48 @@ func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "title is required")
 			return
 		}
+		if strings.TrimSpace(payload.Body) == "" {
+			writeError(w, http.StatusBadRequest, "body is required")
+			return
+		}
 		validStatuses := map[string]bool{"brouillon": true, "publie": true, "archive": true, "en_attente": true}
 		if !validStatuses[payload.Status] {
 			writeError(w, http.StatusBadRequest, "invalid status")
 			return
 		}
+		var contentType string
+		if err := db.QueryRow(`SELECT type FROM salarie_contents WHERE id = $1`, id).Scan(&contentType); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "content not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not load content")
+			return
+		}
+		if contentType == "conseil" {
+			normalizeConseilMeta(&payload.ConseilMetaPayload)
+			if err := validateConseilMeta(payload.ConseilMetaPayload, true); err != nil {
+				writeConseilValidationError(w, err)
+				return
+			}
+		}
 		pinned := false
 		if payload.IsPinned != nil {
 			pinned = *payload.IsPinned
 		}
-		var updatedAt time.Time
-		queryErr := db.QueryRow(`
-			UPDATE salarie_contents
-			SET title = $1, body = $2, status = $3, image_url = $4, is_pinned = $5,
-			    rejection_comment = CASE WHEN $3 IN ('publie', 'en_attente') THEN '' ELSE rejection_comment END,
-			    updated_at = NOW()
-			WHERE id = $6
-			RETURNING updated_at
-		`, strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status, strings.TrimSpace(payload.ImageURL), pinned, id).Scan(&updatedAt)
-		if queryErr != nil {
-			if queryErr == sql.ErrNoRows {
+		_, err = db.Exec(`
+			UPDATE salarie_contents SET rejection_comment = CASE WHEN $1 IN ('publie', 'en_attente') THEN '' ELSE rejection_comment END WHERE id = $2
+		`, payload.Status, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update content")
+			return
+		}
+		coverURL, photosJSON := resolveConseilMedia(payload.ImageURL, payload.Photos)
+		updatedAt, err := updateSalarieContentWithMeta(id,
+			strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status,
+			coverURL, photosJSON, &pinned, payload.ConseilMetaPayload)
+		if err != nil {
+			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "content not found")
 				return
 			}
@@ -4854,7 +5063,14 @@ func itemMaterialsAdminHandler(w http.ResponseWriter, r *http.Request) {
 				"position":          pos, "createdAt": createdAt.UTC().Format(time.RFC3339), "updatedAt": updatedAt.UTC().Format(time.RFC3339),
 			})
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
+		conseilSuggestions := []string{}
+		if labels, err := listConseilMaterialLabelsNotInCatalog(); err == nil {
+			conseilSuggestions = labels
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"items":              result,
+			"conseilSuggestions": conseilSuggestions,
+		})
 
 	case http.MethodPost:
 		var payload itemMaterialPayload

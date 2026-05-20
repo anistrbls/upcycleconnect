@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import ConseilFeedCardText from "../conseils/ConseilFeedCardText";
 import { formatDateFR } from "../../lib/formatters";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
+import {
+    SALARIE_CONSEIL_DRAFTS,
+    SALARIE_CONSEIL_LIST,
+    salarieConseilDetailHref,
+} from "../../lib/conseilDetailRoutes";
 
 const AVATAR_PALETTE = ["#B5D5E0", "#C8E6C9", "#FFE0B2", "#E1BEE7", "#F8BBD9", "#B2DFDB", "#D7E3F5", "#F0E68C"];
 
@@ -77,99 +84,8 @@ const S = {
     photoBox: { border: "2px dashed #d0d8da", borderRadius: "20px", padding: "2rem 1rem", textAlign: "center", cursor: "pointer", background: "rgba(255,255,255,0.75)", color: "var(--text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" },
 };
 
-/* ── Formulaire pleine-page (identique à l'admin) ───────────────── */
-function SalarieConseilForm({ editingItem, formState, setFormState, onSubmit, onSaveDraft, onCancel, isSaving, localError }) {
-    const fileRef = useRef();
-    const set = (key) => (e) => setFormState((p) => ({ ...p, [key]: e.target.value }));
-
-    const handleFileDrop = (file) => {
-        if (!file || !file.type.startsWith("image/")) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => setFormState((p) => ({ ...p, imageUrl: ev.target.result }));
-        reader.readAsDataURL(file);
-    };
-
-    return (
-        <div style={S.container}>
-            <div style={{ marginBottom: "2rem" }}>
-                <button type="button" onClick={onCancel} style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.88rem", marginBottom: "1.25rem", padding: 0 }}>
-                    <IcChevronLeft /> Retour
-                </button>
-                <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>Espace salarié · Conseils</span>
-                <h1 style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800 }}>
-                    {editingItem ? "Modifier le conseil" : "Partager un conseil"}
-                </h1>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); onSubmit("en_attente"); }}>
-                <div style={S.grid}>
-                    {/* Colonne principale */}
-                    <div>
-                        <div style={S.card}>
-                            <h2 style={S.sectionTitle}>Contenu</h2>
-                            <label style={S.label}>
-                                Titre *
-                                <input type="text" value={formState.title} onChange={set("title")} style={S.input} required placeholder="Ex. Comment trier les matériaux en bois…" />
-                            </label>
-                            <label style={S.label}>
-                                Contenu *
-                                <textarea value={formState.body} onChange={set("body")} style={S.textarea} required placeholder="Rédigez votre conseil…" autoFocus />
-                            </label>
-                        </div>
-
-                        <div style={S.card}>
-                            <h2 style={S.sectionTitle}>Image de couverture</h2>
-                            {formState.imageUrl ? (
-                                <div style={{ position: "relative", borderRadius: "16px", overflow: "hidden", marginBottom: "0.75rem" }}>
-                                    <img src={formState.imageUrl} alt="Aperçu" style={{ width: "100%", maxHeight: "220px", objectFit: "cover", display: "block" }} />
-                                    <button type="button" onClick={() => setFormState((p) => ({ ...p, imageUrl: "" }))} style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "1rem" }}>×</button>
-                                </div>
-                            ) : (
-                                <div style={S.photoBox} onClick={() => fileRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFileDrop(e.dataTransfer.files[0]); }}>
-                                    <IcCamera />
-                                    <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>Cliquer ou glisser une image</span>
-                                    <span style={{ fontSize: "0.78rem" }}>JPG, PNG, WEBP</span>
-                                </div>
-                            )}
-                            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileDrop(e.target.files[0])} />
-                            {!formState.imageUrl.startsWith("data:") && (
-                                <div style={{ marginTop: "0.75rem" }}>
-                                    <label style={{ ...S.label, fontSize: "0.78rem" }}>
-                                        URL externe (facultatif)
-                                        <input type="text" value={formState.imageUrl} onChange={set("imageUrl")} style={{ ...S.input, fontSize: "0.82rem" }} placeholder="https://…" />
-                                    </label>
-                                </div>
-                            )}
-                        </div>
-
-                        {localError && <div style={S.errorBox}>{localError}</div>}
-                    </div>
-
-                    {/* Colonne latérale */}
-                    <div style={{ position: "sticky", top: "1rem" }}>
-                        <div style={S.card}>
-                            <h2 style={S.sectionTitle}>Publication</h2>
-                            <button type="submit" disabled={isSaving} style={S.btnPrimary}>
-                                {isSaving ? "Envoi…" : editingItem ? "Soumettre à validation" : "Soumettre à validation"}
-                            </button>
-                            <button type="button" disabled={isSaving} onClick={() => onSubmit("brouillon")} style={S.btnSecondary}>
-                                {isSaving ? "Enregistrement…" : "Enregistrer en brouillon"}
-                            </button>
-                            <button type="button" onClick={onCancel} style={{ ...S.btnSecondary, marginTop: "0.4rem" }}>Annuler</button>
-                        </div>
-                        <div style={{ ...S.card, background: "#EAF4FF", marginTop: 0 }}>
-                            <p style={{ fontSize: "0.83rem", color: "#1e4976", margin: 0, lineHeight: 1.55 }}>
-                                Votre conseil sera relu par un administrateur avant d'être publié dans le feed.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </form>
-        </div>
-    );
-}
-
 /* ── Carte style X ──────────────────────────────────────────────── */
-function ConseilCard({ item, isOwn, onEdit, onDelete, delay = 0 }) {
+function ConseilCard({ item, isOwn, onEdit, onDelete, onDetail, delay = 0 }) {
     const [liked, setLiked] = useState(!!item.likedByMe);
     const [likeCount, setLikeCount] = useState(item.likeCount ?? 0);
     const [bookmarked, setBookmarked] = useState(!!item.favoritedByMe);
@@ -179,9 +95,8 @@ function ConseilCard({ item, isOwn, onEdit, onDelete, delay = 0 }) {
 
     const initials = getInitials(item.authorName);
     const avatarBg = getAvatarColor(item.authorName);
-    const body = item.body || "";
-    const needsTrunc = body.length > 300;
-    const displayBody = needsTrunc && !expanded ? body.slice(0, 300) + "…" : body;
+    const coreText = (item.displayBody || item.summary || item.body || "").trim();
+    const showSummaryInBody = !!(item.summary?.trim() && coreText === item.summary.trim());
 
     return (
         <div
@@ -241,21 +156,15 @@ function ConseilCard({ item, isOwn, onEdit, onDelete, delay = 0 }) {
                     </div>
 
                     {/* Titre (si présent) */}
-                    {item.title && (
-                        <p style={{ fontWeight: 700, fontSize: "1rem", color: "#0F1419", marginBottom: "0.35rem", lineHeight: 1.4 }}>
-                            {item.title}
-                        </p>
-                    )}
-
-                    {/* Corps */}
-                    <p style={{ fontSize: "0.93rem", lineHeight: 1.65, color: "#0F1419", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: "0 0 0.5rem 0" }}>
-                        {displayBody}
-                    </p>
-                    {needsTrunc && (
-                        <button type="button" onClick={() => setExpanded((p) => !p)} style={{ fontSize: "0.82rem", color: "#1D9BF0", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit", fontWeight: 500 }}>
-                            {expanded ? "Voir moins" : "Lire la suite"}
-                        </button>
-                    )}
+                    <div onClick={() => onDetail?.(item)} style={{ cursor: onDetail ? "pointer" : "default" }}>
+                        <ConseilFeedCardText
+                            item={item}
+                            expanded={expanded}
+                            onToggleExpand={() => setExpanded((p) => !p)}
+                            preferFullBody={!showSummaryInBody}
+                            bodyOnly={showSummaryInBody}
+                        />
+                    </div>
 
                     {/* Image */}
                     {item.imageUrl && (
@@ -324,81 +233,25 @@ export default function SalarieConseilFeedView({
     ownItems = [],
     loading,
     errorMessage,
-    onCreate,
-    onUpdate,
     onDelete,
     draftOnly = false,
 }) {
-    const [composerOpen, setComposerOpen] = useState(false);
-    const [editingItem, setEditingItem] = useState(null);
-    const [isSaving, setIsSaving] = useState(false);
-    const [localError, setLocalError] = useState("");
-    const [formState, setFormState] = useState({ title: "", body: "", imageUrl: "" });
+    const router = useRouter();
     const [toast, setToast] = useState("");
 
     const drafts = ownItems.filter((i) => i.type === "conseil" && i.status === "brouillon");
     const pendingItems = ownItems.filter((i) => i.type === "conseil" && i.status === "en_attente");
 
-    const showToast = (msg) => setToast(msg);
+    const openComposer = () => router.push("/salarie-contenu/conseils/nouveau");
 
-    const resetForm = () => {
-        setEditingItem(null);
-        setFormState({ title: "", body: "", imageUrl: "" });
-        setLocalError("");
-    };
+    const openDraftForEdit = (item) => router.push(`/salarie-contenu/conseils/${item.id}/modifier`);
 
-    const openComposer = () => { resetForm(); setComposerOpen(true); };
-
-    const openDraftForEdit = (item) => {
-        setEditingItem(item);
-        setFormState({ title: item.title || "", body: item.body || "", imageUrl: item.imageUrl || "" });
-        setLocalError("");
-        setComposerOpen(true);
-    };
-
-    const handleSubmit = async (status) => {
-        setLocalError("");
-        if (!formState.body.trim()) { setLocalError("Le contenu est requis."); return; }
-        if (!formState.title.trim()) { setLocalError("Le titre est requis."); return; }
-        setIsSaving(true);
-        try {
-            const payload = {
-                title: formState.title.trim(),
-                body: formState.body.trim(),
-                imageUrl: formState.imageUrl.trim(),
-                status,
-                type: "conseil",
-            };
-            if (editingItem) { await onUpdate(editingItem.id, payload); } else { await onCreate(payload); }
-            setComposerOpen(false);
-            resetForm();
-            if (status === "brouillon") showToast("Conseil enregistré en brouillon ✓");
-        } catch (err) {
-            setLocalError(String(err?.message || "Une erreur est survenue."));
-        } finally {
-            setIsSaving(false);
-        }
-    };
+    const openDetail = (item, backTo = SALARIE_CONSEIL_LIST) => router.push(salarieConseilDetailHref(item.id, backTo));
 
     const handleDelete = async (item) => {
         if (!window.confirm("Supprimer ce conseil ?")) return;
         try { await onDelete(item.id); } catch (err) { window.alert(String(err?.message || "Impossible de supprimer.")); }
     };
-
-    /* ── Vue formulaire (pleine-page) ── */
-    if (composerOpen) {
-        return (
-            <SalarieConseilForm
-                editingItem={editingItem}
-                formState={formState}
-                setFormState={setFormState}
-                onSubmit={handleSubmit}
-                onCancel={() => { setComposerOpen(false); resetForm(); }}
-                isSaving={isSaving}
-                localError={localError}
-            />
-        );
-    }
 
     /* ── Vue brouillons seuls ── */
     if (draftOnly) {
@@ -437,14 +290,14 @@ export default function SalarieConseilFeedView({
                                 item={item}
                                 isOwn
                                 onEdit={openDraftForEdit}
-                                onDelete={handleDelete}
-                                delay={idx * 0.04}
-                            />
-                        ))}
-                    </div>
-                )}
-                {/* FAB */}
-                <button type="button" title="Nouveau conseil" onClick={openComposer} style={{ position: "fixed", bottom: "2rem", right: "2rem", width: "52px", height: "52px", borderRadius: "50%", background: "var(--text-main, #1a2e35)", color: "#fff", border: "none", fontSize: "1.6rem", lineHeight: 1, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.22)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s, box-shadow 0.15s" }}
+                            onDelete={handleDelete}
+                            onDetail={(item) => openDetail(item, SALARIE_CONSEIL_DRAFTS)}
+                            delay={idx * 0.04}
+                        />
+                    ))}
+                </div>
+            )}
+            <button type="button" title="Nouveau conseil" onClick={openComposer} style={{ position: "fixed", bottom: "2rem", right: "2rem", width: "52px", height: "52px", borderRadius: "50%", background: "var(--text-main, #1a2e35)", color: "#fff", border: "none", fontSize: "1.6rem", lineHeight: 1, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.22)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s, box-shadow 0.15s" }}
                     onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.1)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(0,0,0,0.28)"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.22)"; }}
                 >+</button>
@@ -550,13 +403,13 @@ export default function SalarieConseilFeedView({
                             isOwn={isOwn || item.isOwn}
                             onEdit={(i) => openDraftForEdit(i)}
                             onDelete={handleDelete}
+                            onDetail={openDetail}
                             delay={idx * 0.04}
                         />
                     );
                 })}
             </div>
 
-            {/* FAB */}
             <button type="button" title="Nouveau conseil" onClick={openComposer} style={{ position: "fixed", bottom: "2rem", right: "2rem", width: "52px", height: "52px", borderRadius: "50%", background: "var(--text-main, #1a2e35)", color: "#fff", border: "none", fontSize: "1.6rem", lineHeight: 1, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.22)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s, box-shadow 0.15s" }}
                 onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.1)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(0,0,0,0.28)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.22)"; }}

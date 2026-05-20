@@ -5,6 +5,7 @@ import ConseilsAdminView from "../../../components/admin/conseils/ConseilsAdminV
 import ParticulierConseilFeedView from "../../../components/particulier/ParticulierConseilFeedView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
+import { appendConseilFiltersToUrl } from "../../../lib/conseilFormUtils";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 
 export default function ConseilsSubPage({ params }) {
@@ -26,7 +27,8 @@ export default function ConseilsSubPage({ params }) {
             return null;
         }
     };
-    const isParticulier = getUserRole() === "particulier";
+    const userRole = getUserRole();
+    const isFeedUser = userRole === "particulier" || userRole === "professionnel";
 
     const activeModule = getModuleByKey("conseils");
     const activeSub = getSubNavItem(activeModule.key, subpage);
@@ -37,11 +39,15 @@ export default function ConseilsSubPage({ params }) {
         return data;
     };
 
-    const loadItems = async () => {
+    const loadItems = async (filters = {}) => {
         setLoading(true);
         setError("");
         try {
-            const url = apiUrl("/admin/salarie-contents") + "?type=conseil";
+            let url = apiUrl("/admin/salarie-contents") + "?type=conseil";
+            if (subpage === "en-attente") {
+                filters = { ...filters, status: "en_attente" };
+            }
+            url = appendConseilFiltersToUrl(url, filters);
             const res = await fetch(url, { headers: buildAuthHeaders() });
             const data = await parseResponse(res);
             setItems(data.items || []);
@@ -52,11 +58,12 @@ export default function ConseilsSubPage({ params }) {
         }
     };
 
-    const loadFeed = async (favoritesOnly = false) => {
+    const loadFeed = async (favoritesOnly = false, filters = {}) => {
         setFeedLoading(true);
         setFeedError("");
         try {
-            const url = favoritesOnly ? apiUrl("/salarie/contents/feed?favorites=true") : apiUrl("/salarie/contents/feed");
+            let url = favoritesOnly ? apiUrl("/salarie/contents/feed?favorites=true") : apiUrl("/salarie/contents/feed");
+            url = appendConseilFiltersToUrl(url, filters);
             const res = await fetch(url, { headers: buildAuthHeaders() });
             const data = await parseResponse(res);
             setFeedItems(data.items || []);
@@ -68,32 +75,12 @@ export default function ConseilsSubPage({ params }) {
     };
 
     useEffect(() => {
-        if (isParticulier) {
+        if (isFeedUser) {
             loadFeed(subpage === "favoris");
         } else {
             loadItems();
         }
     }, [subpage]);
-
-    const handleCreate = async (payload) => {
-        const res = await fetch(apiUrl("/admin/salarie-contents"), {
-            method: "POST",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseResponse(res);
-        await loadItems();
-    };
-
-    const handleUpdate = async (id, payload) => {
-        const res = await fetch(apiUrl(`/admin/salarie-contents/${id}`), {
-            method: "PUT",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseResponse(res);
-        await loadItems();
-    };
 
     const handleDelete = async (id) => {
         const res = await fetch(apiUrl(`/admin/salarie-contents/${id}`), {
@@ -123,13 +110,15 @@ export default function ConseilsSubPage({ params }) {
         await loadItems();
     };
 
-    if (isParticulier) {
+    if (isFeedUser) {
         return (
             <ParticulierConseilFeedView
                 feedItems={feedItems}
                 loading={feedLoading}
                 errorMessage={feedError}
                 favoritesOnly={subpage === "favoris"}
+                userRole={userRole}
+                onReloadFeed={(filters) => loadFeed(subpage === "favoris", filters)}
             />
         );
     }
@@ -142,8 +131,6 @@ export default function ConseilsSubPage({ params }) {
                 errorMessage={error}
                 filterPending={subpage === "en-attente"}
                 onReload={loadItems}
-                onCreate={handleCreate}
-                onUpdate={handleUpdate}
                 onDelete={handleDelete}
                 onValidate={handleValidate}
                 onReject={handleReject}

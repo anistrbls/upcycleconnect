@@ -198,7 +198,7 @@ function ConseilsValidation({ contents, loading, errorMessage, onReload, onValid
                             }
                             line1={excerpt || "—"}
                             line2={line2 || undefined}
-                            onOpenDetail={() => router.push(`/conseils/tous-conseils#content-${item.id}`)}
+                            onOpenDetail={() => router.push(`/conseils/detail/${item.id}?from=${encodeURIComponent("/operations/conseils")}`)}
                             childrenActions={
                                 <>
                                     <button

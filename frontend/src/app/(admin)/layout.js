@@ -11,7 +11,11 @@ export default function AdminLayout({ children }) {
     const router = useRouter();
     const [user, setUser] = useState(null);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-    const currentSubKey = pathname.split("/").filter(Boolean)[1] || "";
+    const pathParts = pathname.split("/").filter(Boolean);
+    let currentSubKey = pathParts[1] || "";
+    if (pathParts[0] === "conseils" && ["detail", "modifier", "nouveau"].includes(currentSubKey)) {
+        currentSubKey = "tous-conseils";
+    }
     const isSalarie = user?.role === "salarie";
     const isAdmin = user?.role === "admin";
     const isPro = user?.role === "professionnel";

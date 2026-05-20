@@ -1,8 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import ConseilFeedCardText from "../conseils/ConseilFeedCardText";
 import { formatDateFR } from "../../lib/formatters";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
+import ConseilFilterFields from "../conseils/ConseilFilterFields";
+import { filterConseilsForRole } from "../../lib/conseilAudience";
+import { CONSEIL_LIST_ALL, CONSEIL_LIST_FAVORIS, conseilDetailHref } from "../../lib/conseilDetailRoutes";
 
 /* ── Icônes style X ─────────────────────────────────────────────────────────── */
 const IcHeart = ({ filled }) => (
@@ -21,17 +26,15 @@ const IcPin = () => (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" /></svg>
 );
 
-/* ── Carte style X (lecture seule) ──────────────────────────────────────────── */
-function ConseilCard({ item, delay = 0 }) {
+function ConseilCard({ item, delay = 0, onDetail }) {
     const [liked, setLiked] = useState(!!item.likedByMe);
     const [likeCount, setLikeCount] = useState(item.likeCount ?? 0);
     const [bookmarked, setBookmarked] = useState(!!item.favoritedByMe);
     const [favoriteCount, setFavoriteCount] = useState(item.favoriteCount ?? 0);
     const [expanded, setExpanded] = useState(false);
 
-    const body = item.body || "";
-    const needsTrunc = body.length > 300;
-    const displayBody = needsTrunc && !expanded ? body.slice(0, 300) + "…" : body;
+    const coreText = (item.displayBody || item.summary || item.body || "").trim();
+    const showSummaryInBody = !!(item.summary?.trim() && coreText === item.summary.trim());
 
     return (
         <div className="x-card" style={{ animationDelay: `${delay}s` }}>
@@ -53,22 +56,15 @@ function ConseilCard({ item, delay = 0 }) {
                     <span style={{ color: "#71767B", fontSize: "0.84rem", whiteSpace: "nowrap" }}>{formatDateFR(item.createdAt)}</span>
                 </div>
 
-                {/* Titre */}
-                {item.title && (
-                    <p style={{ fontWeight: 700, fontSize: "1rem", color: "#0F1419", marginBottom: "0.35rem", lineHeight: 1.4 }}>
-                        {item.title}
-                    </p>
-                )}
-
-                {/* Corps */}
-                <p style={{ fontSize: "0.93rem", lineHeight: 1.65, color: "#0F1419", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: "0 0 0.5rem 0" }}>
-                    {displayBody}
-                </p>
-                {needsTrunc && (
-                    <button type="button" onClick={() => setExpanded((p) => !p)} style={{ fontSize: "0.82rem", color: "#1D9BF0", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit", fontWeight: 500 }}>
-                        {expanded ? "Voir moins" : "Lire la suite"}
-                    </button>
-                )}
+                <div onClick={() => onDetail?.(item)} style={{ cursor: onDetail ? "pointer" : "default" }}>
+                    <ConseilFeedCardText
+                        item={item}
+                        expanded={expanded}
+                        onToggleExpand={() => setExpanded((p) => !p)}
+                        preferFullBody={!showSummaryInBody}
+                        bodyOnly={showSummaryInBody}
+                    />
+                </div>
 
                 {/* Image */}
                 {item.imageUrl && (
@@ -132,8 +128,15 @@ function ConseilCard({ item, delay = 0 }) {
     );
 }
 
-/* ── Composant principal ────────────────────────────────────────────────────── */
-export default function ParticulierConseilFeedView({ feedItems = [], loading, errorMessage, favoritesOnly = false }) {
+export default function ParticulierConseilFeedView({ feedItems = [], loading, errorMessage, favoritesOnly = false, onReloadFeed, userRole = "particulier" }) {
+    const router = useRouter();
+    const visibleItems = filterConseilsForRole(feedItems, userRole);
+    const spaceLabel = userRole === "professionnel" ? "Espace professionnel" : "Espace particulier";
+    const listBack = favoritesOnly ? CONSEIL_LIST_FAVORIS : CONSEIL_LIST_ALL;
+    const [filters, setFilters] = useState({ category: "", difficulty: "", material: "", audience: "" });
+
+    const openDetail = (item) => router.push(conseilDetailHref(item.id, listBack));
+
     return (
         <>
             <style>{`
@@ -146,18 +149,27 @@ export default function ParticulierConseilFeedView({ feedItems = [], loading, er
 
             <div className="header-section" style={{ marginBottom: "1.75rem" }}>
                 <div className="title-area">
-                    <span className="activities-label">Espace particulier</span>
+                    <span className="activities-label">{spaceLabel}</span>
                     <h1>{favoritesOnly ? "Mes favoris" : "Conseils"}</h1>
                 </div>
             </div>
 
             {errorMessage && <p style={{ color: "#a23b3b", fontSize: "0.85rem", marginBottom: "1rem" }}>{errorMessage}</p>}
 
+            {onReloadFeed && (
+                <div className="panel" style={{ marginBottom: "1rem" }}>
+                    <div className="conseil-toolbar">
+                        <ConseilFilterFields filters={filters} onChange={setFilters} />
+                        <button type="button" className="action-cta task-action-btn" onClick={() => onReloadFeed(filters)}>Filtrer</button>
+                    </div>
+                </div>
+            )}
+
             <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px", marginLeft: "auto", marginRight: "auto" }}>
                 {loading && [1, 2, 3].map((k) => (
                     <div key={k} style={{ background: "#F7F9F9", borderRadius: "20px", height: "130px", opacity: 0.5 }} />
                 ))}
-                {!loading && feedItems.length === 0 && (
+                {!loading && visibleItems.length === 0 && (
                     <div style={{ textAlign: "center", padding: "3.5rem 1rem" }}>
                         <p style={{ fontSize: "1rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "0.35rem" }}>
                             {favoritesOnly ? "Aucun conseil en favoris" : "Aucun conseil publié pour le moment"}
@@ -167,8 +179,8 @@ export default function ParticulierConseilFeedView({ feedItems = [], loading, er
                         </p>
                     </div>
                 )}
-                {!loading && feedItems.map((item, idx) => (
-                    <ConseilCard key={item.id} item={item} delay={idx * 0.04} />
+                {!loading && visibleItems.map((item, idx) => (
+                    <ConseilCard key={item.id} item={item} delay={idx * 0.04} onDetail={openDetail} />
                 ))}
             </div>
         </>
