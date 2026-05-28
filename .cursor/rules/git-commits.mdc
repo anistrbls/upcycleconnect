@@ -1,0 +1,9 @@
+---
+description: Règles pour les commits Git effectués par l'agent
+alwaysApply: true
+---
+
+# Commits Git
+
+- Ne jamais ajouter de ligne `Co-authored-by:` (Cursor, Copilot, ni autre outil) dans les messages de commit.
+- Utiliser uniquement le titre et le corps convenus avec l'utilisateur, en français, au style du dépôt.
