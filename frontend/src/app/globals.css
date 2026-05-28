@@ -790,13 +790,24 @@ body {
 }
 
 .db-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
   font-size: 0.72rem;
   font-weight: 600;
+  line-height: 1;
   background: var(--pill-bg);
   color: var(--ink-strong);
-  padding: 2px 10px;
+  padding: 0.35rem 0.65rem;
   border-radius: 20px;
   white-space: nowrap;
+  vertical-align: middle;
+}
+
+.db-badge svg {
+  flex-shrink: 0;
+  display: block;
 }
 
 
@@ -1237,7 +1248,7 @@ body {
   border-left: 3px solid var(--green-leaf);
 }
 
-/* Infos conseil (carte feed) — sous le titre */
+/* Infos conseil (carte feed) — sous le résumé */
 .conseil-card-facts {
   display: flex;
   flex-wrap: wrap;
@@ -1338,10 +1349,21 @@ body {
   animation: fadeIn 0.5s ease-out;
 }
 
-.conseil-detail-page--narrow {
-  max-width: 720px;
-  margin-left: auto;
-  margin-right: auto;
+.conseil-detail__meta-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.conseil-engagement-stat--active {
+  border-color: rgba(224, 36, 94, 0.35);
+  background: rgba(224, 36, 94, 0.06);
+}
+
+.conseil-engagement-stat--active.conseil-engagement-stat--bookmark {
+  border-color: rgba(29, 155, 240, 0.35);
+  background: rgba(29, 155, 240, 0.06);
 }
 
 .conseil-detail__back {
@@ -1791,6 +1813,142 @@ body {
   color: #71767B;
 }
 
+.conseil-engagement-insights__grid {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.conseil-engagement-stat {
+  flex: 1;
+  background: #fff;
+  border-radius: 14px;
+  padding: 1rem 0.65rem;
+  text-align: center;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-family: inherit;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.conseil-engagement-stat:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  border-color: rgba(29, 155, 240, 0.35);
+}
+
+.conseil-engagement-stat__icon {
+  display: block;
+  margin: 0 auto 0.35rem;
+}
+
+.conseil-engagement-stat__count {
+  display: block;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.conseil-engagement-stat__label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  font-weight: 600;
+}
+
+.conseil-engagement-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 20, 25, 0.45);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.conseil-engagement-modal {
+  background: var(--surface-hover);
+  border-radius: 16px;
+  max-width: 440px;
+  width: 100%;
+  max-height: min(70vh, 520px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+}
+
+.conseil-engagement-modal__header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.conseil-engagement-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.conseil-engagement-modal__close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  border-radius: 8px;
+}
+
+.conseil-engagement-modal__body {
+  overflow-y: auto;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.conseil-engagement-modal__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.conseil-engagement-modal__error {
+  margin: 0;
+  color: #c0392b;
+  font-size: 0.9rem;
+}
+
+.conseil-engagement-modal__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.conseil-engagement-modal__item--bordered {
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.conseil-engagement-modal__name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-main);
+}
+
+.conseil-engagement-modal__role {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
 .x-card .conseil-card-head {
   display: flex;
   align-items: center;
@@ -1818,6 +1976,115 @@ body {
   color: #71767B;
   font-size: 0.84rem;
   white-space: nowrap;
+}
+
+/* Actions cartes conseils / forum (boutons ronds) */
+.conseil-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #EFF3F4;
+}
+
+.conseil-card-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: #e8ecee;
+  color: var(--text-main);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  font-family: inherit;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.conseil-card-action-btn:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.conseil-card-action-btn--like {
+  width: auto;
+  min-width: 30px;
+  padding: 0 0.65rem;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #71767B;
+}
+
+.conseil-card-action-btn--like-active {
+  background: rgba(224, 36, 94, 0.12);
+  color: #e0245e;
+}
+
+.conseil-card-action-btn--delete {
+  background: #fde8e8;
+  color: #b24a4a;
+}
+
+.conseil-card-action-btn--moderate-active {
+  background: #e5ffbc;
+  color: #2e7d32;
+}
+
+.conseil-card-action-btn--spacer {
+  margin-left: auto;
+}
+
+/* Liste conseils (admin) — 2 colonnes sur grands écrans */
+.conseils-feed-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.85rem;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .conseils-feed-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+}
+
+@media (min-width: 1440px) {
+  .conseils-feed-grid {
+    gap: 1.15rem;
+  }
+}
+
+/* Feed particulier / pro : colonne étroite sur mobile, pleine largeur en 2 colonnes sur grand écran */
+.conseils-feed-grid--public {
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (min-width: 1024px) {
+  .conseils-feed-grid--public {
+    max-width: none;
+    width: 100%;
+  }
+}
+
+.conseils-feed-grid__empty {
+  grid-column: 1 / -1;
+}
+
+.conseil-workspace-section-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.75rem 0;
 }
 
 

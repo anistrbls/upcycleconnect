@@ -64,7 +64,8 @@ func RegisterDepositRoutes(mux *http.ServeMux, repo *Repository, authMiddleware 
 			return
 		}
 		containers, _ := repo.ListContainersByPoint(r.Context(), id)
-		point.Containers = containers
+		itemsByContainer, _ := repo.ListContainerItemsByPoint(r.Context(), id)
+		point.Containers = attachContainerItems(containers, itemsByContainer)
 		writeJSON(w, http.StatusOK, point)
 	}))
 
@@ -116,7 +117,12 @@ func RegisterDepositRoutes(mux *http.ServeMux, repo *Repository, authMiddleware 
 			writeError(w, http.StatusInternalServerError, "could not list containers")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"containers": containers})
+		itemsByContainer, err := repo.ListContainerItemsByPoint(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not list container items")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"containers": attachContainerItems(containers, itemsByContainer)})
 	}))
 
 	// POST /api/admin/deposit-points/{id}/containers

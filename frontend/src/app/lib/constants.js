@@ -80,9 +80,7 @@ export const NAV_MODULES = [
             { key: "vue-ensemble", label: "Vue d'ensemble", shortLabel: "Vue" },
             { key: "ajouter", label: "Ajouter une prestation", shortLabel: "Ajouter", hideInTopbar: true },
             { key: "prestations", label: "Prestations", shortLabel: "Prestations" },
-            { key: "categories-prestations", label: "Catégories de prestations", shortLabel: "Catégories" },
             { key: "reservations", label: "Réservations", shortLabel: "Réservations" },
-            { key: "tarification", label: "Tarification", shortLabel: "Tarifs" },
         ],
     },
     {
@@ -304,7 +302,6 @@ export const SALARIE_MODULES = [
         subNav: [
             { key: "conseils", label: "Conseils", shortLabel: "Conseils" },
             { key: "brouillons", label: "Brouillons", shortLabel: "Brouillons" },
-            { key: "favoris", label: "Favoris", shortLabel: "Favoris" },
         ],
     },
     {

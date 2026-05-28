@@ -4,9 +4,39 @@ import { useEffect, useState, Suspense, use } from "react";
 import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, Plus, Trash2, Edit3, X, 
-  Package, Info, CheckCircle2, AlertCircle 
+  Package, CheckCircle2, AlertCircle, ChevronRight, ImageIcon
 } from "lucide-react";
 import { TOKEN_KEY, apiUrl } from "../../../../lib/api";
+import { formatDateFR } from "../../../../lib/formatters";
+
+function isContainerInMaintenanceWindow(c) {
+    if (c.status !== "maintenance" || !c.maintenance_start || !c.maintenance_end) {
+        return c.status === "maintenance";
+    }
+    const now = Date.now();
+    const start = new Date(c.maintenance_start).getTime();
+    const end = new Date(c.maintenance_end).getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) return c.status === "maintenance";
+    return now >= start && now < end;
+}
+
+function containerStatusLabel(c) {
+    if (c.status === "maintenance") {
+        if (!isContainerInMaintenanceWindow(c)) {
+            if (c.maintenance_end && Date.now() >= new Date(c.maintenance_end).getTime()) {
+                return "Maintenance terminée (rechargez la page)";
+            }
+            if (c.maintenance_start && Date.now() < new Date(c.maintenance_start).getTime()) {
+                return `Maintenance planifiée dès le ${formatDateFR(c.maintenance_start)}`;
+            }
+        }
+        const endLabel = c.maintenance_end ? ` jusqu'au ${formatDateFR(c.maintenance_end)}` : "";
+        return c.maintenance_reason
+            ? `Container maintenance : ${c.maintenance_reason}${endLabel}`
+            : `Container maintenance${endLabel}`;
+    }
+    return `Container ${c.status}`;
+}
 
 const styles = {
     container: {
@@ -130,8 +160,68 @@ const styles = {
         cursor: "pointer",
         width: "100%",
         marginTop: "1rem",
-    }
+    },
+    itemsSection: {
+        marginTop: "0.25rem",
+        paddingTop: "0.85rem",
+        borderTop: "1px solid rgba(0,0,0,0.06)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.5rem",
+    },
+    itemsSectionTitle: {
+        fontSize: "0.78rem",
+        fontWeight: 700,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        color: "var(--text-muted)",
+        margin: 0,
+    },
+    itemRow: {
+        display: "flex",
+        alignItems: "center",
+        gap: "0.65rem",
+        padding: "0.55rem 0.65rem",
+        borderRadius: "14px",
+        background: "#f8fafc",
+        border: "1px solid rgba(0,0,0,0.05)",
+        cursor: "pointer",
+        transition: "background 0.15s",
+        textAlign: "left",
+        width: "100%",
+    },
+    itemThumb: {
+        width: 48,
+        height: 48,
+        borderRadius: 10,
+        objectFit: "cover",
+        flexShrink: 0,
+        background: "#e2e8f0",
+    },
+    itemThumbPlaceholder: {
+        width: 48,
+        height: 48,
+        borderRadius: 10,
+        flexShrink: 0,
+        background: "#e2e8f0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#94a3b8",
+    },
 };
+
+const WORKFLOW_LABELS = {
+    deposited: "Déposé",
+    available: "Disponible",
+    reserved: "Réservé",
+};
+
+function itemCover(item) {
+    if (item?.image) return item.image;
+    if (Array.isArray(item?.photos) && item.photos[0]) return item.photos[0];
+    return "";
+}
 
 function ContainerManagementContent({ id }) {
     const router = useRouter();
@@ -333,13 +423,60 @@ function ContainerManagementContent({ id }) {
                                 <span style={{ color: "var(--text-muted)" }}>Total: {c.capacity}</span>
                             </div>
 
-                            <div style={{ marginTop: "0.5rem", padding: "0.6rem", borderRadius: "12px", background: c.status === 'actif' ? '#f0fdf4' : '#fef2f2', display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem" }}>
-                                {c.status === 'actif' ? <CheckCircle2 size={14} color="#166534" /> : <AlertCircle size={14} color="#991b1b" />}
-                                <span style={{ fontWeight: "700", color: c.status === 'actif' ? '#166534' : '#991b1b' }}>
-                                    {c.status === "maintenance" && c.maintenance_reason
-                                        ? `Container maintenance: ${c.maintenance_reason}`
-                                        : `Container ${c.status}`}
+                            <div style={{ marginTop: "0.5rem", padding: "0.6rem", borderRadius: "12px", background: isContainerInMaintenanceWindow(c) ? '#fef2f2' : c.status === 'actif' ? '#f0fdf4' : '#fef2f2', display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem" }}>
+                                {isContainerInMaintenanceWindow(c) ? <AlertCircle size={14} color="#991b1b" /> : c.status === 'actif' ? <CheckCircle2 size={14} color="#166534" /> : <AlertCircle size={14} color="#991b1b" />}
+                                <span style={{ fontWeight: "700", color: isContainerInMaintenanceWindow(c) ? '#991b1b' : c.status === 'actif' ? '#166534' : '#991b1b' }}>
+                                    {containerStatusLabel(c)}
                                 </span>
+                            </div>
+
+                            <div style={styles.itemsSection}>
+                                <p style={styles.itemsSectionTitle}>
+                                    Objets dans ce container ({(c.items || []).length})
+                                </p>
+                                {(c.items || []).length === 0 ? (
+                                    <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                                        {c.current_count > 0
+                                            ? "Aucun détail disponible — actualisez la page."
+                                            : "Aucun objet pour le moment."}
+                                    </p>
+                                ) : (
+                                    (c.items || []).map((item) => {
+                                        const cover = itemCover(item);
+                                        const wf = WORKFLOW_LABELS[item.workflowStatus] || item.workflowStatus || "—";
+                                        return (
+                                            <button
+                                                key={item.id}
+                                                type="button"
+                                                style={styles.itemRow}
+                                                className="container-item-row"
+                                                onClick={() => router.push(`/annonces/logistique/${item.id}`)}
+                                                title="Voir la fiche logistique"
+                                            >
+                                                {cover ? (
+                                                    <img src={cover} alt="" style={styles.itemThumb} />
+                                                ) : (
+                                                    <div style={styles.itemThumbPlaceholder}>
+                                                        <ImageIcon size={18} />
+                                                    </div>
+                                                )}
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ fontWeight: 700, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                        {item.title || "Sans titre"}
+                                                    </div>
+                                                    <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>
+                                                        {item.reference ? `Réf. ${item.reference}` : item.category || "—"}
+                                                        {item.userName ? ` · ${item.userName}` : ""}
+                                                    </div>
+                                                    <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--forest-deep)", marginTop: "0.2rem" }}>
+                                                        {wf}
+                                                    </div>
+                                                </div>
+                                                <ChevronRight size={16} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                                            </button>
+                                        );
+                                    })
+                                )}
                             </div>
                         </div>
                     );
@@ -399,6 +536,7 @@ function ContainerManagementContent({ id }) {
 
             <style jsx>{`
                 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+                .container-item-row:hover { background: #eef2f6 !important; }
             `}</style>
         </div>
     );

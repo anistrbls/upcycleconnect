@@ -396,6 +396,11 @@ export default function EventAdminView({ events, categories, salaries = [], load
         setFormOpen(true);
     };
 
+    const openEventDetail = (item) => {
+        if (!item?.id) return;
+        router.push(`/evenements/tous-evenements?id=${item.id}`);
+    };
+
     useEffect(() => {
         if (!pendingOpenEventId) return;
         const target = events.find((item) => item.id === pendingOpenEventId);
@@ -473,6 +478,10 @@ export default function EventAdminView({ events, categories, salaries = [], load
 
     return (
         <>
+            <style>{`
+                .event-admin-card:hover { transform: translateY(-3px); box-shadow: 0 10px 32px rgba(0,0,0,0.16); }
+                .event-admin-card:focus-visible { outline: 2px solid var(--black); outline-offset: 3px; }
+            `}</style>
             <div className="header-section">
                 <div className="title-area">
                     <span className="activities-label">Événements</span>
@@ -639,7 +648,29 @@ export default function EventAdminView({ events, categories, salaries = [], load
                         ? { bg: "rgba(220,60,60,0.18)", color: "#ff8080", border: "rgba(220,60,60,0.3)" }
                         : { bg: "rgba(255,255,255,0.12)", color: "#EAF5F4", border: "rgba(255,255,255,0.22)" };
                     return (
-                        <article key={item.id} style={{ position: "relative", borderRadius: "28px", overflow: "hidden", height: "400px", background: item.imageUrl ? "#111" : tc.bg, boxShadow: "0 4px 24px rgba(0,0,0,0.10)" }}>
+                        <article
+                            key={item.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openEventDetail(item)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    openEventDetail(item);
+                                }
+                            }}
+                            style={{
+                                position: "relative",
+                                borderRadius: "28px",
+                                overflow: "hidden",
+                                height: "400px",
+                                background: item.imageUrl ? "#111" : tc.bg,
+                                boxShadow: "0 4px 24px rgba(0,0,0,0.10)",
+                                cursor: "pointer",
+                                transition: "transform 0.18s ease, box-shadow 0.18s ease",
+                            }}
+                            className="event-admin-card"
+                        >
                             {item.imageUrl ? (
                                 <>
                                     {previewLooksLikeVideo(item.imageUrl) ? (
@@ -689,10 +720,9 @@ export default function EventAdminView({ events, categories, salaries = [], load
                                         </span>
                                     )}
                                 </div>
-                                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
                                     <button type="button" onClick={() => handleEdit(item)} title="Modifier" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><IconPencil /></button>
                                     <button type="button" onClick={() => handleDelete(item)} title="Supprimer" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(220,60,60,0.35)", background: "rgba(220,60,60,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#ff8080", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><IconTrash /></button>
-                                    
                                     {item.status !== "annule" && start >= new Date() && (
                                         <button type="button" onClick={() => handleCancelEvent(item)} title="Annuler événement" style={{ padding: "9px", borderRadius: "50%", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.15)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#FCD34D", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -700,9 +730,6 @@ export default function EventAdminView({ events, categories, salaries = [], load
                                     )}
                                     <button type="button" onClick={() => handleViewParticipants(item)} style={{ flex: 1, padding: "0.72rem 0.75rem", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.12)", color: "white", fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 600, cursor: "pointer", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.35rem", whiteSpace: "nowrap" }}>
                                         <IconUsers /> Participants
-                                    </button>
-                                    <button type="button" onClick={() => router.push(`/evenements/tous-evenements?id=${item.id}`)} style={{ flex: 1, padding: "0.72rem 1rem", borderRadius: "999px", border: "none", background: "white", color: "#111", fontFamily: "inherit", fontSize: "0.9rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                        Ouvrir
                                     </button>
                                 </div>
                             </div>

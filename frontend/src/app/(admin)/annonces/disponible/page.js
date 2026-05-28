@@ -11,6 +11,16 @@ import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
 
 const SELECT_ARROW_BG = "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='292.4' height='292.4'%3E%3Cpath fill='%232b4548' d='M287 69.4a17.6 17.6 0 0 0-13-5.4H18.4c-5 0-9.3 1.8-12.9 5.4A17.6 17.6 0 0 0 0 82.2c0 5 1.8 9.3 5.4 12.9l128 127.9c3.6 3.6 7.8 5.4 12.8 5.4s9.2-1.8 12.8-5.4L287 95c3.5-3.5 5.4-7.8 5.4-12.8 0-5-1.9-9.2-5.5-12.8z'/%3E%3C/svg%3E\")";
 
+/** Valeur du select « matériau » pour le mode recherche hors catalogue affiché. */
+const MATERIAL_FILTER_OTHER = "__autre__";
+
+function itemMatchesMaterialLabel(item, materialLabel) {
+    const material = String(item?.material || "").toLowerCase().trim();
+    const needle = String(materialLabel || "").toLowerCase().trim();
+    if (!needle) return false;
+    return material === needle || material.includes(needle);
+}
+
 const styles = {
     container: {
         width: "100%",
@@ -92,6 +102,25 @@ const styles = {
         fontFamily: "inherit",
         cursor: "pointer",
         whiteSpace: "nowrap",
+    },
+    materialFilterGroup: {
+        display: "flex",
+        alignItems: "center",
+        gap: "0.5rem",
+        flexWrap: "nowrap",
+    },
+    materialAlertBtn: {
+        border: "none",
+        borderRadius: "999px",
+        padding: "0.6rem 1rem",
+        fontWeight: 700,
+        fontSize: "0.85rem",
+        cursor: "pointer",
+        background: "var(--forest-deep, #2b4548)",
+        color: "#fff",
+        fontFamily: "inherit",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
     },
     filterMeta: {
         marginBottom: "1rem",
@@ -298,6 +327,10 @@ export default function ProfessionalAvailablePage() {
     const [watchlistOnly, setWatchlistOnly] = useState(false);
     const [watchlistIds, setWatchlistIds] = useState([]);
     const [watchBusyId, setWatchBusyId] = useState(0);
+    /** Libellés issus de `item_materials` (référentiel complet). */
+    const [catalogMaterialLabels, setCatalogMaterialLabels] = useState([]);
+    /** Recherche dans le référentiel lorsque le filtre « Autre » est actif. */
+    const [otherMaterialSearch, setOtherMaterialSearch] = useState("");
 
     const normalize = (value) => String(value || "").toLowerCase().trim();
 
@@ -352,10 +385,27 @@ export default function ProfessionalAvailablePage() {
         fetchItems();
     }, []);
 
-    const materialOptions = useMemo(() => {
-        const uniq = Array.from(new Set(items.map((it) => String(it.material || "").trim()).filter(Boolean)));
-        return uniq.sort((a, b) => a.localeCompare(b, "fr"));
-    }, [items]);
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(apiUrl("/item-materials"));
+                const data = await res.json();
+                if (!res.ok || cancelled) return;
+                const labels = (data.items || [])
+                    .map((row) => String(row.label || "").trim())
+                    .filter(Boolean);
+                const uniq = Array.from(new Set(labels));
+                uniq.sort((a, b) => a.localeCompare(b, "fr"));
+                if (!cancelled) setCatalogMaterialLabels(uniq);
+            } catch {
+                if (!cancelled) setCatalogMaterialLabels([]);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const conditionOptions = useMemo(() => {
         const uniq = Array.from(new Set(items.map((it) => String(it.condition || "").trim()).filter(Boolean)));
@@ -366,6 +416,15 @@ export default function ProfessionalAvailablePage() {
         const uniq = Array.from(new Set(items.map((it) => String(it.containerName || "").trim()).filter(Boolean)));
         return uniq.sort((a, b) => a.localeCompare(b, "fr"));
     }, [items]);
+
+    const catalogMatchesForOtherSearch = useMemo(() => {
+        const q = normalize(otherMaterialSearch);
+        if (!q) return [];
+        return catalogMaterialLabels.filter((label) => {
+            const nl = normalize(label);
+            return nl.includes(q) || nl === q;
+        });
+    }, [catalogMaterialLabels, otherMaterialSearch]);
 
     const filteredItems = useMemo(() => {
         const search = normalize(searchText);
@@ -386,19 +445,104 @@ export default function ProfessionalAvailablePage() {
                 .join(" ");
 
             if (search && !haystack.includes(search)) return false;
-            if (materialFilter && material !== normalize(materialFilter)) return false;
+
+            if (materialFilter === MATERIAL_FILTER_OTHER) {
+                const q = normalize(otherMaterialSearch);
+                if (q) {
+                    const matches = catalogMaterialLabels.filter((label) => {
+                        const nl = normalize(label);
+                        return nl.includes(q) || nl === q;
+                    });
+                    if (matches.length > 0) {
+                        const ok = matches.some((m) => {
+                            const nm = normalize(m);
+                            return material === nm || material.includes(nm);
+                        });
+                        if (!ok) return false;
+                    }
+                }
+            } else if (materialFilter && material !== normalize(materialFilter)) {
+                return false;
+            }
+
             if (conditionFilter && condition !== normalize(conditionFilter)) return false;
             if (containerFilter && container !== normalize(containerFilter)) return false;
             if (watchlistOnly && !watchSet.has(item.id)) return false;
             return true;
         });
-    }, [items, searchText, materialFilter, conditionFilter, containerFilter, watchlistOnly, watchlistIds]);
+    }, [
+        items,
+        searchText,
+        materialFilter,
+        otherMaterialSearch,
+        catalogMaterialLabels,
+        conditionFilter,
+        containerFilter,
+        watchlistOnly,
+        watchlistIds,
+    ]);
 
-    const hasActiveFilters = Boolean(searchText || materialFilter || conditionFilter || containerFilter || watchlistOnly);
+    const materialAlertContext = useMemo(() => {
+        const q = otherMaterialSearch.trim();
+
+        if (materialFilter && materialFilter !== MATERIAL_FILTER_OTHER) {
+            const hasAnnonces = items.some((it) => itemMatchesMaterialLabel(it, materialFilter));
+            if (!hasAnnonces) {
+                return {
+                    show: true,
+                    label: materialFilter,
+                    message: `Aucune annonce disponible pour le matériau « ${materialFilter} ».`,
+                };
+            }
+            return { show: false, label: "", message: "" };
+        }
+
+        if (materialFilter !== MATERIAL_FILTER_OTHER || normalize(q).length < 2) {
+            return { show: false, label: "", message: "" };
+        }
+
+        if (catalogMatchesForOtherSearch.length === 0) {
+            return {
+                show: true,
+                label: q,
+                message: `Aucun matériau enregistré ne correspond à « ${q} ».`,
+            };
+        }
+
+        const labelsWithAnnonces = catalogMatchesForOtherSearch.filter((label) =>
+            items.some((it) => itemMatchesMaterialLabel(it, label)),
+        );
+        if (labelsWithAnnonces.length === 0) {
+            const labelText =
+                catalogMatchesForOtherSearch.length === 1
+                    ? catalogMatchesForOtherSearch[0]
+                    : q;
+            return {
+                show: true,
+                label: labelText,
+                message:
+                    catalogMatchesForOtherSearch.length === 1
+                        ? `Aucune annonce disponible pour le matériau « ${catalogMatchesForOtherSearch[0]} ».`
+                        : `Aucune annonce disponible pour les matériaux correspondant à « ${q} ».`,
+            };
+        }
+
+        return { show: false, label: "", message: "" };
+    }, [items, materialFilter, otherMaterialSearch, catalogMatchesForOtherSearch]);
+
+    const hasActiveFilters = Boolean(
+        searchText ||
+            materialFilter ||
+            (materialFilter === MATERIAL_FILTER_OTHER && otherMaterialSearch.trim()) ||
+            conditionFilter ||
+            containerFilter ||
+            watchlistOnly,
+    );
 
     const clearFilters = () => {
         setSearchText("");
         setMaterialFilter("");
+        setOtherMaterialSearch("");
         setConditionFilter("");
         setContainerFilter("");
         setWatchlistOnly(false);
@@ -576,7 +720,7 @@ export default function ProfessionalAvailablePage() {
                 <p style={styles.subtitle}>Objets déposés et récupérables par les professionnels.</p>
             </header>
 
-            <section style={styles.filtersWrap}>
+            <section style={{ ...styles.filtersWrap, flexWrap: "wrap", alignItems: "center" }}>
                 <div style={styles.searchFieldWrap}>
                     <input
                         type="text"
@@ -587,12 +731,34 @@ export default function ProfessionalAvailablePage() {
                     />
                 </div>
 
-                <select value={materialFilter} onChange={(e) => setMaterialFilter(e.target.value)} style={styles.filterField}>
-                    <option value="">Materiau</option>
-                    {materialOptions.map((value) => (
-                        <option key={value} value={value}>{value}</option>
-                    ))}
-                </select>
+                <div style={styles.materialFilterGroup}>
+                    <select
+                        value={materialFilter}
+                        onChange={(e) => {
+                            const v = e.target.value;
+                            setMaterialFilter(v);
+                            if (v !== MATERIAL_FILTER_OTHER) setOtherMaterialSearch("");
+                        }}
+                        style={styles.filterField}
+                    >
+                        <option value="">Matériau</option>
+                        {catalogMaterialLabels.map((value) => (
+                            <option key={value} value={value}>
+                                {value}
+                            </option>
+                        ))}
+                        <option value={MATERIAL_FILTER_OTHER}>Autre</option>
+                    </select>
+                    {materialAlertContext.show && (
+                        <button
+                            type="button"
+                            title={materialAlertContext.message}
+                            style={styles.materialAlertBtn}
+                        >
+                            Être alerté
+                        </button>
+                    )}
+                </div>
 
                 <select value={conditionFilter} onChange={(e) => setConditionFilter(e.target.value)} style={styles.filterField}>
                     <option value="">Etat</option>
@@ -621,6 +787,84 @@ export default function ProfessionalAvailablePage() {
                     Reinitialiser
                 </button>
             </section>
+
+            {materialFilter === MATERIAL_FILTER_OTHER && (
+                <div
+                    style={{
+                        width: "100%",
+                        maxWidth: "520px",
+                        marginBottom: "1.25rem",
+                        padding: "1rem 1.15rem",
+                        borderRadius: "18px",
+                        border: "1px solid rgba(0,0,0,0.08)",
+                        background: "var(--surface-hover, #f4f7f6)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.65rem",
+                    }}
+                >
+                    <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--text-main)" }}>
+                        Nom du matériau
+                    </label>
+                    <input
+                        type="text"
+                        value={otherMaterialSearch}
+                        onChange={(e) => setOtherMaterialSearch(e.target.value)}
+                        placeholder="Tapez pour chercher dans le référentiel…"
+                        style={{
+                            ...styles.searchInput,
+                            maxWidth: "100%",
+                            borderRadius: "14px",
+                            background: "#fff",
+                            border: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                    />
+                    {catalogMatchesForOtherSearch.length > 0 && (
+                        <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-muted)" }}>
+                            Correspondances dans le référentiel
+                        </div>
+                    )}
+                    {catalogMatchesForOtherSearch.length > 0 && (
+                        <ul
+                            style={{
+                                margin: 0,
+                                padding: "0.35rem 0",
+                                listStyle: "none",
+                                maxHeight: "200px",
+                                overflowY: "auto",
+                                borderRadius: "12px",
+                                background: "#fff",
+                                border: "1px solid rgba(0,0,0,0.06)",
+                            }}
+                        >
+                            {catalogMatchesForOtherSearch.map((label) => (
+                                <li key={label}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setMaterialFilter(label);
+                                            setOtherMaterialSearch("");
+                                        }}
+                                        style={{
+                                            width: "100%",
+                                            textAlign: "left",
+                                            padding: "0.55rem 0.85rem",
+                                            border: "none",
+                                            background: "transparent",
+                                            cursor: "pointer",
+                                            fontSize: "0.9rem",
+                                            fontFamily: "inherit",
+                                        }}
+                                        className="catalog-material-suggest-btn"
+                                    >
+                                        {label}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
 
             <div style={styles.filterMeta}>
                 <Filter size={14} />
@@ -745,6 +989,9 @@ export default function ProfessionalAvailablePage() {
                 }
                 .reserve-btn-card:hover {
                     background: rgba(255,255,255,0.24) !important;
+                }
+                .catalog-material-suggest-btn:hover {
+                    background: rgb(229, 255, 188) !important;
                 }
                 @keyframes fadeIn {
                     from { opacity: 0; transform: translateY(10px); }

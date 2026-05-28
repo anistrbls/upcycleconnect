@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
 import { formatDateFR } from "../../lib/formatters";
 import AdminModal from "../admin/AdminModal";
+import { ForumPhotoPicker, ForumPhotosGrid } from "./ForumPhotoAttachments";
 
 /* ── Icônes ─────────────────────────────────────────────────────────────── */
 const IcMsg = () => (
@@ -32,17 +33,17 @@ const IcLock = () => (
     </svg>
 );
 const IcEye = () => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
     </svg>
 );
 const IcTrash = () => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="3 6 5 6 21 6" /><path d="M19 6l-2 14H7L5 6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </svg>
 );
 const IcEdit = () => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
     </svg>
 );
@@ -57,7 +58,8 @@ function StatusBadge({ status }) {
     const s = STATUS_BADGE[status] || STATUS_BADGE.open;
     return (
         <span className="db-badge" style={{ background: s.bg, color: s.color, flexShrink: 0, fontSize: "0.72rem" }}>
-            {status === "closed" && <IcLock />} {s.label}
+            {status === "closed" ? <IcLock /> : null}
+            <span>{s.label}</span>
         </span>
     );
 }
@@ -150,6 +152,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [replyContent, setReplyContent] = useState("");
+    const [replyPhotos, setReplyPhotos] = useState([]);
     const [sending, setSending] = useState(false);
     const [editReplyId, setEditReplyId] = useState(null);
     const [editContent, setEditContent] = useState("");
@@ -175,16 +178,17 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
     useEffect(() => { load(); }, [topicId]);
 
     const handleSendReply = async () => {
-        if (!replyContent.trim()) return;
+        if (!replyContent.trim() && replyPhotos.length === 0) return;
         setSending(true);
         try {
             const res = await fetch(apiUrl("/forum/replies"), {
                 method: "POST",
                 headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
-                body: JSON.stringify({ topicId, content: replyContent }),
+                body: JSON.stringify({ topicId, content: replyContent, photos: replyPhotos }),
             });
             if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
             setReplyContent("");
+            setReplyPhotos([]);
             load();
         } catch (e) { setError(String(e.message)); }
         finally { setSending(false); }
@@ -337,13 +341,20 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                             <span style={{ fontWeight: 700, fontSize: "0.93rem" }}>{topic.authorName}</span>
                             <span style={{ color: "#71767B", fontSize: "0.8rem" }}>· {formatDateFR(topic.createdAt)}</span>
                             {!topic.isOwn && (
-                                <button className="x-icon-btn" style={{ marginLeft: "auto", color: "#71767B", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
-                                    onClick={() => { setReportTarget({ type: "topic", id: topic.id }); setReportOpen(true); }}>
-                                    <IcFlag /> Signaler
+                                <button
+                                    type="button"
+                                    className="conseil-card-action-btn conseil-card-action-btn--spacer"
+                                    title="Signaler"
+                                    onClick={() => { setReportTarget({ type: "topic", id: topic.id }); setReportOpen(true); }}
+                                >
+                                    <IcFlag />
                                 </button>
                             )}
                         </div>
-                        <p style={{ fontSize: "0.93rem", lineHeight: 1.7, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }}>{topic.content}</p>
+                        {topic.content ? (
+                            <p style={{ fontSize: "0.93rem", lineHeight: 1.7, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }}>{topic.content}</p>
+                        ) : null}
+                        <ForumPhotosGrid photos={topic.photos} />
                     </div>
                 </div>
             </div>
@@ -388,41 +399,64 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                                     </div>
                                 </div>
                             ) : (
-                                <p style={{ fontSize: "0.9rem", lineHeight: 1.65, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }}>{r.content}</p>
+                                <>
+                                    {r.content ? (
+                                        <p style={{ fontSize: "0.9rem", lineHeight: 1.65, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }}>{r.content}</p>
+                                    ) : null}
+                                    <ForumPhotosGrid photos={r.photos} />
+                                </>
                             )}
                         </div>
                     </div>
                     {/* Actions réponse */}
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", paddingTop: "0.5rem", borderTop: "1px solid #EFF3F4" }}>
+                    <div className="conseil-card-actions">
                         <button
-                            className="x-icon-btn"
-                            style={{ color: r.likedByMe ? "#E0245E" : "#71767B", display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.78rem" }}
+                            type="button"
+                            className={`conseil-card-action-btn conseil-card-action-btn--like${r.likedByMe ? " conseil-card-action-btn--like-active" : ""}`}
+                            title={r.likedByMe ? "Je n'aime plus" : "J'aime"}
                             onClick={() => handleLike(r.id, r.likedByMe)}
                         >
-                            <IcHeart filled={r.likedByMe} /> {r.likeCount > 0 && <span>{r.likeCount}</span>}
+                            <IcHeart filled={r.likedByMe} />
+                            {r.likeCount > 0 ? <span>{r.likeCount}</span> : null}
                         </button>
                         {!r.isOwn && (
-                            <button className="x-icon-btn" style={{ color: "#71767B", display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.78rem", marginLeft: "0.5rem" }}
-                                onClick={() => { setReportTarget({ type: "reply", id: r.id }); setReportOpen(true); }}>
-                                <IcFlag /> Signaler
+                            <button
+                                type="button"
+                                className="conseil-card-action-btn"
+                                title="Signaler"
+                                onClick={() => { setReportTarget({ type: "reply", id: r.id }); setReportOpen(true); }}
+                            >
+                                <IcFlag />
                             </button>
                         )}
                         {r.isOwn && editReplyId !== r.id && (
-                            <button className="x-icon-btn" style={{ color: "#71767B", display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.78rem", marginLeft: "auto" }}
-                                onClick={() => { setEditReplyId(r.id); setEditContent(r.content); }}>
+                            <button
+                                type="button"
+                                className="conseil-card-action-btn"
+                                title="Modifier"
+                                onClick={() => { setEditReplyId(r.id); setEditContent(r.content); }}
+                            >
                                 <IcEdit />
                             </button>
                         )}
                         {(r.isOwn || canModerate) && (
-                            <button className="x-icon-btn" style={{ color: "#B24A4A", display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.78rem" }}
-                                onClick={() => handleDeleteReply(r.id)}>
+                            <button
+                                type="button"
+                                className="conseil-card-action-btn conseil-card-action-btn--delete conseil-card-action-btn--spacer"
+                                title="Supprimer"
+                                onClick={() => handleDeleteReply(r.id)}
+                            >
                                 <IcTrash />
                             </button>
                         )}
                         {canModerate && (
-                            <button className="x-icon-btn" style={{ color: r.status === "hidden" ? "#2E7D6E" : "#71767B", display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.78rem" }}
-                                onClick={() => handleHideReply(r.id, r.status)}>
-                                <IcEye /> {r.status === "hidden" ? "Afficher" : "Masquer"}
+                            <button
+                                type="button"
+                                className={`conseil-card-action-btn${r.status === "hidden" ? " conseil-card-action-btn--moderate-active" : ""}`}
+                                title={r.status === "hidden" ? "Afficher" : "Masquer"}
+                                onClick={() => handleHideReply(r.id, r.status)}
+                            >
+                                <IcEye />
                             </button>
                         )}
                     </div>
@@ -440,9 +474,10 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                         rows={4}
                         style={{ width: "100%", borderRadius: "12px", border: "1px solid #e0e0e0", padding: "0.75rem", fontSize: "0.9rem", fontFamily: "inherit", resize: "vertical", outline: "none", boxSizing: "border-box" }}
                     />
+                    <ForumPhotoPicker photos={replyPhotos} onChange={setReplyPhotos} disabled={sending} />
                     {error && <p style={{ color: "#a23b3b", fontSize: "0.83rem", margin: "0.4rem 0 0" }}>{error}</p>}
                     <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.65rem" }}>
-                        <button className="action-cta task-action-btn" onClick={handleSendReply} disabled={sending || !replyContent.trim()}>
+                        <button className="action-cta task-action-btn" onClick={handleSendReply} disabled={sending || (!replyContent.trim() && replyPhotos.length === 0)}>
                             {sending ? "Envoi…" : "Répondre"}
                         </button>
                     </div>
@@ -503,6 +538,7 @@ export default function ForumView({ role = "particulier", callerUserId }) {
     const [selectedTopicId, setSelectedTopicId] = useState(null);
     const [newTopicOpen, setNewTopicOpen] = useState(false);
     const [newForm, setNewForm] = useState({ title: "", content: "" });
+    const [newTopicPhotos, setNewTopicPhotos] = useState([]);
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState("");
 
@@ -529,12 +565,13 @@ export default function ForumView({ role = "particulier", callerUserId }) {
             const res = await fetch(apiUrl("/forum/topics"), {
                 method: "POST",
                 headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
-                body: JSON.stringify(newForm),
+                body: JSON.stringify({ ...newForm, photos: newTopicPhotos }),
             });
             if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
             const topic = await res.json();
             setNewTopicOpen(false);
             setNewForm({ title: "", content: "" });
+            setNewTopicPhotos([]);
             setSelectedTopicId(topic.id);
             loadTopics();
         } catch (e) { setCreateError(String(e.message)); }
@@ -563,7 +600,7 @@ export default function ForumView({ role = "particulier", callerUserId }) {
                 onNew={() => setNewTopicOpen(true)}
             />
 
-            <AdminModal open={newTopicOpen} title="Nouveau sujet" onClose={() => setNewTopicOpen(false)}>
+            <AdminModal open={newTopicOpen} title="Nouveau sujet" onClose={() => { setNewTopicOpen(false); setNewTopicPhotos([]); }}>
                 <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.3rem" }}>Titre *</label>
                 <input
                     value={newForm.title}
@@ -580,6 +617,7 @@ export default function ForumView({ role = "particulier", callerUserId }) {
                     rows={5}
                     style={{ width: "100%", borderRadius: "10px", border: "1px solid #e0e0e0", padding: "0.6rem 0.8rem", fontSize: "0.9rem", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
                 />
+                <ForumPhotoPicker photos={newTopicPhotos} onChange={setNewTopicPhotos} disabled={creating} />
                 {createError && <p style={{ color: "#a23b3b", fontSize: "0.83rem", margin: "0.4rem 0 0" }}>{createError}</p>}
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }}>
                     <button className="action-cta" onClick={() => setNewTopicOpen(false)}>Annuler</button>

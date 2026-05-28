@@ -210,8 +210,8 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
 
             {/* Feed cartes */}
             {loading && (
-                <div style={{ display: "grid", gap: "0.85rem" }}>
-                    {[1, 2, 3].map((k) => (
+                <div className="conseils-feed-grid">
+                    {[1, 2, 3, 4].map((k) => (
                         <div key={k} style={{ background: "#F7F9F9", borderRadius: "20px", height: "130px", opacity: 0.5 }} />
                     ))}
                 </div>
@@ -222,7 +222,7 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
                 </div>
             )}
             {!loading && visible.length > 0 && (
-                <div style={{ display: "grid", gap: "0.85rem" }}>
+                <div className="conseils-feed-grid">
                     {visible.map((item, idx) => (
                         <AdminConseilCard
                             key={item.id}

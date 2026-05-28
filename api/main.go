@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,7 +21,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"upcycleconnect/api/items"
-	"upcycleconnect/api/pricing"
 	"upcycleconnect/api/projects"
 	"upcycleconnect/api/planning"
 	"upcycleconnect/api/reservations"
@@ -296,9 +296,6 @@ func main() {
 	// Module projects (projets d'upcycling professionnels)
 	projects.RegisterRoutes(mux, db, authMiddleware)
 
-	// Module pricing
-	pricing.RegisterRoutes(mux, db, authMiddleware)
-
 	// Module salarié — contenus (conseils + actualités)
 	if err := ensureSalarieContentsSchema(); err != nil {
 		log.Fatalf("Salarie contents schema error: %v", err)
@@ -308,10 +305,18 @@ func main() {
 	mux.Handle("/api/salarie/contents/feed", authMiddleware(http.HandlerFunc(salarieContentsFeedHandler)))
 	mux.Handle("/api/salarie/contents/like/", authMiddleware(http.HandlerFunc(salarieContentLikeHandler)))
 	mux.Handle("/api/salarie/contents/favorite/", authMiddleware(http.HandlerFunc(salarieContentFavoriteHandler)))
-	mux.Handle("/api/salarie/contents/", authMiddleware(http.HandlerFunc(salarieContentByIDHandler)))
+	mux.Handle("/api/salarie/contents/", authMiddleware(http.HandlerFunc(salarieContentsSubpathHandler)))
 	mux.Handle("/api/admin/salarie-contents", authMiddleware(http.HandlerFunc(adminSalarieContentsHandler)))
 	mux.Handle("/api/admin/salarie-contents/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		if strings.HasSuffix(path, "/likes") && r.Method == http.MethodGet {
+			conseilEngagementLikersHandler(w, r)
+			return
+		}
+		if strings.HasSuffix(path, "/favorites") && r.Method == http.MethodGet {
+			conseilEngagementFavoritersHandler(w, r)
+			return
+		}
 		if strings.HasSuffix(path, "/validate") && r.Method == http.MethodPost {
 			adminSalarieContentValidateHandler(w, r)
 			return
@@ -360,6 +365,19 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		if err := publishDueScheduledConseils(); err != nil {
+			log.Printf("[conseil] publication programmée: %v", err)
+		}
+		for range ticker.C {
+			if err := publishDueScheduledConseils(); err != nil {
+				log.Printf("[conseil] publication programmée: %v", err)
+			}
+		}
+	}()
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
@@ -3430,6 +3448,7 @@ func salarieContentsFeedHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	_ = publishDueScheduledConseils()
 	// Identifier l'utilisateur courant
 	var callerUserID int64
 	if claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims); ok {
@@ -3610,6 +3629,19 @@ func salarieContentFavoriteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func salarieContentsSubpathHandler(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	if strings.HasSuffix(path, "/likes") && r.Method == http.MethodGet {
+		conseilEngagementLikersHandler(w, r)
+		return
+	}
+	if strings.HasSuffix(path, "/favorites") && r.Method == http.MethodGet {
+		conseilEngagementFavoritersHandler(w, r)
+		return
+	}
+	salarieContentByIDHandler(w, r)
+}
+
 func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDFromPath(r.URL.Path, "/api/salarie/contents/")
 	if err != nil {
@@ -3672,7 +3704,8 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		item, err := buildContentItemFromRow(row, strings.TrimSpace(firstname+" "+lastname), 0, 0, row.ContentType == "conseil")
+		likeCount, favoriteCount, _ := fetchConseilEngagementCounts(id)
+		item, err := buildContentItemFromRow(row, strings.TrimSpace(firstname+" "+lastname), likeCount, favoriteCount, row.ContentType == "conseil")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not load content")
 			return
@@ -3771,6 +3804,7 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		_ = publishDueScheduledConseils()
 		statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
 		typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
 		filterExtra, filterArgs := buildConseilFilterClause(map[string]string{
@@ -3878,20 +3912,30 @@ func adminSalarieContentsHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		saveStatus := payload.Status
+		if payload.Type == "conseil" {
+			var statusErr error
+			saveStatus, statusErr = conseilStatusForSave(payload.Status, payload.ConseilMetaPayload)
+			if statusErr != nil {
+				writeConseilValidationError(w, statusErr)
+				return
+			}
+		}
 		coverURL, photosJSON := resolveConseilMedia(payload.ImageURL, payload.Photos)
 		id, createdAt, updatedAt, err := insertSalarieContentWithMeta(
 			adminUserID, payload.Type,
 			strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body),
-			payload.Status, coverURL, photosJSON, payload.ConseilMetaPayload,
+			saveStatus, coverURL, photosJSON, payload.ConseilMetaPayload,
 		)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create content")
 			return
 		}
+		_ = publishDueScheduledConseils()
 		resp := map[string]interface{}{
 			"id": id, "userId": adminUserID, "type": payload.Type,
 			"title": strings.TrimSpace(payload.Title), "body": strings.TrimSpace(payload.Body),
-			"status": payload.Status, "imageUrl": coverURL, "photos": parseStringArrayJSON(photosJSON),
+			"status": saveStatus, "imageUrl": coverURL, "photos": parseStringArrayJSON(photosJSON),
 			"isPinned": false, "createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		}
@@ -3914,6 +3958,7 @@ func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		_ = publishDueScheduledConseils()
 		var row conseilContentRow
 		var firstname, lastname string
 		err := db.QueryRow(`
@@ -3941,7 +3986,8 @@ func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not fetch content")
 			return
 		}
-		item, err := buildContentItemFromRow(row, strings.TrimSpace(firstname+" "+lastname), 0, 0, row.ContentType == "conseil")
+		likeCount, favoriteCount, _ := fetchConseilEngagementCounts(id)
+		item, err := buildContentItemFromRow(row, strings.TrimSpace(firstname+" "+lastname), likeCount, favoriteCount, row.ContentType == "conseil")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not load content")
 			return
@@ -3991,20 +4037,29 @@ func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		saveStatus := payload.Status
+		if contentType == "conseil" {
+			var statusErr error
+			saveStatus, statusErr = conseilStatusForSave(payload.Status, payload.ConseilMetaPayload)
+			if statusErr != nil {
+				writeConseilValidationError(w, statusErr)
+				return
+			}
+		}
 		pinned := false
 		if payload.IsPinned != nil {
 			pinned = *payload.IsPinned
 		}
 		_, err = db.Exec(`
 			UPDATE salarie_contents SET rejection_comment = CASE WHEN $1 IN ('publie', 'en_attente') THEN '' ELSE rejection_comment END WHERE id = $2
-		`, payload.Status, id)
+		`, saveStatus, id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not update content")
 			return
 		}
 		coverURL, photosJSON := resolveConseilMedia(payload.ImageURL, payload.Photos)
 		updatedAt, err := updateSalarieContentWithMeta(id,
-			strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), payload.Status,
+			strings.TrimSpace(payload.Title), strings.TrimSpace(payload.Body), saveStatus,
 			coverURL, photosJSON, &pinned, payload.ConseilMetaPayload)
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -4014,8 +4069,9 @@ func adminSalarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not update content")
 			return
 		}
+		_ = publishDueScheduledConseils()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id": id, "status": payload.Status, "isPinned": pinned,
+			"id": id, "status": saveStatus, "isPinned": pinned,
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
 		})
 
@@ -6123,6 +6179,79 @@ func adminSaleCommissionHandler(w http.ResponseWriter, r *http.Request) {
 
 // ─── FORUM ────────────────────────────────────────────────────────────────────
 
+const (
+	maxForumPhotos     = 5
+	maxForumPhotoBytes = 5 * 1024 * 1024
+)
+
+func validateForumPhotoDataURL(dataURL string) error {
+	trimmed := strings.TrimSpace(dataURL)
+	if trimmed == "" {
+		return fmt.Errorf("empty image")
+	}
+	if !strings.HasPrefix(trimmed, "data:") {
+		return fmt.Errorf("invalid image format: data URL expected")
+	}
+	comma := strings.Index(trimmed, ",")
+	if comma <= 0 || comma >= len(trimmed)-1 {
+		return fmt.Errorf("invalid image payload")
+	}
+	header := strings.ToLower(trimmed[:comma])
+	if !strings.Contains(header, ";base64") {
+		return fmt.Errorf("invalid image payload: base64 expected")
+	}
+	allowedFormats := []string{"data:image/jpeg", "data:image/jpg", "data:image/png", "data:image/webp"}
+	allowed := false
+	for _, format := range allowedFormats {
+		if strings.HasPrefix(header, format) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("unsupported image format; allowed: jpg, jpeg, png, webp")
+	}
+	payload := trimmed[comma+1:]
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(payload)
+		if err != nil {
+			return fmt.Errorf("invalid base64 image payload")
+		}
+	}
+	if len(decoded) > maxForumPhotoBytes {
+		return fmt.Errorf("image too large (max 5MB)")
+	}
+	return nil
+}
+
+func normalizeForumPhotosJSON(photos []string) (string, error) {
+	clean := make([]string, 0, len(photos))
+	seen := map[string]bool{}
+	for _, p := range photos {
+		s := strings.TrimSpace(p)
+		if s == "" || seen[s] {
+			continue
+		}
+		if err := validateForumPhotoDataURL(s); err != nil {
+			return "", err
+		}
+		seen[s] = true
+		clean = append(clean, s)
+		if len(clean) >= maxForumPhotos {
+			break
+		}
+	}
+	return encodeStringArrayJSON(clean), nil
+}
+
+func forumMessagePresent(content, photosJSON string) bool {
+	if strings.TrimSpace(content) != "" {
+		return true
+	}
+	return len(parseStringArrayJSON(photosJSON)) > 0
+}
+
 func ensureForumSchema() error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS forum_topics (
@@ -6160,6 +6289,8 @@ func ensureForumSchema() error {
 			reply_id BIGINT NOT NULL,
 			PRIMARY KEY (user_id, reply_id)
 		)`,
+		`ALTER TABLE forum_topics ADD COLUMN IF NOT EXISTS photos TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS photos TEXT NOT NULL DEFAULT '[]'`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -6242,23 +6373,31 @@ func forumTopicsHandler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var p struct {
-			Title   string `json:"title"`
-			Content string `json:"content"`
+			Title   string   `json:"title"`
+			Content string   `json:"content"`
+			Photos  []string `json:"photos"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil || strings.TrimSpace(p.Title) == "" {
 			writeError(w, http.StatusBadRequest, "title required")
 			return
 		}
+		photosJSON, normErr := normalizeForumPhotosJSON(p.Photos)
+		if normErr != nil {
+			writeError(w, http.StatusBadRequest, normErr.Error())
+			return
+		}
+		content := strings.TrimSpace(p.Content)
 		var id int64
 		var createdAt, updatedAt time.Time
-		err = db.QueryRow(`INSERT INTO forum_topics (user_id, title, content) VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`,
-			callerID, strings.TrimSpace(p.Title), strings.TrimSpace(p.Content)).Scan(&id, &createdAt, &updatedAt)
+		err = db.QueryRow(`INSERT INTO forum_topics (user_id, title, content, photos) VALUES ($1,$2,$3,$4) RETURNING id, created_at, updated_at`,
+			callerID, strings.TrimSpace(p.Title), content, photosJSON).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create topic")
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"id": id, "userId": callerID, "title": p.Title, "content": p.Content,
+			"id": id, "userId": callerID, "title": p.Title, "content": content,
+			"photos": parseStringArrayJSON(photosJSON),
 			"status": "open", "replyCount": 0,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
 			"updatedAt": updatedAt.UTC().Format(time.RFC3339),
@@ -6287,12 +6426,12 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var topicUserID int64
-		var fn, ln, title, content, status string
+		var fn, ln, title, content, status, topicPhotosJSON string
 		var createdAt, updatedAt time.Time
 		if err := db.QueryRow(`
-			SELECT t.user_id, u.firstname, u.lastname, t.title, t.content, t.status, t.created_at, t.updated_at
+			SELECT t.user_id, u.firstname, u.lastname, t.title, t.content, t.status, t.created_at, t.updated_at, t.photos
 			FROM forum_topics t JOIN users u ON u.id = t.user_id WHERE t.id = $1
-		`, topicID).Scan(&topicUserID, &fn, &ln, &title, &content, &status, &createdAt, &updatedAt); err != nil {
+		`, topicID).Scan(&topicUserID, &fn, &ln, &title, &content, &status, &createdAt, &updatedAt, &topicPhotosJSON); err != nil {
 			writeError(w, http.StatusNotFound, "topic not found")
 			return
 		}
@@ -6302,7 +6441,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// replies
 		replyRows, err := db.Query(`
-			SELECT r.id, r.user_id, u.firstname, u.lastname, r.content, r.status, r.created_at, r.updated_at,
+			SELECT r.id, r.user_id, u.firstname, u.lastname, r.content, r.status, r.created_at, r.updated_at, r.photos,
 			       (SELECT COUNT(*) FROM forum_reply_likes l WHERE l.reply_id = r.id) AS like_count,
 			       EXISTS(SELECT 1 FROM forum_reply_likes l2 WHERE l2.reply_id = r.id AND l2.user_id = $2) AS liked_by_me
 			FROM forum_replies r JOIN users u ON u.id = r.user_id
@@ -6317,10 +6456,10 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 		replies := make([]map[string]interface{}, 0)
 		for replyRows.Next() {
 			var rid, ruID, lc int64
-			var rfn, rln, rc, rs string
+			var rfn, rln, rc, rs, replyPhotosJSON string
 			var rca, rua time.Time
 			var likedByMe bool
-			if err := replyRows.Scan(&rid, &ruID, &rfn, &rln, &rc, &rs, &rca, &rua, &lc, &likedByMe); err != nil {
+			if err := replyRows.Scan(&rid, &ruID, &rfn, &rln, &rc, &rs, &rca, &rua, &replyPhotosJSON, &lc, &likedByMe); err != nil {
 				continue
 			}
 			if rs == "hidden" && callerRole != "admin" && callerRole != "salarie" {
@@ -6330,6 +6469,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 				"id": rid, "userId": ruID,
 				"authorName": strings.TrimSpace(rfn + " " + rln),
 				"content":    rc, "status": rs,
+				"photos":     parseStringArrayJSON(replyPhotosJSON),
 				"likeCount": lc, "likedByMe": likedByMe,
 				"isOwn":     ruID == callerID,
 				"createdAt": rca.UTC().Format(time.RFC3339),
@@ -6340,6 +6480,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 			"id": topicID, "userId": topicUserID,
 			"authorName": strings.TrimSpace(fn + " " + ln),
 			"title":      title, "content": content, "status": status,
+			"photos":    parseStringArrayJSON(topicPhotosJSON),
 			"isOwn":     topicUserID == callerID,
 			"replies":   replies,
 			"createdAt": createdAt.UTC().Format(time.RFC3339),
@@ -6412,12 +6553,22 @@ func forumRepliesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p struct {
-		TopicID int64  `json:"topicId"`
-		Content string `json:"content"`
+		TopicID int64    `json:"topicId"`
+		Content string   `json:"content"`
+		Photos  []string `json:"photos"`
 	}
-	json.NewDecoder(r.Body).Decode(&p)
-	if p.TopicID == 0 || strings.TrimSpace(p.Content) == "" {
-		writeError(w, http.StatusBadRequest, "topicId and content required")
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	photosJSON, normErr := normalizeForumPhotosJSON(p.Photos)
+	if normErr != nil {
+		writeError(w, http.StatusBadRequest, normErr.Error())
+		return
+	}
+	content := strings.TrimSpace(p.Content)
+	if p.TopicID == 0 || !forumMessagePresent(content, photosJSON) {
+		writeError(w, http.StatusBadRequest, "topicId and content or photos required")
 		return
 	}
 	// vérifier que le sujet est ouvert
@@ -6429,15 +6580,16 @@ func forumRepliesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var id int64
 	var createdAt time.Time
-	err = db.QueryRow(`INSERT INTO forum_replies (topic_id, user_id, content) VALUES ($1,$2,$3) RETURNING id, created_at`,
-		p.TopicID, callerID, strings.TrimSpace(p.Content)).Scan(&id, &createdAt)
+	err = db.QueryRow(`INSERT INTO forum_replies (topic_id, user_id, content, photos) VALUES ($1,$2,$3,$4) RETURNING id, created_at`,
+		p.TopicID, callerID, content, photosJSON).Scan(&id, &createdAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create reply")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"id": id, "topicId": p.TopicID, "userId": callerID,
-		"content": p.Content, "status": "visible", "likeCount": 0, "likedByMe": false,
+		"content": content, "photos": parseStringArrayJSON(photosJSON),
+		"status": "visible", "likeCount": 0, "likedByMe": false,
 		"isOwn": true, "createdAt": createdAt.UTC().Format(time.RFC3339),
 	})
 }

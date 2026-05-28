@@ -1042,6 +1042,10 @@ func (r *Repository) AssignLogistics(ctx context.Context, itemID int64, p Assign
 		return fmt.Errorf("cannot assign from status %q", status)
 	}
 
+	if err := r.ExpireContainerMaintenanceIfEnded(ctx, p.ContainerID); err != nil {
+		return err
+	}
+
 	// Validate container has capacity
 	var capacity, currentCount int
 	var containerStatus string
@@ -1053,14 +1057,19 @@ func (r *Repository) AssignLogistics(ctx context.Context, itemID int64, p Assign
 	if containerStatus == "inactif" {
 		return fmt.Errorf("container is inactive")
 	}
-	if containerStatus == "maintenance" {
-		if !maintenanceStart.Valid || !maintenanceEnd.Valid {
-			return fmt.Errorf("container maintenance schedule is invalid")
-		}
-		now := time.Now()
-		if !now.Before(maintenanceStart.Time) && !now.After(maintenanceEnd.Time) {
-			return fmt.Errorf("container is in maintenance window")
-		}
+	now := time.Now()
+	var c Container
+	c.Status = containerStatus
+	if maintenanceStart.Valid {
+		t := maintenanceStart.Time
+		c.MaintenanceStart = &t
+	}
+	if maintenanceEnd.Valid {
+		t := maintenanceEnd.Time
+		c.MaintenanceEnd = &t
+	}
+	if isContainerInMaintenanceWindow(c, now) {
+		return fmt.Errorf("container is in maintenance window")
 	}
 	if containerStatus != "actif" && containerStatus != "maintenance" && containerStatus != "inactif" {
 		return fmt.Errorf("container is not assignable (status: %s)", containerStatus)
@@ -1069,7 +1078,6 @@ func (r *Repository) AssignLogistics(ctx context.Context, itemID int64, p Assign
 		return fmt.Errorf("container is full (%d/%d)", currentCount, capacity)
 	}
 
-	now := time.Now()
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE item_logistics SET
 			workflow_status = 'assigned',

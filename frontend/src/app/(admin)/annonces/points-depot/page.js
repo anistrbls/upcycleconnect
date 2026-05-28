@@ -1,13 +1,30 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { 
   Building2, MapPin, Package, Settings2, Plus, 
   Trash2, Edit3, X, ChevronRight, Info, AlertTriangle, CheckCircle2 
 } from "lucide-react";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
-import DepositMap from "../../../components/admin/DepositMap";
+const DepositMap = dynamic(() => import("../../../components/admin/DepositMap"), {
+  ssr: false,
+  loading: () => (
+    <div
+      style={{
+        height: "400px",
+        background: "#f0f0f0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: "24px",
+      }}
+    >
+      Chargement de la carte…
+    </div>
+  ),
+});
 
 const styles = {
     container: {

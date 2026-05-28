@@ -481,6 +481,9 @@ export default function ConseilFormSections({ formState, setFormState, isAdmin =
                 <label style={S.label}>
                     Date de publication prévue (facultatif)
                     <input type="datetime-local" value={formState.scheduledPublishAt} onChange={set("scheduledPublishAt")} style={S.input} />
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+                        Avec une date future, choisissez le statut « Publié » : le conseil restera en brouillon jusqu&apos;à cette date, puis sera publié automatiquement.
+                    </span>
                 </label>
                 {authorName && (
                     <label style={S.label}>

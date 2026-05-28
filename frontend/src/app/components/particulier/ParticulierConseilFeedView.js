@@ -33,9 +33,6 @@ function ConseilCard({ item, delay = 0, onDetail }) {
     const [favoriteCount, setFavoriteCount] = useState(item.favoriteCount ?? 0);
     const [expanded, setExpanded] = useState(false);
 
-    const coreText = (item.displayBody || item.summary || item.body || "").trim();
-    const showSummaryInBody = !!(item.summary?.trim() && coreText === item.summary.trim());
-
     return (
         <div className="x-card" style={{ animationDelay: `${delay}s` }}>
             {item.isPinned && (
@@ -61,8 +58,6 @@ function ConseilCard({ item, delay = 0, onDetail }) {
                         item={item}
                         expanded={expanded}
                         onToggleExpand={() => setExpanded((p) => !p)}
-                        preferFullBody={!showSummaryInBody}
-                        bodyOnly={showSummaryInBody}
                     />
                 </div>
 
@@ -165,12 +160,12 @@ export default function ParticulierConseilFeedView({ feedItems = [], loading, er
                 </div>
             )}
 
-            <div style={{ display: "grid", gap: "0.85rem", maxWidth: "600px", marginLeft: "auto", marginRight: "auto" }}>
-                {loading && [1, 2, 3].map((k) => (
+            <div className="conseils-feed-grid conseils-feed-grid--public">
+                {loading && [1, 2, 3, 4].map((k) => (
                     <div key={k} style={{ background: "#F7F9F9", borderRadius: "20px", height: "130px", opacity: 0.5 }} />
                 ))}
                 {!loading && visibleItems.length === 0 && (
-                    <div style={{ textAlign: "center", padding: "3.5rem 1rem" }}>
+                    <div className="conseils-feed-grid__empty" style={{ textAlign: "center", padding: "3.5rem 1rem" }}>
                         <p style={{ fontSize: "1rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "0.35rem" }}>
                             {favoritesOnly ? "Aucun conseil en favoris" : "Aucun conseil publié pour le moment"}
                         </p>

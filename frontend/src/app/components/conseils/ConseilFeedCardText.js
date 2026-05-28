@@ -9,7 +9,8 @@ import {
 
 /**
  * Bloc texte structuré pour les cartes conseil (feed).
- * @param {boolean} preferFullBody — admin : résumé + corps séparés ; public : displayBody
+ * Ordre : titre → résumé → pastilles (catégorie, niveau, public…) → corps.
+ * @param {boolean} preferFullBody — admin : corps complet sous le résumé
  */
 const BODY_TRUNC_LEN = 300;
 
@@ -17,13 +18,11 @@ export default function ConseilFeedCardText({
     item,
     expanded = false,
     onToggleExpand,
-    preferFullBody = true,
-    bodyOnly = false,
+    preferFullBody = false,
 }) {
     const summary = (item?.summary || "").trim();
-    const showSummary = preferFullBody && summary.length > 0;
     const hasMaterialsIntro = formatMaterialsIntro(item?.materials).length > 0;
-    const coreText = getConseilFeedCoreText(item, { preferFullBody, bodyOnly });
+    const coreText = getConseilFeedCoreText(item, { preferFullBody });
     const introLen = hasMaterialsIntro ? formatMaterialsIntro(item?.materials).length : 0;
     const totalLen = introLen + coreText.length + (hasMaterialsIntro && coreText ? 2 : 0);
     const needsTrunc = totalLen > BODY_TRUNC_LEN;
@@ -40,11 +39,11 @@ export default function ConseilFeedCardText({
                 <h3 className="conseil-card-text__title">{item.title}</h3>
             )}
 
-            <ConseilCardFactsStrip item={item} />
-
-            {showSummary && (
+            {summary && (
                 <p className="conseil-card-text__summary">{summary}</p>
             )}
+
+            <ConseilCardFactsStrip item={item} />
 
             {showBody && (
                 <div className="conseil-card-text__body-wrap">
@@ -70,7 +69,7 @@ export default function ConseilFeedCardText({
                 </div>
             )}
 
-            {!showBody && !showSummary && !item?.title && (
+            {!showBody && !summary && !item?.title && (
                 <p className="conseil-card-text__empty">Aucun contenu texte.</p>
             )}
         </div>

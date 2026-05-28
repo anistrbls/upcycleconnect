@@ -2,12 +2,10 @@
 
 import { use, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import CategoryAdminView from "../../../components/admin/offers/CategoryAdminView";
 import ServiceAdminView from "../../../components/admin/offers/ServiceAdminView";
 import ServiceFormView from "../../../components/admin/offers/ServiceFormView";
 import OverviewStats from "../../../components/admin/offers/OverviewStats";
 import ReservationsAdminView from "../../../components/admin/offers/ReservationsAdminView";
-import PricingAdminView from "../../../components/admin/offers/PricingAdminView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
@@ -20,23 +18,16 @@ export default function OffersSubPage({ params }) {
     const activeModule = getModuleByKey("offres-prestations");
     const activeSub = getSubNavItem(activeModule.key, subpage);
 
-    // ------------------------------------------------------------------ //
-    //  États partagés
-    // ------------------------------------------------------------------ //
     const [serviceCategories, setServiceCategories] = useState([]);
-    const [services, setServices]                   = useState([]);
-    const [bookings, setBookings]                   = useState([]);
-    const [employees, setEmployees]                 = useState([]);
-    const [pricingRules, setPricingRules]           = useState([]);
-    const [overviewData, setOverviewData]           = useState(null);
+    const [services, setServices] = useState([]);
+    const [bookings, setBookings] = useState([]);
+    const [employees, setEmployees] = useState([]);
+    const [overviewData, setOverviewData] = useState(null);
 
-    const [offersLoading, setOffersLoading]   = useState(false);
-    const [offersError, setOffersError]       = useState("");
-    const [isSaving, setIsSaving]             = useState(false);
+    const [offersLoading, setOffersLoading] = useState(false);
+    const [offersError, setOffersError] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
 
-    // ------------------------------------------------------------------ //
-    //  Utilitaire fetch
-    // ------------------------------------------------------------------ //
     const parseApiResponse = async (response) => {
         let data = null;
         try { data = await response.json(); } catch { data = null; }
@@ -46,9 +37,6 @@ export default function OffersSubPage({ params }) {
         return data;
     };
 
-    // ------------------------------------------------------------------ //
-    //  Loaders individuels
-    // ------------------------------------------------------------------ //
     const loadServiceCategories = useCallback(async () => {
         const res = await fetch(apiUrl("/admin/service-categories"), { headers: buildAuthHeaders() });
         const data = await parseApiResponse(res);
@@ -73,31 +61,20 @@ export default function OffersSubPage({ params }) {
         setEmployees(data.items ?? []);
     }, []);
 
-    const loadPricing = useCallback(async () => {
-        const res = await fetch(apiUrl("/admin/pricing"), { headers: buildAuthHeaders() });
-        const data = await parseApiResponse(res);
-        setPricingRules(data.items ?? []);
-    }, []);
-
     const loadOverview = useCallback(async () => {
         const res = await fetch(apiUrl("/admin/offers/overview"), { headers: buildAuthHeaders() });
         const data = await parseApiResponse(res);
         setOverviewData(data);
     }, []);
 
-    // ------------------------------------------------------------------ //
-    //  Refresh selon la sous-page active
-    // ------------------------------------------------------------------ //
     const refresh = useCallback(async () => {
         setOffersLoading(true);
         setOffersError("");
         try {
-            if (subpage === "prestations" || subpage === "categories-prestations" || subpage === "ajouter") {
+            if (subpage === "prestations" || subpage === "ajouter") {
                 await Promise.all([loadServiceCategories(), loadServices(), loadEmployees()]);
             } else if (subpage === "reservations") {
                 await Promise.all([loadBookings(), loadServices(), loadEmployees()]);
-            } else if (subpage === "tarification") {
-                await loadPricing();
             } else if (subpage === "vue-ensemble") {
                 await loadOverview();
             }
@@ -106,45 +83,16 @@ export default function OffersSubPage({ params }) {
         } finally {
             setOffersLoading(false);
         }
-    }, [subpage, loadServiceCategories, loadServices, loadBookings, loadEmployees, loadPricing, loadOverview]);
+    }, [subpage, loadServiceCategories, loadServices, loadBookings, loadEmployees, loadOverview]);
 
     useEffect(() => { refresh(); }, [refresh]);
 
-    // ------------------------------------------------------------------ //
-    //  Handlers Catégories
-    // ------------------------------------------------------------------ //
-    const createCategory = async (payload) => {
-        const res = await fetch(apiUrl("/admin/service-categories"), {
-            method: "POST",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseApiResponse(res);
-        await Promise.all([loadServiceCategories(), loadServices()]);
-    };
+    useEffect(() => {
+        if (subpage === "tarification" || subpage === "categories-prestations") {
+            router.replace(subpage === "categories-prestations" ? "/parametres/configuration" : "/offres-prestations/vue-ensemble");
+        }
+    }, [subpage, router]);
 
-    const updateCategory = async (id, payload) => {
-        const res = await fetch(apiUrl(`/admin/service-categories/${id}`), {
-            method: "PUT",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseApiResponse(res);
-        await Promise.all([loadServiceCategories(), loadServices()]);
-    };
-
-    const deleteCategory = async (id) => {
-        const res = await fetch(apiUrl(`/admin/service-categories/${id}`), {
-            method: "DELETE",
-            headers: buildAuthHeaders(),
-        });
-        await parseApiResponse(res);
-        await loadServiceCategories();
-    };
-
-    // ------------------------------------------------------------------ //
-    //  Handlers Prestations
-    // ------------------------------------------------------------------ //
     const createService = async (payload) => {
         setIsSaving(true);
         setOffersError("");
@@ -159,25 +107,6 @@ export default function OffersSubPage({ params }) {
             router.push("/offres-prestations/prestations");
         } catch (err) {
             setOffersError(String(err?.message || "Erreur lors de la création."));
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const updateService = async (id, payload) => {
-        setIsSaving(true);
-        setOffersError("");
-        try {
-            const res = await fetch(apiUrl(`/admin/services/${id}`), {
-                method: "PUT",
-                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify(payload),
-            });
-            await parseApiResponse(res);
-            await loadServices();
-            router.push("/offres-prestations/prestations");
-        } catch (err) {
-            setOffersError(String(err?.message || "Erreur lors de la modification."));
         } finally {
             setIsSaving(false);
         }
@@ -219,9 +148,6 @@ export default function OffersSubPage({ params }) {
         return created;
     };
 
-    // ------------------------------------------------------------------ //
-    //  Handlers Réservations
-    // ------------------------------------------------------------------ //
     const updateBookingStatus = async (id, payload) => {
         const res = await fetch(apiUrl(`/admin/reservations/${id}/status`), {
             method: "PATCH",
@@ -251,41 +177,6 @@ export default function OffersSubPage({ params }) {
         await loadBookings();
     };
 
-    // ------------------------------------------------------------------ //
-    //  Handlers Tarification
-    // ------------------------------------------------------------------ //
-    const createPricingRule = async (payload) => {
-        const res = await fetch(apiUrl("/admin/pricing"), {
-            method: "POST",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseApiResponse(res);
-        await loadPricing();
-    };
-
-    const updatePricingRule = async (id, payload) => {
-        const res = await fetch(apiUrl(`/admin/pricing/${id}`), {
-            method: "PUT",
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(payload),
-        });
-        await parseApiResponse(res);
-        await loadPricing();
-    };
-
-    const deletePricingRule = async (id) => {
-        const res = await fetch(apiUrl(`/admin/pricing/${id}`), {
-            method: "DELETE",
-            headers: buildAuthHeaders(),
-        });
-        await parseApiResponse(res);
-        await loadPricing();
-    };
-
-    // ------------------------------------------------------------------ //
-    //  Routage par sous-page
-    // ------------------------------------------------------------------ //
     if (subpage === "vue-ensemble") {
         return (
             <OverviewStats
@@ -317,20 +208,6 @@ export default function OffersSubPage({ params }) {
         );
     }
 
-    if (subpage === "categories-prestations") {
-        return (
-            <CategoryAdminView
-                categories={serviceCategories}
-                loading={offersLoading}
-                errorMessage={offersError}
-                onReload={refresh}
-                onCreate={createCategory}
-                onUpdate={updateCategory}
-                onDelete={deleteCategory}
-            />
-        );
-    }
-
     if (subpage === "prestations") {
         return (
             <ServiceAdminView
@@ -358,20 +235,6 @@ export default function OffersSubPage({ params }) {
                 onUpdateStatus={updateBookingStatus}
                 onAssignEmployee={assignEmployee}
                 onDelete={deleteBooking}
-            />
-        );
-    }
-
-    if (subpage === "tarification") {
-        return (
-            <PricingAdminView
-                rules={pricingRules}
-                loading={offersLoading}
-                errorMessage={offersError}
-                onReload={refresh}
-                onCreate={createPricingRule}
-                onUpdate={updatePricingRule}
-                onDelete={deletePricingRule}
             />
         );
     }

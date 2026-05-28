@@ -2,6 +2,7 @@ package items
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -29,31 +30,122 @@ type DepositPoint struct {
 }
 
 type Container struct {
-	ID             int64     `json:"id"`
-	DepositPointID int64     `json:"deposit_point_id"`
-	Name           string    `json:"name"`
-	Capacity       int       `json:"capacity"`
-	CurrentCount   int       `json:"current_count"`
-	Status         string    `json:"status"` // actif, inactif, maintenance
-	MaintenanceReason string `json:"maintenance_reason,omitempty"`
-	MaintenanceStart  *time.Time `json:"maintenance_start,omitempty"`
-	MaintenanceEnd    *time.Time `json:"maintenance_end,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID                int64                  `json:"id"`
+	DepositPointID    int64                  `json:"deposit_point_id"`
+	Name              string                 `json:"name"`
+	Capacity          int                    `json:"capacity"`
+	CurrentCount      int                    `json:"current_count"`
+	Status            string                 `json:"status"` // actif, inactif, maintenance
+	MaintenanceReason string                 `json:"maintenance_reason,omitempty"`
+	MaintenanceStart  *time.Time             `json:"maintenance_start,omitempty"`
+	MaintenanceEnd    *time.Time             `json:"maintenance_end,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	Items             []ContainerItemSummary `json:"items,omitempty"`
+}
+
+// ContainerItemSummary — objet présent physiquement dans un container (logistique).
+type ContainerItemSummary struct {
+	ID             int64      `json:"id"`
+	Title          string     `json:"title"`
+	Reference      string     `json:"reference"`
+	Type           string     `json:"type"`
+	Category       string     `json:"category"`
+	Image          string     `json:"image"`
+	Photos         []string   `json:"photos"`
+	WorkflowStatus string     `json:"workflowStatus"`
+	UserName       string     `json:"userName"`
+	DepositedAt    *time.Time `json:"depositedAt,omitempty"`
 }
 
 var ErrContainerStatusChangeBlocked = errors.New("container status change blocked")
+
+// isContainerInMaintenanceWindow indique si le container est indisponible à l'instant T
+// (fenêtre [début, fin[ ; hors fenêtre le container redevient utilisable même si status=maintenance en base).
+func isContainerInMaintenanceWindow(c Container, now time.Time) bool {
+	if c.Status != "maintenance" {
+		return false
+	}
+	if c.MaintenanceStart == nil || c.MaintenanceEnd == nil {
+		return true
+	}
+	return !now.Before(*c.MaintenanceStart) && now.Before(*c.MaintenanceEnd)
+}
 
 func isContainerUnavailable(c Container, now time.Time) bool {
 	if c.Status == "inactif" {
 		return true
 	}
-	if c.Status != "maintenance" {
-		return false
+	return isContainerInMaintenanceWindow(c, now)
+}
+
+// ExpireEndedContainerMaintenances repasse en « actif » les containers dont la fin de maintenance est passée.
+func (r *Repository) ExpireEndedContainerMaintenances(ctx context.Context, depositPointID int64) error {
+	var rows *sql.Rows
+	var err error
+	if depositPointID > 0 {
+		rows, err = r.db.QueryContext(ctx, `
+			UPDATE containers
+			SET status = 'actif',
+			    maintenance_reason = '',
+			    maintenance_start = NULL,
+			    maintenance_end = NULL
+			WHERE deposit_point_id = $1
+			  AND status = 'maintenance'
+			  AND maintenance_end IS NOT NULL
+			  AND maintenance_end <= NOW()
+			RETURNING id
+		`, depositPointID)
+	} else {
+		rows, err = r.db.QueryContext(ctx, `
+			UPDATE containers
+			SET status = 'actif',
+			    maintenance_reason = '',
+			    maintenance_start = NULL,
+			    maintenance_end = NULL
+			WHERE status = 'maintenance'
+			  AND maintenance_end IS NOT NULL
+			  AND maintenance_end <= NOW()
+			RETURNING id
+		`)
 	}
-	if c.MaintenanceStart != nil && c.MaintenanceEnd != nil {
-		return !now.Before(*c.MaintenanceStart) && !now.After(*c.MaintenanceEnd)
+	if err != nil {
+		return err
 	}
-	return true
+	defer rows.Close()
+	for rows.Next() {
+		var containerID int64
+		if err := rows.Scan(&containerID); err != nil {
+			return err
+		}
+		if err := r.UpdateDepositPointStatus(ctx, containerID); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// ExpireContainerMaintenanceIfEnded expire la maintenance d'un container précis si la date de fin est passée.
+func (r *Repository) ExpireContainerMaintenanceIfEnded(ctx context.Context, containerID int64) error {
+	var id int64
+	err := r.db.QueryRowContext(ctx, `
+		UPDATE containers
+		SET status = 'actif',
+		    maintenance_reason = '',
+		    maintenance_start = NULL,
+		    maintenance_end = NULL
+		WHERE id = $1
+		  AND status = 'maintenance'
+		  AND maintenance_end IS NOT NULL
+		  AND maintenance_end <= NOW()
+		RETURNING id
+	`, containerID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return r.UpdateDepositPointStatus(ctx, id)
 }
 
 // Deposit Point Methods
@@ -117,6 +209,9 @@ func (r *Repository) DeleteDepositPoint(ctx context.Context, id int64) error {
 // Container Methods
 
 func (r *Repository) ListContainersByPoint(ctx context.Context, pointID int64) ([]Container, error) {
+	if err := r.ExpireEndedContainerMaintenances(ctx, pointID); err != nil {
+		return nil, err
+	}
 	query := `SELECT id, deposit_point_id, name, capacity, current_count, status, maintenance_reason, maintenance_start, maintenance_end, created_at 
 	          FROM containers WHERE deposit_point_id = $1 ORDER BY name ASC`
 	rows, err := r.db.QueryContext(ctx, query, pointID)
@@ -134,6 +229,53 @@ func (r *Repository) ListContainersByPoint(ctx context.Context, pointID int64) (
 		containers = append(containers, c)
 	}
 	return containers, nil
+}
+
+// ListContainerItemsByPoint retourne les objets stockés par container pour un point de dépôt.
+func (r *Repository) ListContainerItemsByPoint(ctx context.Context, pointID int64) (map[int64][]ContainerItemSummary, error) {
+	query := `
+		SELECT i.id, i.title, i.reference, i.type, i.category, COALESCE(i.image, ''), i.photos,
+		       l.workflow_status, l.container_id, l.deposited_at,
+		       TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, ''))
+		FROM items i
+		INNER JOIN item_logistics l ON l.item_id = i.id
+		INNER JOIN users u ON u.id = i.user_id
+		INNER JOIN containers c ON c.id = l.container_id
+		WHERE c.deposit_point_id = $1
+		  AND l.container_id IS NOT NULL
+		  AND l.workflow_status IN ('deposited', 'available', 'reserved')
+		ORDER BY c.name ASC, l.deposited_at DESC NULLS LAST, i.title ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, pointID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[int64][]ContainerItemSummary)
+	for rows.Next() {
+		var it ContainerItemSummary
+		var containerID int64
+		if err := rows.Scan(
+			&it.ID, &it.Title, &it.Reference, &it.Type, &it.Category, &it.Image, pq.Array(&it.Photos),
+			&it.WorkflowStatus, &containerID, &it.DepositedAt, &it.UserName,
+		); err != nil {
+			return nil, err
+		}
+		out[containerID] = append(out[containerID], it)
+	}
+	return out, rows.Err()
+}
+
+func attachContainerItems(containers []Container, itemsByContainer map[int64][]ContainerItemSummary) []Container {
+	for i := range containers {
+		items := itemsByContainer[containers[i].ID]
+		if items == nil {
+			items = []ContainerItemSummary{}
+		}
+		containers[i].Items = items
+	}
+	return containers
 }
 
 func (r *Repository) CreateContainer(ctx context.Context, c *Container) error {

@@ -235,11 +235,12 @@ export default function MonComptePage() {
         
         if (!userData.email?.trim() || !emailRegex.test(userData.email)) return "Veuillez entrer une adresse email valide.";
         
-        if (userData.phone && !phoneRegex.test(userData.phone)) return "Veuillez entrer un numéro de téléphone valide (ex: 06 12 34 56 78).";
-        
-        if (!userData.city?.trim() || userData.city.length < 2) return "La ville doit contenir au moins 2 caractères.";
-        if (!nameRegex.test(userData.city)) return "La ville contient des caractères non valides.";
-        
+        if (userData.role !== "admin") {
+            if (userData.phone && !phoneRegex.test(userData.phone)) return "Veuillez entrer un numéro de téléphone valide (ex: 06 12 34 56 78).";
+            if (!userData.city?.trim() || userData.city.length < 2) return "La ville doit contenir au moins 2 caractères.";
+            if (!nameRegex.test(userData.city)) return "La ville contient des caractères non valides.";
+        }
+
         return null;
     };
 
@@ -261,9 +262,9 @@ export default function MonComptePage() {
                     firstname: userData.firstname,
                     lastname: userData.lastname,
                     email: userData.email,
-                    phone: userData.phone,
-                    city: userData.city
-                })
+                    phone: userData.phone ?? "",
+                    city: userData.city ?? "",
+                }),
             });
             const data = await resp.json();
             if (resp.ok) {
@@ -315,6 +316,8 @@ export default function MonComptePage() {
             </div>
         );
     }
+
+    const isAdmin = userData.role === "admin";
 
     return (
         <div style={styles.container}>
@@ -390,32 +393,36 @@ export default function MonComptePage() {
                             </div>
                         </div>
 
-                        <div style={styles.formGroup}>
-                            <label style={styles.label}>Téléphone</label>
-                            <div style={styles.inputWrap} className="form-group-input">
-                                <Phone size={16} color="#94a3b8" />
-                                <input 
-                                    style={styles.input} 
-                                    type="tel"
-                                    value={userData.phone}
-                                    onChange={e => setUserData({...userData, phone: e.target.value})}
-                                />
-                            </div>
-                        </div>
+                        {!isAdmin && (
+                            <>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Téléphone</label>
+                                    <div style={styles.inputWrap} className="form-group-input">
+                                        <Phone size={16} color="#94a3b8" />
+                                        <input
+                                            style={styles.input}
+                                            type="tel"
+                                            value={userData.phone}
+                                            onChange={(e) => setUserData({ ...userData, phone: e.target.value })}
+                                        />
+                                    </div>
+                                </div>
 
-                        <div style={styles.formGroup}>
-                            <label style={styles.label}>Ville</label>
-                            <div style={styles.inputWrap} className="form-group-input">
-                                <MapPin size={16} color="#94a3b8" />
-                                <input 
-                                    style={styles.input} 
-                                    value={userData.city}
-                                    onChange={e => setUserData({...userData, city: e.target.value})}
-                                    required
-                                    minLength={2}
-                                />
-                            </div>
-                        </div>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Ville</label>
+                                    <div style={styles.inputWrap} className="form-group-input">
+                                        <MapPin size={16} color="#94a3b8" />
+                                        <input
+                                            style={styles.input}
+                                            value={userData.city}
+                                            onChange={(e) => setUserData({ ...userData, city: e.target.value })}
+                                            required
+                                            minLength={2}
+                                        />
+                                    </div>
+                                </div>
+                            </>
+                        )}
 
                         <button className="action-btn primary" disabled={savingProfile} style={{ width: '100%', padding: '0.85rem', marginTop: '1rem' }}>
                             {savingProfile ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}

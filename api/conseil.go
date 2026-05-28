@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -411,6 +412,49 @@ func parseScheduledPublishAt(raw string) (sql.NullTime, error) {
 	return sql.NullTime{}, fmt.Errorf("invalid scheduledPublishAt")
 }
 
+// publishDueScheduledConseils passe en « publie » les conseils dont la date programmée est atteinte.
+func publishDueScheduledConseils() error {
+	_, err := db.Exec(`
+		UPDATE salarie_contents
+		SET status = 'publie', rejection_comment = '', updated_at = NOW()
+		WHERE type = 'conseil'
+		  AND scheduled_publish_at IS NOT NULL
+		  AND scheduled_publish_at <= NOW()
+		  AND status = 'brouillon'
+	`)
+	return err
+}
+
+// resolveConseilStatusForSave : publication future → brouillon en base jusqu'à la date, puis promotion auto.
+func resolveConseilStatusForSave(requestedStatus string, scheduled sql.NullTime) string {
+	status := strings.TrimSpace(requestedStatus)
+	if status == "" {
+		status = "brouillon"
+	}
+	if !scheduled.Valid {
+		return status
+	}
+	now := time.Now().UTC()
+	if scheduled.Time.After(now) {
+		if status == "publie" {
+			return "brouillon"
+		}
+		return status
+	}
+	if status == "publie" {
+		return "publie"
+	}
+	return status
+}
+
+func conseilStatusForSave(requestedStatus string, meta ConseilMetaPayload) (string, error) {
+	scheduled, err := parseScheduledPublishAt(meta.ScheduledPublishAt)
+	if err != nil {
+		return "", err
+	}
+	return resolveConseilStatusForSave(requestedStatus, scheduled), nil
+}
+
 func loadConseilTools(contentID int64) ([]map[string]interface{}, error) {
 	rows, err := db.Query(`
 		SELECT id, name, description, image_url, external_url, sort_order
@@ -663,10 +707,8 @@ func buildContentItemFromRow(row conseilContentRow, authorName string, likeCount
 	if authorName != "" {
 		item["authorName"] = authorName
 	}
-	if likeCount > 0 || favoriteCount > 0 {
-		item["likeCount"] = likeCount
-		item["favoriteCount"] = favoriteCount
-	}
+	item["likeCount"] = likeCount
+	item["favoriteCount"] = favoriteCount
 	appendConseilMetaToItem(item, row, tools)
 	return item, nil
 }
@@ -894,4 +936,189 @@ func listConseilMaterialLabelsNotInCatalog() ([]string, error) {
 		return strings.ToLower(out[i]) < strings.ToLower(out[j])
 	})
 	return out, nil
+}
+
+// conseilEngagementUser décrit un utilisateur ayant liké ou mis en favori un conseil (vue staff).
+type conseilEngagementUser struct {
+	UserID      int64  `json:"userId"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+}
+
+func conseilEngagementRoleLabel(role string) string {
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "particulier":
+		return "Particulier"
+	case "professionnel":
+		return "Professionnel"
+	case "salarie", "admin":
+		return "Équipe UpcycleConnect"
+	default:
+		if role == "" {
+			return "Particulier"
+		}
+		return role
+	}
+}
+
+func fetchConseilEngagementCounts(contentID int64) (likeCount, favoriteCount int64, err error) {
+	err = db.QueryRow(`SELECT COUNT(*) FROM conseil_likes WHERE content_id = $1`, contentID).Scan(&likeCount)
+	if err != nil {
+		return 0, 0, err
+	}
+	err = db.QueryRow(`SELECT COUNT(*) FROM conseil_favorites WHERE content_id = $1`, contentID).Scan(&favoriteCount)
+	return likeCount, favoriteCount, err
+}
+
+func listConseilLikers(contentID int64) ([]conseilEngagementUser, error) {
+	rows, err := db.Query(`
+		SELECT u.id,
+		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
+		       COALESCE(u.email, ''),
+		       u.role
+		FROM conseil_likes l
+		JOIN users u ON u.id = l.user_id
+		WHERE l.content_id = $1
+		ORDER BY u.id DESC
+	`, contentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanConseilEngagementUsers(rows)
+}
+
+func listConseilFavoriters(contentID int64) ([]conseilEngagementUser, error) {
+	rows, err := db.Query(`
+		SELECT u.id,
+		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
+		       COALESCE(u.email, ''),
+		       u.role
+		FROM conseil_favorites f
+		JOIN users u ON u.id = f.user_id
+		WHERE f.content_id = $1
+		ORDER BY u.id DESC
+	`, contentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanConseilEngagementUsers(rows)
+}
+
+func scanConseilEngagementUsers(rows *sql.Rows) ([]conseilEngagementUser, error) {
+	var out []conseilEngagementUser
+	for rows.Next() {
+		var u conseilEngagementUser
+		var email, rawRole string
+		if err := rows.Scan(&u.UserID, &u.DisplayName, &email, &rawRole); err != nil {
+			return nil, err
+		}
+		u.Role = conseilEngagementRoleLabel(rawRole)
+		if strings.TrimSpace(u.DisplayName) == "" {
+			if email != "" {
+				u.DisplayName = email
+			} else {
+				u.DisplayName = fmt.Sprintf("Utilisateur #%d", u.UserID)
+			}
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []conseilEngagementUser{}
+	}
+	return out, nil
+}
+
+func callerHasConseilStaffAccess(r *http.Request) bool {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok {
+		return false
+	}
+	role, _ := claims["role"].(string)
+	return role == "admin" || role == "salarie"
+}
+
+func conseilContentExists(contentID int64) (bool, error) {
+	var exists bool
+	err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM salarie_contents WHERE id = $1 AND type = 'conseil')`, contentID).Scan(&exists)
+	return exists, err
+}
+
+func conseilEngagementLikersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !callerHasConseilStaffAccess(r) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	contentID, err := parseConseilEngagementContentID(r.URL.Path, "/likes")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	exists, err := conseilContentExists(contentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load content")
+		return
+	}
+	if !exists {
+		writeError(w, http.StatusNotFound, "content not found")
+		return
+	}
+	users, err := listConseilLikers(contentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "impossible de charger les j'aime")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"users": users})
+}
+
+func conseilEngagementFavoritersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !callerHasConseilStaffAccess(r) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	contentID, err := parseConseilEngagementContentID(r.URL.Path, "/favorites")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	exists, err := conseilContentExists(contentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load content")
+		return
+	}
+	if !exists {
+		writeError(w, http.StatusNotFound, "content not found")
+		return
+	}
+	users, err := listConseilFavoriters(contentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "impossible de charger les favoris")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"users": users})
+}
+
+func parseConseilEngagementContentID(path, suffix string) (int64, error) {
+	trimmed := strings.TrimSuffix(path, suffix)
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	if i := strings.LastIndex(trimmed, "/"); i >= 0 {
+		trimmed = trimmed[i+1:]
+	}
+	id, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid id")
+	}
+	return id, nil
 }

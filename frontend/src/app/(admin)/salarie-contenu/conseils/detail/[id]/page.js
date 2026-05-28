@@ -61,7 +61,9 @@ export default function SalarieConseilDetailPage({ params }) {
         <ConseilPublicDetailView
             item={item}
             onBack={goBack}
-            showEngagement={item.status === "publie"}
+            showEngagement={false}
+            showEngagementInsights
+            engagementApiPrefix="salarie"
             onEdit={canEdit ? () => router.push(`/salarie-contenu/conseils/${item.id}/modifier`) : undefined}
         />
     );

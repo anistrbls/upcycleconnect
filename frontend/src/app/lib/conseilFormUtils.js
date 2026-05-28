@@ -115,11 +115,18 @@ export function buildConseilPayload(form) {
             scheduledPublishAt = d.toISOString();
         }
     }
+    let status = form.status;
+    if (scheduledPublishAt) {
+        const sched = new Date(scheduledPublishAt);
+        if (!Number.isNaN(sched.getTime()) && sched.getTime() > Date.now() && status === "brouillon") {
+            status = "publie";
+        }
+    }
     return {
         title: form.title.trim(),
         body: form.body.trim(),
         summary: (form.summary || "").trim(),
-        status: form.status,
+        status,
         imageUrl: coverUrl,
         photos,
         externalUrl: "",

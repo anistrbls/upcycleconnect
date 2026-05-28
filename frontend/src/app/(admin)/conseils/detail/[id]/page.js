@@ -32,6 +32,7 @@ export default function ConseilDetailPage({ params }) {
     const from = searchParams.get("from");
     const role = getUserRole();
     const isAdmin = role === "admin";
+    const isSalarie = role === "salarie";
     const isFeedUser = role === "particulier" || role === "professionnel";
 
     const defaultBack = isFeedUser
@@ -181,6 +182,8 @@ export default function ConseilDetailPage({ params }) {
             item={item}
             onBack={goBack}
             showEngagement={isFeedUser}
+            showEngagementInsights={isSalarie}
+            engagementApiPrefix="salarie"
         />
     );
 }

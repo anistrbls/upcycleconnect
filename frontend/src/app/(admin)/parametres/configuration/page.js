@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Tag, Plus, Pencil, Trash2, Check, X, GripVertical, Package, Shield, Layers, Loader2, MapPin, QrCode, Lightbulb } from "lucide-react";
+import { Tag, Plus, Pencil, Trash2, Check, X, GripVertical, Package, Shield, Layers, Loader2, MapPin, QrCode, Lightbulb, Briefcase } from "lucide-react";
 import AdminModal from "../../../components/admin/AdminModal";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import {
     loadDismissedConseilMaterialSuggestions,
     dismissConseilMaterialSuggestion,
     filterVisibleConseilMaterialSuggestions,
+    materialSuggestionKey,
 } from "../../../lib/materialConseilSuggestions";
 
 // Les entités n'utilisent plus de slug. Le label fait foi.
@@ -200,6 +201,100 @@ function MaterialConseilSuggestionRow({ label, onAccept, onDismiss, accepting })
                     Non
                 </button>
             </div>
+        </div>
+    );
+}
+
+function ServiceCategoryRow({ category, onSave, onDelete }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState({
+        name: category.name || "",
+        description: category.description || "",
+        status: category.status || "actif",
+    });
+    const [saving, setSaving] = useState(false);
+
+    const commit = async () => {
+        const name = draft.name.trim();
+        if (!name) return;
+        setSaving(true);
+        await onSave({
+            ...category,
+            name,
+            description: draft.description.trim(),
+            status: draft.status,
+        });
+        setSaving(false);
+        setEditing(false);
+    };
+
+    const cancel = () => {
+        setDraft({
+            name: category.name || "",
+            description: category.description || "",
+            status: category.status || "actif",
+        });
+        setEditing(false);
+    };
+
+    const handleDelete = () => {
+        const linked = Number(category.linkedServices || 0);
+        if (linked > 0) {
+            window.alert(`La catégorie « ${category.name} » possède encore ${linked} prestation(s) liée(s). Suppression impossible.`);
+            return;
+        }
+        if (window.confirm(`Supprimer la catégorie « ${category.name} » ?`)) {
+            onDelete(category.id);
+        }
+    };
+
+    return (
+        <div style={{ ...rowStyle, flexWrap: editing ? "wrap" : "nowrap" }}>
+            <span style={gripStyle}><GripVertical size={16} /></span>
+            {editing ? (
+                <>
+                    <input
+                        autoFocus
+                        value={draft.name}
+                        onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+                        placeholder="Nom"
+                        style={{ ...textInput, flex: "1 1 140px", minWidth: "120px" }}
+                    />
+                    <input
+                        value={draft.description}
+                        onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
+                        placeholder="Description (facultatif)"
+                        style={{ ...textInput, flex: "2 1 180px", minWidth: "140px" }}
+                    />
+                    <select
+                        value={draft.status}
+                        onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}
+                        style={{ ...textInput, flex: "0 0 100px" }}
+                    >
+                        <option value="actif">actif</option>
+                        <option value="inactif">inactif</option>
+                    </select>
+                    <button onClick={commit} disabled={saving || !draft.name.trim()} style={{ ...iconBtn, background: "var(--forest-deep)", color: "white" }}>
+                        {saving ? <Loader2 size={14} style={spinStyle} /> : <Check size={14} />}
+                    </button>
+                    <button onClick={cancel} style={iconBtn}><X size={14} /></button>
+                </>
+            ) : (
+                <>
+                    <span style={{ flex: 1, fontSize: "0.92rem", fontWeight: "500", minWidth: 0 }}>{category.name}</span>
+                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", maxWidth: "28%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={category.description || ""}>
+                        {category.description || "—"}
+                    </span>
+                    <span style={{ fontSize: "0.78rem", background: category.status === "actif" ? "#E5FFBC" : "#E6EDEE", padding: "2px 8px", borderRadius: "10px", fontWeight: 600 }}>
+                        {category.status}
+                    </span>
+                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                        {category.linkedServices || 0} prest.
+                    </span>
+                    <button onClick={() => setEditing(true)} style={iconBtn}><Pencil size={14} /></button>
+                    <button onClick={handleDelete} style={{ ...iconBtn, color: "var(--state-critical)" }}><Trash2 size={14} /></button>
+                </>
+            )}
         </div>
     );
 }
@@ -460,6 +555,13 @@ export default function ConfigurationPage() {
     const [newDpType, setNewDpType] = useState({ label: "" });
     const [addingDpType, setAddingDpType] = useState(false);
 
+    // Catégories de prestations
+    const [serviceCategories, setServiceCategories] = useState([]);
+    const [serviceCatLoading, setServiceCatLoading] = useState(true);
+    const [addServiceCatModal, setAddServiceCatModal] = useState(false);
+    const [newServiceCat, setNewServiceCat] = useState({ name: "", description: "", status: "actif" });
+    const [addingServiceCat, setAddingServiceCat] = useState(false);
+
     // Catégories de conseils
     const [conseilCategories, setConseilCategories] = useState([]);
     const [conseilCatLoading, setConseilCatLoading] = useState(true);
@@ -548,6 +650,18 @@ export default function ConfigurationPage() {
         finally { setDpTypeLoading(false); }
     }, []);
 
+    // ── Fetch catégories de prestations
+    const fetchServiceCategories = useCallback(async () => {
+        setServiceCatLoading(true);
+        try {
+            const res = await fetch(apiUrl("/admin/service-categories"), { headers: buildAuthHeaders() });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setServiceCategories(data.items || []);
+        } catch { showToast("Impossible de charger les catégories de prestations.", "error"); }
+        finally { setServiceCatLoading(false); }
+    }, []);
+
     // ── Fetch catégories de conseils
     const fetchConseilCategories = useCallback(async () => {
         setConseilCatLoading(true);
@@ -578,9 +692,10 @@ export default function ConfigurationPage() {
         fetchMaterials();
         fetchCountries();
         fetchDpTypes();
+        fetchServiceCategories();
         fetchConseilCategories();
         fetchModerationReasons();
-    }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries, fetchDpTypes, fetchConseilCategories, fetchModerationReasons]);
+    }, [fetchCategories, fetchConditions, fetchMaterials, fetchCountries, fetchDpTypes, fetchServiceCategories, fetchConseilCategories, fetchModerationReasons]);
 
     // Recharger les suggestions après publication d'un conseil (autre onglet / retour sur la page).
     useEffect(() => {
@@ -686,22 +801,57 @@ export default function ConfigurationPage() {
     };
 
     const handleAcceptMaterialSuggestion = async (label) => {
-        setAcceptingMaterialSuggestion(label);
+        const trimmed = label.trim();
+        if (!trimmed) return;
+        setAcceptingMaterialSuggestion(trimmed);
+        const suggestionKey = materialSuggestionKey(trimmed);
+
+        const removeSuggestionFromList = () => {
+            setConseilMaterialSuggestions((prev) =>
+                prev.filter((l) => materialSuggestionKey(l) !== suggestionKey)
+            );
+        };
+
         try {
             const res = await fetch(apiUrl("/admin/item-materials"), {
                 method: "POST",
                 headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ label: label.trim(), impactCoefficient: 1 }),
+                body: JSON.stringify({ label: trimmed, impactCoefficient: 1 }),
             });
-            if (!res.ok) throw new Error((await res.json()).error || "");
-            const created = await res.json();
-            setMaterials(prev => [...prev, created]);
-            const key = materialSuggestionKey(label);
-            setConseilMaterialSuggestions(prev => prev.filter(l => materialSuggestionKey(l) !== key));
-            showToast(`« ${label} » ajouté au référentiel.`);
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok) {
+                if (data?.id) {
+                    setMaterials((prev) =>
+                        prev.some((m) => m.id === data.id) ? prev : [...prev, data]
+                    );
+                } else {
+                    await fetchMaterials();
+                }
+                removeSuggestionFromList();
+                showToast(`« ${trimmed} » ajouté au référentiel.`);
+                return;
+            }
+
+            if (res.status === 409 || data.error === "material label already exists") {
+                removeSuggestionFromList();
+                await fetchMaterials();
+                showToast(`« ${trimmed} » est déjà dans le référentiel.`);
+                return;
+            }
+
+            throw new Error(data.error || "Impossible d'ajouter.");
         } catch (e) {
-            showToast(e.message === "material label already exists" ? "Libellé déjà présent." : "Impossible d'ajouter.", "error");
-            await fetchMaterials();
+            const msg = String(e?.message || "").trim();
+            const isDuplicate = msg === "material label already exists";
+            if (isDuplicate) {
+                removeSuggestionFromList();
+                await fetchMaterials();
+                showToast(`« ${trimmed} » est déjà dans le référentiel.`);
+            } else {
+                showToast(msg || "Impossible d'ajouter.", "error");
+                await fetchMaterials();
+            }
         } finally {
             setAcceptingMaterialSuggestion("");
         }
@@ -792,6 +942,63 @@ export default function ConfigurationPage() {
             showToast("Type de point ajouté.");
         } catch (e) { showToast(e.message && e.message.includes("already exists") ? "Libellé déjà utilisé." : "Impossible de créer.", "error"); }
         finally { setAddingDpType(false); }
+    };
+
+    // ── CRUD catégories de prestations
+    const handleSaveServiceCat = async (updated) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/service-categories/${updated.id}`), {
+                method: "PUT",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({
+                    name: updated.name,
+                    description: updated.description || "",
+                    status: updated.status,
+                }),
+            });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const saved = await res.json();
+            setServiceCategories(prev => prev.map(c => c.id === saved.id ? saved : c));
+            showToast("Catégorie de prestation mise à jour.");
+        } catch (e) {
+            showToast(e.message === "category already exists" ? "Nom déjà utilisé." : (e.message || "Erreur de mise à jour."), "error");
+        }
+    };
+    const handleDeleteServiceCat = async (id) => {
+        try {
+            const res = await fetch(apiUrl(`/admin/service-categories/${id}`), { method: "DELETE", headers: buildAuthHeaders() });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || "");
+            }
+            setServiceCategories(prev => prev.filter(c => c.id !== id));
+            showToast("Catégorie de prestation supprimée.");
+        } catch (e) {
+            showToast(e.message?.includes("linked") ? "Impossible : des prestations sont encore liées." : "Impossible de supprimer.", "error");
+        }
+    };
+    const handleAddServiceCat = async () => {
+        if (!newServiceCat.name.trim()) return;
+        setAddingServiceCat(true);
+        try {
+            const res = await fetch(apiUrl("/admin/service-categories"), {
+                method: "POST",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({
+                    name: newServiceCat.name.trim(),
+                    description: newServiceCat.description.trim(),
+                    status: newServiceCat.status,
+                }),
+            });
+            if (!res.ok) throw new Error((await res.json()).error || "");
+            const created = await res.json();
+            setServiceCategories(prev => [...prev, created]);
+            setNewServiceCat({ name: "", description: "", status: "actif" });
+            setAddServiceCatModal(false);
+            showToast("Catégorie de prestation ajoutée.");
+        } catch (e) {
+            showToast(e.message === "category already exists" ? "Nom déjà utilisé." : "Impossible de créer.", "error");
+        } finally { setAddingServiceCat(false); }
     };
 
     // ── CRUD catégories de conseils
@@ -992,6 +1199,37 @@ export default function ConfigurationPage() {
                         <button onClick={handleAddCond} disabled={!newCond.label.trim() || addingCond}
                             style={{ border: "none", background: newCond.label.trim() ? "var(--black)" : "var(--border)", color: newCond.label.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newCond.label.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
                             {addingCond ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
+                        </button>
+                    </div>
+                </div>
+            </AdminModal>
+
+            {/* ── Modal ajout catégorie de prestation ── */}
+            <AdminModal open={addServiceCatModal} title="Nouvelle catégorie de prestation" onClose={() => { setAddServiceCatModal(false); setNewServiceCat({ name: "", description: "", status: "actif" }); }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom *</label>
+                        <input autoFocus placeholder="Ex : Atelier textile, Réparation…" value={newServiceCat.name} onChange={e => setNewServiceCat(d => ({ ...d, name: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") handleAddServiceCat(); }}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Description</label>
+                        <textarea placeholder="Description courte (facultatif)" value={newServiceCat.description} onChange={e => setNewServiceCat(d => ({ ...d, description: e.target.value }))} rows={2}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)", resize: "vertical" }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Statut</label>
+                        <select value={newServiceCat.status} onChange={e => setNewServiceCat(d => ({ ...d, status: e.target.value }))}
+                            style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }}>
+                            <option value="actif">actif</option>
+                            <option value="inactif">inactif</option>
+                        </select>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
+                        <button onClick={() => { setAddServiceCatModal(false); setNewServiceCat({ name: "", description: "", status: "actif" }); }} style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}>Annuler</button>
+                        <button onClick={handleAddServiceCat} disabled={!newServiceCat.name.trim() || addingServiceCat}
+                            style={{ border: "none", background: newServiceCat.name.trim() ? "var(--black)" : "var(--border)", color: newServiceCat.name.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: newServiceCat.name.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            {addingServiceCat ? <Loader2 size={14} style={spinStyle} /> : <Plus size={14} />} Ajouter
                         </button>
                     </div>
                 </div>

@@ -14,15 +14,17 @@ export function formatMaterialsIntro(materials) {
     return `Vous aurez besoin de ${rest} et de ${last}.`;
 }
 
-/** Texte principal d’une carte feed (sans l’intro matériaux). */
-export function getConseilFeedCoreText(item, { preferFullBody = true, bodyOnly = false } = {}) {
+/** Texte principal d’une carte feed (sans l’intro matériaux ni le résumé affiché à part). */
+export function getConseilFeedCoreText(item, { preferFullBody = false } = {}) {
+    const summary = (item?.summary || "").trim();
     if (preferFullBody) {
         return (item?.body || "").trim();
     }
-    if (bodyOnly) {
-        return (item?.body || "").trim();
-    }
-    return (item?.displayBody || item?.summary || item?.body || "").trim();
+    const display = (item?.displayBody || "").trim();
+    const body = (item?.body || "").trim();
+    if (display && display !== summary) return display;
+    if (body && body !== summary) return body;
+    return "";
 }
 
 /** Corps affiché dans une carte feed (intro matériaux + texte, texte brut). */

@@ -801,7 +801,7 @@ export default function LogisticsDashboard() {
                                     const now = Date.now();
                                     const maintenanceStart = hasMaintenanceWindow ? new Date(c.maintenance_start).getTime() : 0;
                                     const maintenanceEnd = hasMaintenanceWindow ? new Date(c.maintenance_end).getTime() : 0;
-                                    const isInMaintenanceWindow = isMaintenance && hasMaintenanceWindow && !Number.isNaN(maintenanceStart) && !Number.isNaN(maintenanceEnd) && now >= maintenanceStart && now <= maintenanceEnd;
+                                    const isInMaintenanceWindow = isMaintenance && hasMaintenanceWindow && !Number.isNaN(maintenanceStart) && !Number.isNaN(maintenanceEnd) && now >= maintenanceStart && now < maintenanceEnd;
                                     const disabled = isFull || isInactive || isInMaintenanceWindow;
                                     return (
                                         <button 
