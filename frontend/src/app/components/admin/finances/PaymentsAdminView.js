@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { FileText } from "lucide-react";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import RefundPaymentDetailModal, { showRefundDetailsButton } from "../../finances/RefundPaymentDetailModal";
+import InvoicePreviewModal from "../../finances/InvoicePreviewModal";
 
 export default function PaymentsAdminView() {
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [refundDetailPayment, setRefundDetailPayment] = useState(null);
+    const [invoicePayment, setInvoicePayment] = useState(null);
 
     const fetchPayments = async () => {
         setLoading(true);
@@ -61,6 +64,11 @@ export default function PaymentsAdminView() {
         if (p.status !== "refund_requested") return false;
         const src = String(p.source || "").toLowerCase();
         return src.includes("événement") || src.includes("réservation service") || src.includes("reservation service");
+    };
+    
+    const canShowInvoice = (p) => {
+        const s = String(p?.status || "").toLowerCase();
+        return s === "paid" || s === "success" || s === "succeeded" || s === "gratuit" || s === "refunded" || s === "refund_requested" || s === "non_refundable" || s === "refund_failed";
     };
 
     const formatDate = (dateStr) => {
@@ -176,6 +184,17 @@ export default function PaymentsAdminView() {
                                         </td>
                                         <td style={{ padding: "1.2rem 1.5rem", verticalAlign: "middle" }}>
                                             <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", alignItems: "flex-start" }}>
+                                                {canShowInvoice(p) && (
+                                                    <button
+                                                        type="button"
+                                                        className="action-cta task-action-btn"
+                                                        style={{ fontSize: "0.78rem", padding: "0.45rem 0.9rem", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                                                        onClick={() => setInvoicePayment(p)}
+                                                    >
+                                                        <FileText size={13} />
+                                                        Facture
+                                                    </button>
+                                                )}
                                                 {showRefundLink(p) ? (
                                                     <Link
                                                         href="/operations/validations?tab=remboursements"
@@ -195,7 +214,7 @@ export default function PaymentsAdminView() {
                                                         Voir le remboursement
                                                     </button>
                                                 ) : null}
-                                                {!showRefundLink(p) && !showRefundDetailsButton(p) ? (
+                                                {!canShowInvoice(p) && !showRefundLink(p) && !showRefundDetailsButton(p) ? (
                                                     <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>—</span>
                                                 ) : null}
                                             </div>
@@ -210,6 +229,7 @@ export default function PaymentsAdminView() {
             </div>
 
             <RefundPaymentDetailModal open={!!refundDetailPayment} payment={refundDetailPayment} onClose={() => setRefundDetailPayment(null)} />
+            <InvoicePreviewModal open={!!invoicePayment} payment={invoicePayment} onClose={() => setInvoicePayment(null)} />
 
             <style jsx>{`
                 .table-row-hover:hover {

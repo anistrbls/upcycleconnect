@@ -1,17 +1,20 @@
 package projects
 
 import (
+	"encoding/json"
 	"encoding/base64"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 )
 
 const (
 	maxProjectImageCount = 20
 	maxProjectImageBytes = 5 * 1024 * 1024
+	maxProjectDetailImagesEssential = 3
 )
 
 // sqlExprCorrelatedProUCConnectScore = score UC Connect cumulé du pro : somme (kg × coefficient matériau)
@@ -95,16 +98,18 @@ func (r *Repository) EnsureSchema() error {
 			pro_user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			title             TEXT NOT NULL,
 			description       TEXT NOT NULL DEFAULT '',
+			project_steps     JSONB NOT NULL DEFAULT '[]'::jsonb,
 			category          TEXT NOT NULL DEFAULT '',
 			status            TEXT NOT NULL DEFAULT 'brouillon',
-			moderation_status TEXT NOT NULL DEFAULT 'pending',
+			moderation_status TEXT NOT NULL DEFAULT '',
 			moderation_note   TEXT NOT NULL DEFAULT '',
 			created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			CONSTRAINT upcycling_projects_status_check CHECK (status IN ('brouillon', 'publie')),
-			CONSTRAINT upcycling_projects_modstatus_check CHECK (moderation_status IN ('pending', 'approved', 'rejected'))
+			CONSTRAINT upcycling_projects_modstatus_check CHECK (moderation_status IN ('pending', 'approved', 'rejected', ''))
 		)`,
-		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'pending'`,
+		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS project_steps JSONB NOT NULL DEFAULT '[]'::jsonb`,
+		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS moderation_note TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS upcycling_project_items (
 			id         BIGSERIAL PRIMARY KEY,
@@ -118,9 +123,11 @@ func (r *Repository) EnsureSchema() error {
 			project_id BIGINT NOT NULL REFERENCES upcycling_projects(id) ON DELETE CASCADE,
 			url        TEXT NOT NULL,
 			image_type TEXT NOT NULL DEFAULT 'autre',
+			is_step_image BOOLEAN NOT NULL DEFAULT FALSE,
 			added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			CONSTRAINT upcycling_project_images_type_check CHECK (image_type IN ('avant', 'apres', 'autre'))
 		)`,
+		`ALTER TABLE upcycling_project_images ADD COLUMN IF NOT EXISTS is_step_image BOOLEAN NOT NULL DEFAULT FALSE`,
 		`CREATE TABLE IF NOT EXISTS upcycling_project_likes (
 			project_id  BIGINT NOT NULL REFERENCES upcycling_projects(id) ON DELETE CASCADE,
 			user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -133,6 +140,14 @@ func (r *Repository) EnsureSchema() error {
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			PRIMARY KEY (project_id, user_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS upcycling_project_feed_metrics (
+			project_id  BIGINT NOT NULL REFERENCES upcycling_projects(id) ON DELETE CASCADE,
+			user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			impressions BIGINT NOT NULL DEFAULT 0,
+			clicks      BIGINT NOT NULL DEFAULT 0,
+			last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (project_id, user_id)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := r.db.Exec(s); err != nil {
@@ -141,6 +156,72 @@ func (r *Repository) EnsureSchema() error {
 	}
 	log.Println("✓ Upcycling projects schema initialized")
 	return nil
+}
+
+func sanitizeProjectSteps(raw []ProjectStep) []ProjectStep {
+	if len(raw) == 0 {
+		return []ProjectStep{}
+	}
+	out := make([]ProjectStep, 0, len(raw))
+	for _, step := range raw {
+		cleanText := strings.TrimSpace(step.Text)
+		cleanImage := strings.TrimSpace(step.ImageURL)
+		if cleanText == "" {
+			continue
+		}
+		if len(cleanText) > 300 {
+			cleanText = cleanText[:300]
+		}
+		out = append(out, ProjectStep{Text: cleanText, ImageURL: cleanImage})
+		if len(out) >= 30 {
+			break
+		}
+	}
+	return out
+}
+
+func parseProjectSteps(raw string) []ProjectStep {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []ProjectStep{}
+	}
+
+	var structured []ProjectStep
+	if err := json.Unmarshal([]byte(trimmed), &structured); err == nil {
+		return sanitizeProjectSteps(structured)
+	}
+
+	// Compatibilité legacy: ancien format []string.
+	var legacy []string
+	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
+		return []ProjectStep{}
+	}
+	converted := make([]ProjectStep, 0, len(legacy))
+	for _, text := range legacy {
+		converted = append(converted, ProjectStep{Text: text})
+	}
+	return sanitizeProjectSteps(converted)
+}
+
+func (r *Repository) getSubscriptionTypeForPro(proUserID int64) (string, error) {
+	var subscriptionType string
+	err := r.db.QueryRow("SELECT COALESCE(subscription_type, 'decouverte') FROM users WHERE id = $1", proUserID).Scan(&subscriptionType)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(strings.ToLower(subscriptionType)), nil
+}
+
+func validateProjectStepsForSubscription(subscriptionType string, steps []ProjectStep) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	switch strings.TrimSpace(strings.ToLower(subscriptionType)) {
+	case "", "decouverte", "gratuit":
+		return errors.New("les etapes de projet sont reservees aux offres Pro Essentiel et Premium Atelier")
+	default:
+		return nil
+	}
 }
 
 // GetProUCConnectScore retourne le score UC Connect du professionnel (objets récupérés utilisés dans des projets publiés/validés).
@@ -235,7 +316,7 @@ func (r *Repository) ListByPro(proUserID int64) ([]Project, error) {
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE
 			ORDER BY CASE
 				WHEN img.image_type = 'apres' THEN 0
 				WHEN img.image_type = 'avant' THEN 1
@@ -271,6 +352,23 @@ func (r *Repository) ListByPro(proUserID int64) ([]Project, error) {
 // Delete supprime un projet du professionnel (items/images en cascade).
 func (r *Repository) Delete(id, proUserID int64) error {
 	res, err := r.db.Exec(`DELETE FROM upcycling_projects WHERE id = $1 AND pro_user_id = $2`, id, proUserID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return errors.New("project not found or not yours")
+	}
+	return nil
+}
+
+// Archive remet un projet en brouillon (depublication explicite demandee par le pro).
+func (r *Repository) Archive(id, proUserID int64) error {
+	res, err := r.db.Exec(`
+		UPDATE upcycling_projects
+		SET status = 'brouillon', moderation_status = '', moderation_note = '', updated_at = NOW()
+		WHERE id = $1 AND pro_user_id = $2
+	`, id, proUserID)
 	if err != nil {
 		return err
 	}
@@ -335,7 +433,7 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 	query := `
 		SELECT p.id, p.pro_user_id,
 		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
-		       p.title, p.description, p.category, p.status,
+		       p.title, p.description, COALESCE(p.project_steps::text, '[]'), p.category, p.status,
 		       p.moderation_status, p.moderation_note,
 		       (SELECT COUNT(*) FROM upcycling_project_items pi WHERE pi.project_id = p.id) AS item_count,
 		       COALESCE((
@@ -360,7 +458,8 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 	query += ` ORDER BY p.id`
 
 	var p Project
-	err := r.db.QueryRow(query, args...).Scan(&p.ID, &p.ProUserID, &p.ProDisplayName, &p.Title, &p.Description,
+	var stepsRaw string
+	err := r.db.QueryRow(query, args...).Scan(&p.ID, &p.ProUserID, &p.ProDisplayName, &p.Title, &p.Description, &stepsRaw,
 		&p.Category, &p.Status, &p.ModerationStatus, &p.ModerationNote,
 		&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
 		&p.LikeCount, &p.BookmarkCount, &p.CreatedAt, &p.UpdatedAt)
@@ -370,6 +469,7 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 		}
 		return nil, err
 	}
+	p.Steps = parseProjectSteps(stepsRaw)
 	p.TotalWeightKg = p.TotalWeightGrams / 1000.0
 	return &p, nil
 }
@@ -439,18 +539,29 @@ func (r *Repository) Create(proUserID int64, payload CreatePayload) (*Project, e
 	if payload.Status == StatusPublished {
 		status = StatusPublished
 	}
+	steps := sanitizeProjectSteps(payload.Steps)
+	subscriptionType, err := r.getSubscriptionTypeForPro(proUserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateProjectStepsForSubscription(subscriptionType, steps); err != nil {
+		return nil, err
+	}
+	stepsJSON, _ := json.Marshal(steps)
 	var p Project
-	err := r.db.QueryRow(`
-		INSERT INTO upcycling_projects (pro_user_id, title, description, category, status)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, pro_user_id, title, description, category, status, moderation_status, moderation_note, created_at, updated_at
-	`, proUserID, payload.Title, payload.Description, payload.Category, status).Scan(
-		&p.ID, &p.ProUserID, &p.Title, &p.Description, &p.Category, &p.Status,
+	var stepsRaw string
+	err = r.db.QueryRow(`
+		INSERT INTO upcycling_projects (pro_user_id, title, description, project_steps, category, status, moderation_status)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6, '')
+		RETURNING id, pro_user_id, title, description, COALESCE(project_steps::text, '[]'), category, status, moderation_status, moderation_note, created_at, updated_at
+	`, proUserID, payload.Title, payload.Description, string(stepsJSON), payload.Category, status).Scan(
+		&p.ID, &p.ProUserID, &p.Title, &p.Description, &stepsRaw, &p.Category, &p.Status,
 		&p.ModerationStatus, &p.ModerationNote, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	p.Steps = parseProjectSteps(stepsRaw)
 	p.ItemCount = 0
 	p.TotalWeightGrams = 0
 	p.TotalWeightKg = 0
@@ -464,14 +575,34 @@ func (r *Repository) Update(id, proUserID int64, payload UpdatePayload) (*Projec
 	if payload.Status == StatusPublished {
 		status = StatusPublished
 	}
+	var existingStepsRaw string
+	err := r.db.QueryRow(`SELECT COALESCE(project_steps::text, '[]') FROM upcycling_projects WHERE id = $1 AND pro_user_id = $2`, id, proUserID).Scan(&existingStepsRaw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("project not found or not yours")
+		}
+		return nil, err
+	}
+	steps := parseProjectSteps(existingStepsRaw)
+	if payload.Steps != nil {
+		steps = sanitizeProjectSteps(*payload.Steps)
+		subscriptionType, err := r.getSubscriptionTypeForPro(proUserID)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateProjectStepsForSubscription(subscriptionType, steps); err != nil {
+			return nil, err
+		}
+	}
+	stepsJSON, _ := json.Marshal(steps)
 	var p Project
-	err := r.db.QueryRow(`
+	err = r.db.QueryRow(`
 		UPDATE upcycling_projects
-		SET title = $1, description = $2, category = $3, status = $4, updated_at = NOW()
-		WHERE id = $5 AND pro_user_id = $6
-		RETURNING id, pro_user_id, title, description, category, status, moderation_status, moderation_note, created_at, updated_at
-	`, payload.Title, payload.Description, payload.Category, status, id, proUserID).Scan(
-		&p.ID, &p.ProUserID, &p.Title, &p.Description, &p.Category, &p.Status,
+		SET title = $1, description = $2, project_steps = $3::jsonb, category = $4, status = $5, moderation_status = '', updated_at = NOW()
+		WHERE id = $6 AND pro_user_id = $7
+		RETURNING id, pro_user_id, title, description, COALESCE(project_steps::text, '[]'), category, status, moderation_status, moderation_note, created_at, updated_at
+	`, payload.Title, payload.Description, string(stepsJSON), payload.Category, status, id, proUserID).Scan(
+		&p.ID, &p.ProUserID, &p.Title, &p.Description, &existingStepsRaw, &p.Category, &p.Status,
 		&p.ModerationStatus, &p.ModerationNote, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
@@ -480,6 +611,7 @@ func (r *Repository) Update(id, proUserID int64, payload UpdatePayload) (*Projec
 		}
 		return nil, err
 	}
+	p.Steps = parseProjectSteps(existingStepsRaw)
 	p.ItemCount = 0
 	p.TotalWeightGrams = 0
 	p.TotalWeightKg = 0
@@ -620,7 +752,7 @@ func (r *Repository) ListImages(projectID int64) ([]ProjectImage, error) {
 	rows, err := r.db.Query(`
 		SELECT id, project_id, url, image_type, added_at
 		FROM upcycling_project_images
-		WHERE project_id = $1
+		WHERE project_id = $1 AND COALESCE(is_step_image, FALSE) = FALSE
 		ORDER BY added_at ASC
 	`, projectID)
 	if err != nil {
@@ -651,24 +783,85 @@ func (r *Repository) AddImage(projectID, proUserID int64, url, imageType string)
 	if err := validateImagePayload(url); err != nil {
 		return nil, err
 	}
+	validTypes := map[string]bool{"avant": true, "apres": true, "autre": true}
+	if !validTypes[imageType] {
+		return nil, errors.New("type d'image invalide")
+	}
+
+	var subscriptionType string
+	err = r.db.QueryRow(`
+		SELECT COALESCE(u.subscription_type, 'decouverte')
+		FROM upcycling_projects p
+		JOIN users u ON u.id = p.pro_user_id
+		WHERE p.id = $1 AND p.pro_user_id = $2
+	`, projectID, proUserID).Scan(&subscriptionType)
+	if err != nil {
+		return nil, err
+	}
+	subscriptionType = strings.TrimSpace(strings.ToLower(subscriptionType))
+	if imageType == "autre" {
+		switch subscriptionType {
+		case "", "decouverte", "gratuit":
+			return nil, errors.New("les images detail ne sont pas disponibles avec l'offre Decouverte")
+		case "pro_essentiel":
+			var detailCount int
+			err = r.db.QueryRow(`
+				SELECT COUNT(*)
+				FROM upcycling_project_images
+				WHERE project_id = $1 AND image_type = 'autre' AND COALESCE(is_step_image, FALSE) = FALSE
+			`, projectID).Scan(&detailCount)
+			if err != nil {
+				return nil, err
+			}
+			if detailCount >= maxProjectDetailImagesEssential {
+				return nil, errors.New("vous avez atteint la limite de 3 images detail pour l'offre Pro Essentiel")
+			}
+		}
+	}
 	var imageCount int
-	err = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_images WHERE project_id = $1`, projectID).Scan(&imageCount)
+	err = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_images WHERE project_id = $1 AND COALESCE(is_step_image, FALSE) = FALSE`, projectID).Scan(&imageCount)
 	if err != nil {
 		return nil, err
 	}
 	if imageCount >= maxProjectImageCount {
 		return nil, errors.New("image limit reached for this project")
 	}
-	validTypes := map[string]bool{"avant": true, "apres": true, "autre": true}
-	if !validTypes[imageType] {
-		imageType = "autre"
-	}
 	var img ProjectImage
 	err = r.db.QueryRow(`
-		INSERT INTO upcycling_project_images (project_id, url, image_type)
-		VALUES ($1, $2, $3)
+		INSERT INTO upcycling_project_images (project_id, url, image_type, is_step_image)
+		VALUES ($1, $2, $3, FALSE)
 		RETURNING id, project_id, url, image_type, added_at
 	`, projectID, url, imageType).Scan(&img.ID, &img.ProjectID, &img.URL, &img.ImageType, &img.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &img, nil
+}
+
+// AddStepImage ajoute une image dédiée à une étape, sans l'inclure dans la galerie avant/après/autre.
+func (r *Repository) AddStepImage(projectID, proUserID int64, url string) (*ProjectImage, error) {
+	var ownerID int64
+	err := r.db.QueryRow(`SELECT pro_user_id FROM upcycling_projects WHERE id = $1`, projectID).Scan(&ownerID)
+	if err != nil || ownerID != proUserID {
+		return nil, errors.New("project not found or not yours")
+	}
+	if err := validateImagePayload(url); err != nil {
+		return nil, err
+	}
+	subscriptionType, err := r.getSubscriptionTypeForPro(proUserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateProjectStepsForSubscription(subscriptionType, []ProjectStep{{Text: "step", ImageURL: url}}); err != nil {
+		return nil, err
+	}
+
+	var img ProjectImage
+	err = r.db.QueryRow(`
+		INSERT INTO upcycling_project_images (project_id, url, image_type, is_step_image)
+		VALUES ($1, $2, 'autre', TRUE)
+		RETURNING id, project_id, url, image_type, added_at
+	`, projectID, url).Scan(&img.ID, &img.ProjectID, &img.URL, &img.ImageType, &img.AddedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +973,7 @@ func (r *Repository) AdminListAll(statusFilter, moderationStatusFilter string) (
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE
 			ORDER BY CASE
 				WHEN img.image_type = 'apres' THEN 0
 				WHEN img.image_type = 'avant' THEN 1
@@ -874,7 +1067,7 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE
 			ORDER BY CASE
 				WHEN img.image_type = 'apres' THEN 0
 				WHEN img.image_type = 'avant' THEN 1
@@ -886,14 +1079,14 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'avant'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'avant'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) before_img ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'apres'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'apres'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) after_img ON TRUE
@@ -966,7 +1159,7 @@ func (r *Repository) ProPublishedProjectsForMyUpcycle(viewerUserID, ownerProUser
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE
 			ORDER BY CASE
 				WHEN img.image_type = 'apres' THEN 0
 				WHEN img.image_type = 'avant' THEN 1
@@ -978,14 +1171,14 @@ func (r *Repository) ProPublishedProjectsForMyUpcycle(viewerUserID, ownerProUser
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'avant'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'avant'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) before_img ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'apres'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'apres'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) after_img ON TRUE
@@ -1058,7 +1251,7 @@ func (r *Repository) ParticulierListParticipated(userID int64) ([]Project, error
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE
 			ORDER BY CASE
 				WHEN img.image_type = 'apres' THEN 0
 				WHEN img.image_type = 'avant' THEN 1
@@ -1070,14 +1263,14 @@ func (r *Repository) ParticulierListParticipated(userID int64) ([]Project, error
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'avant'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'avant'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) before_img ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'apres'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'apres'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) after_img ON TRUE
@@ -1154,9 +1347,43 @@ func (r *Repository) AdminModerate(projectID int64, moderationStatus, note strin
 	if !valid[moderationStatus] {
 		return errors.New("invalid moderation status")
 	}
+
+	if moderationStatus == "approved" {
+		var proUserID int64
+		err := r.db.QueryRow("SELECT pro_user_id FROM upcycling_projects WHERE id = $1", projectID).Scan(&proUserID)
+		if err != nil {
+			return err
+		}
+		if err := r.ValidatePublishReadiness(projectID, proUserID); err != nil {
+			return err
+		}
+		var subscriptionType string
+		err = r.db.QueryRow("SELECT COALESCE(subscription_type, 'decouverte') FROM users WHERE id = $1", proUserID).Scan(&subscriptionType)
+		if err == nil {
+			subscriptionType = strings.TrimSpace(strings.ToLower(subscriptionType))
+			var limit int
+			var planName string
+			switch subscriptionType {
+			case "decouverte", "gratuit", "":
+				limit = 3
+				planName = "Découverte"
+			case "pro_essentiel":
+				limit = 10
+				planName = "Pro Essentiel"
+			}
+			if limit > 0 {
+				var publishedCount int
+				_ = r.db.QueryRow("SELECT COUNT(*) FROM upcycling_projects WHERE pro_user_id = $1 AND status = 'publie' AND id != $2", proUserID, projectID).Scan(&publishedCount)
+				if publishedCount >= limit {
+					return errors.New("Cet utilisateur a déjà atteint la limite de " + strconv.Itoa(limit) + " projets publiés pour son abonnement " + planName + ".")
+				}
+			}
+		}
+	}
+
 	res, err := r.db.Exec(`
 		UPDATE upcycling_projects
-		SET moderation_status = $1,
+		SET moderation_status = CASE WHEN $1 = 'rejected' THEN '' ELSE $1 END,
 		    moderation_note = $2,
 		    status = CASE WHEN $1 = 'approved' THEN 'publie' ELSE 'brouillon' END,
 		    updated_at = NOW()
@@ -1195,12 +1422,49 @@ func (r *Repository) ValidatePublishReadiness(projectID, proUserID int64) error 
 	}
 
 	var imageCount int
-	err = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_images WHERE project_id = $1`, projectID).Scan(&imageCount)
+	err = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_images WHERE project_id = $1 AND COALESCE(is_step_image, FALSE) = FALSE`, projectID).Scan(&imageCount)
 	if err != nil {
 		return err
 	}
 	if imageCount < 1 {
 		return errors.New("at least one image is required to publish")
+	}
+
+	var subscriptionType string
+	err = r.db.QueryRow(`SELECT COALESCE(subscription_type, 'decouverte') FROM users WHERE id = $1`, proUserID).Scan(&subscriptionType)
+	if err != nil {
+		return err
+	}
+	subscriptionType = strings.TrimSpace(strings.ToLower(subscriptionType))
+
+	var detailImageCount int
+	err = r.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM upcycling_project_images
+		WHERE project_id = $1 AND image_type = 'autre' AND COALESCE(is_step_image, FALSE) = FALSE
+	`, projectID).Scan(&detailImageCount)
+	if err != nil {
+		return err
+	}
+
+	switch subscriptionType {
+	case "", "decouverte", "gratuit":
+		if detailImageCount > 0 {
+			return errors.New("les images detail ne sont pas disponibles avec l'offre Decouverte")
+		}
+	case "pro_essentiel":
+		if detailImageCount > 3 {
+			return errors.New("vous avez atteint la limite de 3 images detail pour l'offre Pro Essentiel")
+		}
+	}
+
+	var stepsRaw string
+	err = r.db.QueryRow(`SELECT COALESCE(project_steps::text, '[]') FROM upcycling_projects WHERE id = $1`, projectID).Scan(&stepsRaw)
+	if err != nil {
+		return err
+	}
+	if err := validateProjectStepsForSubscription(subscriptionType, parseProjectSteps(stepsRaw)); err != nil {
+		return err
 	}
 
 	return nil
@@ -1342,7 +1606,7 @@ func (r *Repository) ParticulierListFavorites(userID int64) ([]Project, error) {
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE
 			ORDER BY CASE
 				WHEN img.image_type = 'apres' THEN 0
 				WHEN img.image_type = 'avant' THEN 1
@@ -1354,14 +1618,14 @@ func (r *Repository) ParticulierListFavorites(userID int64) ([]Project, error) {
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'avant'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'avant'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) before_img ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT img.url
 			FROM upcycling_project_images img
-			WHERE img.project_id = p.id AND img.image_type = 'apres'
+			WHERE img.project_id = p.id AND COALESCE(img.is_step_image, FALSE) = FALSE AND img.image_type = 'apres'
 			ORDER BY img.added_at DESC
 			LIMIT 1
 		) after_img ON TRUE
@@ -1399,3 +1663,94 @@ func (r *Repository) ParticulierListFavorites(userID int64) ([]Project, error) {
 	}
 	return projects, nil
 }
+
+// TrackFeedImpressions incrémente les impressions des projets affichés dans le fil pour un utilisateur.
+func (r *Repository) TrackFeedImpressions(projectIDs []int64, userID int64) error {
+	if userID <= 0 || len(projectIDs) == 0 {
+		return nil
+	}
+	for _, projectID := range projectIDs {
+		if projectID <= 0 {
+			continue
+		}
+		var ownerID int64
+		if err := r.db.QueryRow(`SELECT pro_user_id FROM upcycling_projects WHERE id = $1`, projectID).Scan(&ownerID); err != nil {
+			continue
+		}
+		if ownerID == userID {
+			continue
+		}
+		_, err := r.db.Exec(`
+			INSERT INTO upcycling_project_feed_metrics (project_id, user_id, impressions, clicks, last_seen_at)
+			VALUES ($1, $2, 1, 0, NOW())
+			ON CONFLICT (project_id, user_id)
+			DO UPDATE SET impressions = upcycling_project_feed_metrics.impressions + 1,
+			              last_seen_at = NOW()
+		`, projectID, userID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TrackProjectClick incrémente le nombre de clics depuis le fil pour un projet et un utilisateur.
+func (r *Repository) TrackProjectClick(projectID, userID int64) error {
+	if projectID <= 0 || userID <= 0 {
+		return nil
+	}
+	var ownerID int64
+	if err := r.db.QueryRow(`SELECT pro_user_id FROM upcycling_projects WHERE id = $1`, projectID).Scan(&ownerID); err != nil {
+		return nil
+	}
+	if ownerID == userID {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		INSERT INTO upcycling_project_feed_metrics (project_id, user_id, impressions, clicks, last_seen_at)
+		VALUES ($1, $2, 0, 1, NOW())
+		ON CONFLICT (project_id, user_id)
+		DO UPDATE SET clicks = upcycling_project_feed_metrics.clicks + 1,
+		              last_seen_at = NOW()
+	`, projectID, userID)
+	return err
+}
+
+// GetProjectAnalytics retourne les statistiques d'un projet pour son propriétaire (offres Essentiel/Premium).
+func (r *Repository) GetProjectAnalytics(projectID, proUserID int64) (*ProjectAnalytics, error) {
+	var ownerID int64
+	if err := r.db.QueryRow(`SELECT pro_user_id FROM upcycling_projects WHERE id = $1`, projectID).Scan(&ownerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("project not found")
+		}
+		return nil, err
+	}
+	if ownerID != proUserID {
+		return nil, errors.New("project not found or not yours")
+	}
+
+	subscriptionType, err := r.getSubscriptionTypeForPro(proUserID)
+	if err != nil {
+		return nil, err
+	}
+	if subscriptionType != "pro_essentiel" && subscriptionType != "premium_atelier" {
+		return nil, errors.New("stats reservees aux offres Pro Essentiel et Premium Atelier")
+	}
+
+	stats := &ProjectAnalytics{}
+	_ = r.db.QueryRow(`
+		SELECT COALESCE(SUM(impressions), 0), COALESCE(SUM(clicks), 0)
+		FROM upcycling_project_feed_metrics
+		WHERE project_id = $1 AND user_id <> $2
+	`, projectID, proUserID).Scan(&stats.ImpressionCount, &stats.ClickCount)
+	_ = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = $1 AND user_id <> $2`, projectID, proUserID).Scan(&stats.LikeCount)
+	_ = r.db.QueryRow(`SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = $1 AND user_id <> $2`, projectID, proUserID).Scan(&stats.BookmarkCount)
+
+	if stats.ClickCount > 0 {
+		stats.LikeConversionPct = (float64(stats.LikeCount) / float64(stats.ClickCount)) * 100.0
+		stats.BookmarkConversionPct = (float64(stats.BookmarkCount) / float64(stats.ClickCount)) * 100.0
+	}
+
+	return stats, nil
+}
+

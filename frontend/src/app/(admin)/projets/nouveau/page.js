@@ -125,8 +125,10 @@ const styles = {
 export default function NouveauProjet() {
     const router = useRouter();
     const fileInputRef = useRef(null);
+    const stepImageInputRefs = useRef({});
 
     const [form, setForm] = useState({ title: "", description: "", category: "" });
+    const [steps, setSteps] = useState([]);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
@@ -139,13 +141,31 @@ export default function NouveauProjet() {
 
     const [showItemSelect, setShowItemSelect] = useState(false);
     const [newImageType, setNewImageType] = useState("autre");
+    const [user, setUser] = useState(null);
 
     useEffect(() => {
         fetch(apiUrl("/pro/projects/recovered-items"), { headers: buildAuthHeaders() })
             .then((r) => r.json())
             .then((d) => setRecoveredItems(d.items || []))
             .catch(() => {});
+        fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() })
+            .then((r) => r.json())
+            .then((d) => setUser(d.user || null))
+            .catch(() => {});
     }, []);
+
+    const subscriptionType = String(user?.subscriptionType || "decouverte").toLowerCase();
+    const canUseDetailImages = subscriptionType === "pro_essentiel" || subscriptionType === "premium_atelier";
+    const detailImageLimit = subscriptionType === "pro_essentiel" ? 3 : subscriptionType === "premium_atelier" ? Infinity : 0;
+    const detailImageCount = images.filter((img) => img.imageType === "autre").length;
+    const remainingDetailImages = Number.isFinite(detailImageLimit) ? Math.max(0, detailImageLimit - detailImageCount) : null;
+    const availableImageTypes = IMAGE_TYPES.filter((type) => type.value !== "autre" || canUseDetailImages);
+
+    useEffect(() => {
+        if (!canUseDetailImages && newImageType === "autre") {
+            setNewImageType("avant");
+        }
+    }, [canUseDetailImages, newImageType]);
 
     const flash = (msg, type = "success") => {
         if (type === "success") {
@@ -179,10 +199,42 @@ export default function NouveauProjet() {
 
     const handleChange = (e) => setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
 
+    const normalizeSteps = (raw) => {
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .map((step) => {
+                if (typeof step === "string") return { text: step.trim(), imageUrl: "" };
+                return {
+                    text: String(step?.text || "").trim(),
+                    imageUrl: String(step?.imageUrl || "").trim(),
+                };
+            })
+            .filter((step) => step.text)
+            .slice(0, 30);
+    };
+
+    const addStep = () => {
+        setSteps((prev) => {
+            if (prev.length >= 30) return prev;
+            return [...prev, { text: "", imageUrl: "" }];
+        });
+    };
+
+    const updateStepText = (idx, text) => {
+        setSteps((prev) => prev.map((step, i) => (i === idx ? { ...step, text } : step)));
+    };
+
+    const removeStep = (idx) => {
+        setSteps((prev) => prev.filter((_, i) => i !== idx));
+    };
+
+    const getStepPayload = () => normalizeSteps(steps);
+
     const loadProject = async (id) => {
         const detail = await fetch(apiUrl(`/pro/projects/${id}`), { headers: buildAuthHeaders() }).then((r) => r.json());
         setItems(detail.items || []);
         setImages(detail.images || []);
+        setSteps(normalizeSteps(detail?.project?.steps));
         setImpact({
             totalWeightKg: Number(detail.impact?.totalWeightKg ?? detail.project?.totalWeightKg ?? 0),
             upcyclingScore: Number(detail.impact?.upcyclingScore ?? detail.project?.upcyclingScore ?? 0),
@@ -194,10 +246,11 @@ export default function NouveauProjet() {
         // Permet de démarrer le brouillon même si le titre n'est pas encore saisi.
         // Le titre restera contrôlé lors de l'enregistrement/publikation finale.
         const draftTitle = form.title.trim() || "Projet en cours";
+        const payload = { ...form, title: draftTitle, status: "brouillon", steps: getStepPayload() };
         const res = await fetch(apiUrl("/pro/projects"), {
             method: "POST",
             headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
-            body: JSON.stringify({ ...form, title: draftTitle, status: "brouillon" }),
+            body: JSON.stringify(payload),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Erreur lors de la création du brouillon");
@@ -241,6 +294,12 @@ export default function NouveauProjet() {
         const files = Array.from(e.target.files || []);
         if (files.length === 0) return;
         try {
+            if (newImageType === "autre" && !canUseDetailImages) {
+                throw new Error("Votre offre Découverte n'autorise pas les images détails. Utilisez seulement Avant ou Après.");
+            }
+            if (newImageType === "autre" && subscriptionType === "pro_essentiel" && detailImageCount >= detailImageLimit) {
+                throw new Error("Votre offre Pro Essentiel est limitée à 3 images détails par projet.");
+            }
             const pid = await ensureDraftProject();
             if (images.length >= MAX_IMAGE_COUNT) {
                 throw new Error(`Limite atteinte: ${MAX_IMAGE_COUNT} images maximum par projet.`);
@@ -292,6 +351,41 @@ export default function NouveauProjet() {
         await loadProject(projectId);
     };
 
+    const uploadStepImage = async (idx, file) => {
+        if (!file) return;
+        try {
+            if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+                throw new Error("Format non supporté. Utilisez JPG, PNG ou WEBP.");
+            }
+            if (file.size > MAX_IMAGE_SIZE) {
+                throw new Error("Image trop volumineuse (max 5 MB).");
+            }
+            if (!canUseDetailImages) {
+                throw new Error("Votre offre actuelle n'autorise pas les images d'étape.");
+            }
+
+            const pid = await ensureDraftProject();
+            const base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+            });
+
+            const res = await fetch(apiUrl(`/pro/projects/${pid}/steps/images`), {
+                method: "POST",
+                headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
+                body: JSON.stringify({ url: base64 }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Erreur upload image");
+
+            setSteps((prev) => prev.map((step, i) => (i === idx ? { ...step, imageUrl: data.url } : step)));
+        } catch (e) {
+            flash(e.message, "error");
+        }
+    };
+
     const submit = async (status) => {
         if (!form.title.trim()) {
             flash("Le titre est obligatoire.", "error");
@@ -316,7 +410,11 @@ export default function NouveauProjet() {
             const res = await fetch(apiUrl(`/pro/projects/${pid}`), {
                 method: "PUT",
                 headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
-                body: JSON.stringify({ ...form, status: "brouillon" }),
+                body: JSON.stringify({
+                    ...form,
+                    status: "brouillon",
+                    steps: getStepPayload(),
+                }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Erreur");
@@ -375,7 +473,7 @@ export default function NouveauProjet() {
                         </div>
                         <div style={{ display: "flex", gap: "0.8rem", alignItems: "center", flexWrap: "wrap" }}>
                             <select style={{ ...styles.select, width: "auto", padding: "0.5rem 0.8rem" }} value={newImageType} onChange={(e) => setNewImageType(e.target.value)}>
-                                {IMAGE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                {availableImageTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                             </select>
                             <button style={styles.btnGhost} onClick={() => fileInputRef.current?.click()}>
                                 <ImageIcon size={14} /> Ajouter des images
@@ -383,7 +481,7 @@ export default function NouveauProjet() {
                             <input ref={fileInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp" style={{ display: "none" }} onChange={handleImageFile} />
                         </div>
                         <p style={{ marginTop: "0.8rem", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                            Formats: JPG, PNG, WEBP · Taille max: 5 MB · {images.length}/{MAX_IMAGE_COUNT} images
+                            Formats: JPG, PNG, WEBP · Taille max: 5 MB · {images.length}/{MAX_IMAGE_COUNT} images · {subscriptionType === "premium_atelier" ? "Images détails illimitées" : subscriptionType === "pro_essentiel" ? `${remainingDetailImages} image(s) détail restante(s)` : "Aucune image détail autorisée"}
                         </p>
                     </div>
 
@@ -400,6 +498,63 @@ export default function NouveauProjet() {
                             <textarea style={styles.textarea} name="description" value={form.description}
                                 onChange={handleChange} placeholder="Décrivez votre projet d'upcycling, la transformation réalisée…" />
                         </div>
+
+                        {(subscriptionType === "pro_essentiel" || subscriptionType === "premium_atelier") ? (
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Étapes de réalisation</label>
+                                <div style={{ display: "grid", gap: "0.7rem" }}>
+                                    {steps.map((step, idx) => (
+                                        <div key={`step-${idx}`} style={{ background: "#fff", borderRadius: "14px", border: "1px solid var(--border)", padding: "0.75rem" }}>
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
+                                                <strong style={{ fontSize: "0.85rem", color: "var(--text-main)" }}>Étape {idx + 1}</strong>
+                                                <button type="button" style={{ ...styles.btnGhost, padding: "0.35rem 0.65rem", fontSize: "0.75rem" }} onClick={() => removeStep(idx)}>
+                                                    <Trash2 size={12} /> Supprimer
+                                                </button>
+                                            </div>
+                                            <textarea
+                                                style={{ ...styles.textarea, minHeight: "88px" }}
+                                                value={step.text}
+                                                onChange={(e) => updateStepText(idx, e.target.value)}
+                                                placeholder={`Décrivez l'étape ${idx + 1}`}
+                                            />
+                                            <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", marginTop: "0.55rem", flexWrap: "wrap" }}>
+                                                <button
+                                                    type="button"
+                                                    style={styles.btnGhost}
+                                                    onClick={() => stepImageInputRefs.current[idx]?.click()}
+                                                >
+                                                    <ImageIcon size={14} /> Ajouter image à l'étape
+                                                </button>
+                                                <input
+                                                    ref={(el) => { stepImageInputRefs.current[idx] = el; }}
+                                                    type="file"
+                                                    accept="image/jpeg,image/png,image/webp"
+                                                    style={{ display: "none" }}
+                                                    onChange={(e) => {
+                                                        const file = e.target.files?.[0];
+                                                        uploadStepImage(idx, file);
+                                                        e.target.value = "";
+                                                    }}
+                                                />
+                                                {step.imageUrl ? (
+                                                    <img src={step.imageUrl} alt={`Étape ${idx + 1}`} style={{ width: "54px", height: "54px", borderRadius: "10px", objectFit: "cover", border: "1px solid var(--border)" }} />
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <button type="button" style={styles.btnGhost} onClick={addStep}>
+                                        <Plus size={14} /> Ajouter une étape
+                                    </button>
+                                </div>
+                                <p style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                                    Visible pour les visiteurs. Maximum 30 étapes.
+                                </p>
+                            </div>
+                        ) : (
+                            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "-0.3rem", marginBottom: "1rem" }}>
+                                Les étapes de réalisation sont disponibles avec les offres Pro Essentiel et Premium Atelier.
+                            </div>
+                        )}
 
                         <div style={styles.formGroup}>
                             <label style={styles.label}>Catégorie</label>

@@ -78,6 +78,7 @@ func (h *Handler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "create as draft first, then submit for moderation")
 		return
 	}
+
 	p, err := h.repo.Create(proUserID, payload)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create project")
@@ -198,6 +199,26 @@ func (h *Handler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// ArchiveHandler gère POST /api/pro/projects/{id}/archive — remet un projet en brouillon.
+func (h *Handler) ArchiveHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := strings.TrimSuffix(r.URL.Path, "/archive")
+	projectID, ok := parseID(path, "/api/pro/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if err := h.repo.Archive(projectID, proUserID); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": StatusDraft})
+}
+
 // PublishHandler gère POST /api/pro/projects/{id}/publish.
 func (h *Handler) PublishHandler(w http.ResponseWriter, r *http.Request) {
 	proUserID, ok := h.getProUserID(r)
@@ -226,6 +247,32 @@ func (h *Handler) PublishHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	// Vérifier la limite de projets publiés selon l'abonnement
+	var subscriptionType string
+	err = h.repo.db.QueryRow("SELECT COALESCE(subscription_type, 'decouverte') FROM users WHERE id = $1", proUserID).Scan(&subscriptionType)
+	if err == nil {
+		subscriptionType = strings.TrimSpace(strings.ToLower(subscriptionType))
+		var limit int
+		var planName string
+		switch subscriptionType {
+		case "decouverte", "gratuit", "":
+			limit = 3
+			planName = "Découverte"
+		case "pro_essentiel":
+			limit = 10
+			planName = "Pro Essentiel"
+		}
+		if limit > 0 {
+			var publishedCount int
+			_ = h.repo.db.QueryRow("SELECT COUNT(*) FROM upcycling_projects WHERE pro_user_id = $1 AND status = 'publie' AND id != $2", proUserID, projectID).Scan(&publishedCount)
+			if publishedCount >= limit {
+				writeError(w, http.StatusForbidden, "Vous avez atteint la limite de "+strconv.Itoa(limit)+" projets publiés pour l'offre "+planName+". Veuillez repasser un projet en brouillon ou passer à un abonnement supérieur.")
+				return
+			}
+		}
+	}
+
 	if err := h.repo.Publish(projectID, proUserID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -315,6 +362,37 @@ func (h *Handler) AddImageHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, img)
 }
 
+// AddStepImageHandler gère POST /api/pro/projects/{id}/steps/images.
+func (h *Handler) AddStepImageHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := strings.TrimSuffix(r.URL.Path, "/steps/images")
+	projectID, ok := parseID(path, "/api/pro/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.URL) == "" {
+		writeError(w, http.StatusBadRequest, "url required")
+		return
+	}
+	img, err := h.repo.AddStepImage(projectID, proUserID, body.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":  img.ID,
+		"url": img.URL,
+	})
+}
+
 // RemoveImageHandler gère DELETE /api/pro/projects/{id}/images/{image_id}.
 func (h *Handler) RemoveImageHandler(w http.ResponseWriter, r *http.Request) {
 	proUserID, ok := h.getProUserID(r)
@@ -382,6 +460,13 @@ func (h *Handler) ParticulierListPostedHandler(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "could not list posted projects")
 		return
 	}
+	if userID > 0 && len(projects) > 0 {
+		projectIDs := make([]int64, 0, len(projects))
+		for _, p := range projects {
+			projectIDs = append(projectIDs, p.ID)
+		}
+		_ = h.repo.TrackFeedImpressions(projectIDs, userID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
 }
 
@@ -401,6 +486,13 @@ func (h *Handler) ParticulierDetailHandler(w http.ResponseWriter, r *http.Reques
 	if p.Status != StatusPublished || p.ModerationStatus != "approved" {
 		writeError(w, http.StatusForbidden, "project not accessible")
 		return
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("from")), "postes") {
+		if claims, ok := r.Context().Value("authClaims").(jwt.MapClaims); ok {
+			if uid, ok := claims["userId"].(float64); ok {
+				_ = h.repo.TrackProjectClick(projectID, int64(uid))
+			}
+		}
 	}
 
 	items, _ := h.repo.ListItems(projectID)
@@ -422,6 +514,36 @@ func (h *Handler) ParticulierDetailHandler(w http.ResponseWriter, r *http.Reques
 		"images":  images,
 		"author":  author,
 	})
+}
+
+// ProjectAnalyticsHandler gère GET /api/pro/projects/{id}/analytics.
+func (h *Handler) ProjectAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := strings.TrimSuffix(r.URL.Path, "/analytics")
+	projectID, ok := parseID(path, "/api/pro/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	stats, err := h.repo.GetProjectAnalytics(projectID, proUserID)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "reservees") {
+			writeError(w, http.StatusForbidden, msg)
+			return
+		}
+		if strings.Contains(msg, "not found") || strings.Contains(msg, "not yours") {
+			writeError(w, http.StatusNotFound, msg)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not load analytics")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stats": stats})
 }
 
 // ParticulierListParticipatedHandler gère GET /api/mes-projets.

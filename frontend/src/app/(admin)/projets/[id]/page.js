@@ -126,6 +126,24 @@ const styles = {
     tipsList: { listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.7rem" },
     tipsItem: { display: "flex", alignItems: "center", gap: "0.55rem", fontSize: "0.82rem", color: "var(--text-muted)" },
     submitRow: { display: "flex", justifyContent: "flex-end", gap: "1rem", marginTop: "1rem", padding: "1rem 0" },
+    toast: {
+        position: "fixed",
+        bottom: "2.5rem",
+        right: "2.5rem",
+        maxWidth: "420px",
+        padding: "1.1rem 1.6rem",
+        borderRadius: "18px",
+        color: "white",
+        boxShadow: "0 20px 50px rgba(0,0,0,0.28)",
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "flex-start",
+        gap: "0.85rem",
+        backdropFilter: "blur(12px)",
+        animation: "slideInRight 0.38s cubic-bezier(0.175,0.885,0.32,1.275)",
+        lineHeight: 1.45,
+        fontSize: "0.92rem",
+    },
 };
 
 export default function ProjetDetail() {
@@ -133,22 +151,31 @@ export default function ProjetDetail() {
     const params = useParams();
     const projectId = params.id;
     const fileInputRef = useRef(null);
+    const stepImageInputRefs = useRef({});
 
     const [project, setProject] = useState(null);
     const [items, setItems] = useState([]);
     const [images, setImages] = useState([]);
     const [recoveredItems, setRecoveredItems] = useState([]);
     const [form, setForm] = useState({ title: "", description: "", category: "" });
+    const [steps, setSteps] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
+    const [toast, setToast] = useState(null);
     const [newImageType, setNewImageType] = useState("autre");
     const [showItemSelect, setShowItemSelect] = useState(false);
     const [likersOpen, setLikersOpen] = useState(false);
     const [likers, setLikers] = useState([]);
     const [likersLoading, setLikersLoading] = useState(false);
     const [likersError, setLikersError] = useState(null);
+    const [user, setUser] = useState(null);
+
+    const showToast = (message, type = "success", duration = 5000) => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), duration);
+    };
 
     const formatWeight = (grams) => {
         const value = Number(grams || 0);
@@ -170,21 +197,72 @@ export default function ProjetDetail() {
         return "Poids non renseigne";
     };
 
+    const normalizeSteps = (raw) => {
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .map((step) => {
+                if (typeof step === "string") return { text: step.trim(), imageUrl: "" };
+                return {
+                    text: String(step?.text || "").trim(),
+                    imageUrl: String(step?.imageUrl || "").trim(),
+                };
+            })
+            .filter((step) => step.text)
+            .slice(0, 30);
+    };
+
+    const addStep = () => {
+        setSteps((prev) => {
+            if (prev.length >= 30) return prev;
+            return [...prev, { text: "", imageUrl: "" }];
+        });
+    };
+
+    const updateStepText = (idx, text) => {
+        setSteps((prev) => prev.map((step, i) => (i === idx ? { ...step, text } : step)));
+    };
+
+    const removeStep = (idx) => {
+        setSteps((prev) => prev.filter((_, i) => i !== idx));
+    };
+
+    const getStepPayload = () => normalizeSteps(steps);
+
     const load = () => {
         Promise.all([
             fetch(apiUrl(`/pro/projects/${projectId}`), { headers: buildAuthHeaders() }).then((r) => r.json()),
             fetch(apiUrl("/pro/projects/recovered-items"), { headers: buildAuthHeaders() }).then((r) => r.json()),
-        ]).then(([detail, recovered]) => {
+            fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() }).then((r) => r.json()),
+        ]).then(([detail, recovered, me]) => {
             setProject(detail.project);
             setItems(detail.items || []);
             setImages(detail.images || []);
             setRecoveredItems(recovered.items || []);
-            setForm({ title: detail.project.title, description: detail.project.description, category: detail.project.category });
+            setForm({
+                title: detail.project.title,
+                description: detail.project.description,
+                category: detail.project.category,
+            });
+            setSteps(normalizeSteps(detail?.project?.steps));
+            setUser(me?.user || null);
             setLoading(false);
         }).catch(() => { setError("Impossible de charger le projet"); setLoading(false); });
     };
 
+    const subscriptionType = String(user?.subscriptionType || "decouverte").toLowerCase();
+    const canUseDetailImages = subscriptionType === "pro_essentiel" || subscriptionType === "premium_atelier";
+    const detailImageLimit = subscriptionType === "pro_essentiel" ? 3 : subscriptionType === "premium_atelier" ? Infinity : 0;
+    const detailImageCount = images.filter((img) => img.imageType === "autre").length;
+    const remainingDetailImages = Number.isFinite(detailImageLimit) ? Math.max(0, detailImageLimit - detailImageCount) : null;
+    const availableImageTypes = IMAGE_TYPES.filter((type) => type.value !== "autre" || canUseDetailImages);
+
     useEffect(() => { load(); }, [projectId]);
+
+    useEffect(() => {
+        if (!canUseDetailImages && newImageType === "autre") {
+            setNewImageType("avant");
+        }
+    }, [canUseDetailImages, newImageType]);
 
     useEffect(() => {
         if (!likersOpen) return;
@@ -228,7 +306,11 @@ export default function ProjetDetail() {
             const res = await fetch(apiUrl(`/pro/projects/${projectId}`), {
                 method: "PUT",
                 headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
-                body: JSON.stringify({ ...form, status }),
+                body: JSON.stringify({
+                    ...form,
+                    status,
+                    steps: getStepPayload(),
+                }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Erreur");
@@ -244,19 +326,41 @@ export default function ProjetDetail() {
         if (images.length < 1) { flash("Ajoutez au moins une image avant publication.", "error"); return; }
         setSaving(true);
         try {
-            // Save as draft first, then submit to moderation
+            // Sauvegarder en brouillon d'abord, puis soumettre à la modération
             await fetch(apiUrl(`/pro/projects/${projectId}`), {
                 method: "PUT",
                 headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
-                body: JSON.stringify({ ...form, status: "brouillon" }),
+                body: JSON.stringify({
+                    ...form,
+                    status: "brouillon",
+                    steps: getStepPayload(),
+                }),
             });
             const res = await fetch(apiUrl(`/pro/projects/${projectId}/publish`), {
                 method: "POST", headers: buildAuthHeaders(),
             });
-            if (!res.ok) throw new Error("Erreur lors de la publication");
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                const apiMsg = data.error || "";
+                // Message enrichi pour la limite d'abonnement
+                if (res.status === 403) {
+                    showToast(
+                        "🚫 Limite atteinte — Votre offre Découverte est limitée à 3 projets publiés simultanément. Repassez un projet en brouillon ou passez à l'offre Pro pour continuer.",
+                        "error",
+                        7000
+                    );
+                } else {
+                    showToast(apiMsg || "Erreur lors de la soumission. Veuillez réessayer.", "error");
+                }
+                setSaving(false);
+                return;
+            }
             setProject((p) => ({ ...p, status: "brouillon", moderationStatus: "pending" }));
+            showToast("✅ Projet soumis à la modération. Il sera publié après validation.", "success");
             flash("Projet soumis à modération. Publication après validation admin.");
-        } catch (e) { flash(e.message, "error"); }
+        } catch (e) {
+            showToast(e.message || "Erreur inattendue", "error");
+        }
         setSaving(false);
     };
 
@@ -282,6 +386,18 @@ export default function ProjetDetail() {
     const handleImageFile = async (e) => {
         const files = Array.from(e.target.files || []);
         if (files.length === 0) return;
+
+        if (newImageType === "autre" && !canUseDetailImages) {
+            flash("Votre offre Découverte n'autorise pas les images détails. Utilisez seulement Avant ou Après.", "error");
+            e.target.value = "";
+            return;
+        }
+
+        if (newImageType === "autre" && subscriptionType === "pro_essentiel" && detailImageCount >= detailImageLimit) {
+            flash("Votre offre Pro Essentiel est limitée à 3 images détails par projet.", "error");
+            e.target.value = "";
+            return;
+        }
 
         if (images.length >= MAX_IMAGE_COUNT) {
             flash(`Limite atteinte: ${MAX_IMAGE_COUNT} images maximum par projet.`, "error");
@@ -331,11 +447,47 @@ export default function ProjetDetail() {
         setImages((prev) => prev.filter((img) => img.id !== imageId));
     };
 
+    const uploadStepImage = async (idx, file) => {
+        if (!file) return;
+        try {
+            if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+                throw new Error("Format non supporté. Utilisez JPG, PNG ou WEBP.");
+            }
+            if (file.size > MAX_IMAGE_SIZE) {
+                throw new Error("Image trop volumineuse (max 5 MB).");
+            }
+            if (!canUseDetailImages) {
+                throw new Error("Votre offre actuelle n'autorise pas les images d'étape.");
+            }
+
+            const base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+            });
+
+            const res = await fetch(apiUrl(`/pro/projects/${projectId}/steps/images`), {
+                method: "POST",
+                headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
+                body: JSON.stringify({ url: base64 }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Erreur upload image");
+
+            setSteps((prev) => prev.map((step, i) => (i === idx ? { ...step, imageUrl: data.url } : step)));
+        } catch (e) {
+            flash(e.message, "error");
+        }
+    };
+
     if (loading) return <div style={styles.container}><p style={{ color: "var(--text-muted)" }}>Chargement…</p></div>;
     if (!project) return <div style={styles.container}><p style={{ color: "#c0392b" }}>Projet introuvable.</p></div>;
 
     const moderationStatus = String(project.moderationStatus || "").toLowerCase();
     const displayStatusLabel = moderationStatus === "approved"
+        ? (STATUS_LABELS[project.status] || project.status)
+        : (!moderationStatus || moderationStatus === "")
         ? (STATUS_LABELS[project.status] || project.status)
         : (MODERATION_LABELS[moderationStatus] || STATUS_LABELS[project.status] || project.status);
 
@@ -380,7 +532,7 @@ export default function ProjetDetail() {
                         <div style={{ display: "flex", gap: "0.8rem", alignItems: "center", flexWrap: "wrap" }}>
                             <select style={{ ...styles.select, width: "auto", padding: "0.5rem 0.8rem" }}
                                 value={newImageType} onChange={(e) => setNewImageType(e.target.value)}>
-                                {IMAGE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                {availableImageTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                             </select>
                             <button style={styles.btnGhost} onClick={() => fileInputRef.current?.click()}>
                                 <ImageIcon size={14} /> Ajouter une image
@@ -388,7 +540,7 @@ export default function ProjetDetail() {
                             <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImageFile} />
                         </div>
                         <p style={{ marginTop: "0.8rem", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                            Formats: JPG, PNG, WEBP · Taille max: 5 MB · {images.length}/{MAX_IMAGE_COUNT} images
+                            Formats: JPG, PNG, WEBP · Taille max: 5 MB · {images.length}/{MAX_IMAGE_COUNT} images · {subscriptionType === "premium_atelier" ? "Images détails illimitées" : subscriptionType === "pro_essentiel" ? `${remainingDetailImages} image(s) détail restante(s)` : "Aucune image détail autorisée"}
                         </p>
                     </div>
 
@@ -404,6 +556,63 @@ export default function ProjetDetail() {
                             <textarea style={styles.textarea} name="description" value={form.description} onChange={handleChange}
                                 placeholder="Décrivez la transformation réalisée…" />
                         </div>
+
+                        {(subscriptionType === "pro_essentiel" || subscriptionType === "premium_atelier") ? (
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Étapes de réalisation</label>
+                                <div style={{ display: "grid", gap: "0.7rem" }}>
+                                    {steps.map((step, idx) => (
+                                        <div key={`step-${idx}`} style={{ background: "#fff", borderRadius: "14px", border: "1px solid var(--border)", padding: "0.75rem" }}>
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
+                                                <strong style={{ fontSize: "0.85rem", color: "var(--text-main)" }}>Étape {idx + 1}</strong>
+                                                <button type="button" style={{ ...styles.btnGhost, padding: "0.35rem 0.65rem", fontSize: "0.75rem" }} onClick={() => removeStep(idx)}>
+                                                    <Trash2 size={12} /> Supprimer
+                                                </button>
+                                            </div>
+                                            <textarea
+                                                style={{ ...styles.textarea, minHeight: "88px" }}
+                                                value={step.text}
+                                                onChange={(e) => updateStepText(idx, e.target.value)}
+                                                placeholder={`Décrivez l'étape ${idx + 1}`}
+                                            />
+                                            <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", marginTop: "0.55rem", flexWrap: "wrap" }}>
+                                                <button
+                                                    type="button"
+                                                    style={styles.btnGhost}
+                                                    onClick={() => stepImageInputRefs.current[idx]?.click()}
+                                                >
+                                                    <ImageIcon size={14} /> Ajouter image à l'étape
+                                                </button>
+                                                <input
+                                                    ref={(el) => { stepImageInputRefs.current[idx] = el; }}
+                                                    type="file"
+                                                    accept="image/jpeg,image/png,image/webp"
+                                                    style={{ display: "none" }}
+                                                    onChange={(e) => {
+                                                        const file = e.target.files?.[0];
+                                                        uploadStepImage(idx, file);
+                                                        e.target.value = "";
+                                                    }}
+                                                />
+                                                {step.imageUrl ? (
+                                                    <img src={step.imageUrl} alt={`Étape ${idx + 1}`} style={{ width: "54px", height: "54px", borderRadius: "10px", objectFit: "cover", border: "1px solid var(--border)" }} />
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <button type="button" style={styles.btnGhost} onClick={addStep}>
+                                        <Plus size={14} /> Ajouter une étape
+                                    </button>
+                                </div>
+                                <p style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                                    Visible pour les visiteurs. Maximum 30 étapes.
+                                </p>
+                            </div>
+                        ) : (
+                            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "-0.3rem", marginBottom: "1rem" }}>
+                                Les étapes de réalisation sont disponibles avec les offres Pro Essentiel et Premium Atelier.
+                            </div>
+                        )}
                         <div style={styles.formGroup}>
                             <label style={styles.label}>Catégorie</label>
                             <select style={styles.select} name="category" value={form.category} onChange={handleChange}>
@@ -674,6 +883,27 @@ export default function ProjetDetail() {
                     </div>
                 </div>
             ) : null}
+
+            {/* Toast bottom-right */}
+            {toast && (
+                <div style={{
+                    ...styles.toast,
+                    background: toast.type === "error" ? "rgba(190,30,45,0.96)" : "rgba(22,90,70,0.96)",
+                }}>
+                    <span style={{ flex: 1 }}>{toast.message}</span>
+                    <button
+                        onClick={() => setToast(null)}
+                        style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", padding: "0 0 0 0.5rem", fontSize: "1.1rem", lineHeight: 1, flexShrink: 0 }}
+                        aria-label="Fermer"
+                    >✕</button>
+                </div>
+            )}
+            <style>{`
+                @keyframes slideInRight {
+                    from { transform: translateX(110%); opacity: 0; }
+                    to   { transform: translateX(0);    opacity: 1; }
+                }
+            `}</style>
         </div>
     );
 }

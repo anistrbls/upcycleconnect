@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../../lib/api";
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Box, Trash2, Share2, User2, Tag, Calendar } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Box, Trash2, Share2, User2, Tag, Calendar, ListChecks } from "lucide-react";
 
 const MODERATION_LABELS = { pending: "En validation", approved: "Valide", rejected: "Refuse" };
 const IMAGE_TYPE_LABELS = { avant: "Avant", apres: "Apres", autre: "Autre" };
@@ -147,6 +147,37 @@ const styles = {
     },
     itemTitle: { fontWeight: "600", fontSize: "0.9rem", color: "var(--text-main)", margin: 0 },
     itemMeta: { fontSize: "0.78rem", color: "var(--text-muted)", margin: "2px 0 0" },
+    stepsWrap: { display: "grid", gap: "0.65rem" },
+    stepRow: {
+        display: "grid",
+        gridTemplateColumns: "30px minmax(0, 1fr)",
+        gap: "0.65rem",
+        padding: "0.75rem",
+        borderRadius: "12px",
+        background: "#fff",
+        alignItems: "start",
+    },
+    stepBadge: {
+        width: "26px",
+        height: "26px",
+        borderRadius: "8px",
+        background: "#E5FFBC",
+        color: "#213A2C",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: "0.78rem",
+        fontWeight: "800",
+    },
+    stepText: { margin: 0, fontSize: "0.9rem", color: "var(--text-main)", lineHeight: "1.55" },
+    stepImage: {
+        marginTop: "0.55rem",
+        width: "100%",
+        maxWidth: "340px",
+        borderRadius: "10px",
+        border: "1px solid rgba(35,59,61,0.12)",
+        objectFit: "cover",
+    },
     noteTextarea: {
         width: "100%", padding: "0.8rem 1rem", borderRadius: "12px",
         border: "none", background: "#fff", fontSize: "0.9rem",
@@ -315,6 +346,19 @@ function ProjectModerationDetailContent() {
     const proDisplayName = (author?.fullName || project.proDisplayName || "Professionnel").trim();
     const companyName = (author?.companyName || "N/A").trim() || "N/A";
     const totalProjectsSinceSignup = Number.isFinite(Number(author?.totalProjectsSinceSignup)) ? Number(author.totalProjectsSinceSignup) : 0;
+    const normalizedSteps = Array.isArray(project?.steps)
+        ? project.steps
+            .map((step) => {
+                if (typeof step === "string") {
+                    return { text: step.trim(), imageUrl: "" };
+                }
+                return {
+                    text: String(step?.text || "").trim(),
+                    imageUrl: String(step?.imageUrl || "").trim(),
+                };
+            })
+            .filter((step) => step.text)
+        : [];
 
     return (
         <div style={styles.container}>
@@ -467,6 +511,28 @@ function ProjectModerationDetailContent() {
                         <p style={styles.description}>{project.description}</p>
                     ) : (
                         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>Aucune description.</p>
+                    )}
+
+                    <div style={{ ...sectionLabel, marginTop: "1.2rem" }}>
+                        <ListChecks size={13} style={{ verticalAlign: "text-bottom", marginRight: "0.35rem" }} />
+                        Étapes de réalisation
+                    </div>
+                    {normalizedSteps.length ? (
+                        <div style={styles.stepsWrap}>
+                            {normalizedSteps.map((step, idx) => (
+                                <div key={`step-${idx}`} style={styles.stepRow}>
+                                    <div style={styles.stepBadge}>{idx + 1}</div>
+                                    <div>
+                                        <p style={styles.stepText}>{step.text}</p>
+                                        {step.imageUrl ? (
+                                            <img src={step.imageUrl} alt={`Étape ${idx + 1}`} style={styles.stepImage} />
+                                        ) : null}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", margin: 0 }}>Aucune étape renseignée.</p>
                     )}
                 </div>
 

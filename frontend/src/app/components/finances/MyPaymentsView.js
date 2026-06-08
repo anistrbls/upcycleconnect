@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { FileText } from "lucide-react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
 import RefundPaymentDetailModal, { showRefundDetailsButton } from "./RefundPaymentDetailModal";
+import InvoicePreviewModal from "./InvoicePreviewModal";
 
 function statusLabel(status) {
     const s = String(status || "").toLowerCase();
@@ -42,11 +44,17 @@ function statusStyle(status) {
     return { bg: "#f4f4f5", color: "#52525b", border: "#d4d4d8" };
 }
 
+function canShowInvoice(p) {
+    const s = String(p?.status || "").toLowerCase();
+    return s === "paid" || s === "success" || s === "succeeded" || s === "gratuit" || s === "refunded" || s === "refund_requested" || s === "non_refundable" || s === "refund_failed";
+}
+
 export default function MyPaymentsView() {
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [refundDetailPayment, setRefundDetailPayment] = useState(null);
+    const [invoicePayment, setInvoicePayment] = useState(null);
 
     const fetchPayments = useCallback(async () => {
         setLoading(true);
@@ -205,18 +213,32 @@ export default function MyPaymentsView() {
                                                 </span>
                                             </td>
                                             <td style={{ ...tdStyle, verticalAlign: "middle" }}>
-                                                {showRefundDetailsButton(p) ? (
-                                                    <button
-                                                        type="button"
-                                                        className="action-cta task-action-btn"
-                                                        style={{ fontSize: "0.78rem", padding: "0.45rem 0.9rem" }}
-                                                        onClick={() => setRefundDetailPayment(p)}
-                                                    >
-                                                        Voir le remboursement
-                                                    </button>
-                                                ) : (
-                                                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>—</span>
-                                                )}
+                                                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+                                                    {canShowInvoice(p) && (
+                                                        <button
+                                                            type="button"
+                                                            className="action-cta task-action-btn"
+                                                            style={{ fontSize: "0.78rem", padding: "0.45rem 0.9rem", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                                                            onClick={() => setInvoicePayment(p)}
+                                                        >
+                                                            <FileText size={13} />
+                                                            Facture
+                                                        </button>
+                                                    )}
+                                                    {showRefundDetailsButton(p) && (
+                                                        <button
+                                                            type="button"
+                                                            className="action-cta task-action-btn"
+                                                            style={{ fontSize: "0.78rem", padding: "0.45rem 0.9rem" }}
+                                                            onClick={() => setRefundDetailPayment(p)}
+                                                        >
+                                                            Voir le remboursement
+                                                        </button>
+                                                    )}
+                                                    {!canShowInvoice(p) && !showRefundDetailsButton(p) && (
+                                                        <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>—</span>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     );
@@ -228,6 +250,7 @@ export default function MyPaymentsView() {
             </div>
 
             <RefundPaymentDetailModal open={!!refundDetailPayment} payment={refundDetailPayment} onClose={() => setRefundDetailPayment(null)} />
+            <InvoicePreviewModal open={!!invoicePayment} payment={invoicePayment} onClose={() => setInvoicePayment(null)} />
 
             <style jsx>{`
                 .table-row-hover:hover {

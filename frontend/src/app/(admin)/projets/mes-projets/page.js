@@ -118,6 +118,7 @@ const styles = {
     },
     statusBadge: (status, moderationStatus) => {
         const rejected = moderationStatus === "rejected";
+        const draft = status === "brouillon" && !moderationStatus;
         return {
             position: "absolute",
             top: "14px",
@@ -126,8 +127,8 @@ const styles = {
             borderRadius: "20px",
             fontSize: "0.72rem",
             fontWeight: "700",
-            background: rejected ? "rgba(255, 170, 170, 0.95)" : "rgb(229, 255, 188)",
-            color: rejected ? "#7A1F1F" : "var(--text-main)",
+            background: rejected ? "rgba(255, 170, 170, 0.95)" : draft ? "rgba(255,255,255,0.15)" : "rgb(229, 255, 188)",
+            color: rejected ? "#7A1F1F" : draft ? "white" : "var(--text-main)",
             backdropFilter: "blur(8px)",
             WebkitBackdropFilter: "blur(8px)",
             letterSpacing: "0.04em",
@@ -136,8 +137,8 @@ const styles = {
             maxWidth: "min(168px, calc(100% - 28px))",
             overflow: "hidden",
             textOverflow: "ellipsis",
-            boxShadow: rejected ? "none" : "0 2px 12px rgba(0, 0, 0, 0.22)",
-            border: rejected ? "none" : "1px solid rgba(43, 69, 72, 0.08)",
+            boxShadow: rejected || draft ? "none" : "0 2px 12px rgba(0, 0, 0, 0.22)",
+            border: rejected ? "none" : draft ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(43, 69, 72, 0.08)",
         };
     },
     cardOverlay: {
@@ -274,6 +275,10 @@ export default function ProjetsList() {
     const getDisplayStatus = (project) => {
         const moderationStatus = String(project.moderationStatus || "").toLowerCase();
         if (moderationStatus === "approved") {
+            return STATUS_LABELS[project.status] || project.status;
+        }
+        // '' = brouillon simple (pas encore soumis à modération)
+        if (!moderationStatus || moderationStatus === "") {
             return STATUS_LABELS[project.status] || project.status;
         }
         return MODERATION_LABELS[moderationStatus] || STATUS_LABELS[project.status] || project.status;

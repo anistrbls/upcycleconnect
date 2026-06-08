@@ -1,9 +1,9 @@
 "use client";
 
 import { Suspense, useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../../lib/api";
-import { ChevronLeft, ChevronRight, X, ImageIcon, Box, BarChart3, Leaf, Calendar, User, Tag, MapPin, Award } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, ImageIcon, Box, BarChart3, Leaf, Calendar, User, Tag, MapPin, Award, ListChecks } from "lucide-react";
 
 const styles = {
     container: { width: "100%", padding: "1rem 2rem 3rem 0", animation: "fadeIn 0.5s ease-out" },
@@ -19,6 +19,44 @@ const styles = {
     description: {
         fontSize: "1rem", color: "var(--text-main)", lineHeight: "1.6", whiteSpace: "pre-wrap",
     },
+    stepsWrap: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.8rem",
+    },
+    stepRow: {
+        display: "grid",
+        gridTemplateColumns: "32px minmax(0, 1fr)",
+        gap: "0.75rem",
+        alignItems: "start",
+    },
+    stepBullet: {
+        width: "28px",
+        height: "28px",
+        borderRadius: "10px",
+        background: "#E5FFBC",
+        color: "#213A2C",
+        fontSize: "0.8rem",
+        fontWeight: "800",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: "0.05rem",
+    },
+    stepText: {
+        margin: 0,
+        fontSize: "0.95rem",
+        color: "var(--text-main)",
+        lineHeight: "1.55",
+    },
+    stepImage: {
+        width: "100%",
+        maxWidth: "360px",
+        marginTop: "0.55rem",
+        borderRadius: "12px",
+        border: "1px solid var(--border, #E5E7EB)",
+        objectFit: "cover",
+    },
     imageGallery: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "1rem", marginBottom: "1rem" },
     imageWrapper: { position: "relative", borderRadius: "16px", overflow: "hidden", aspectRatio: "4/3", background: "#eee", boxShadow: "0 4px 12px rgba(0,0,0,0.05)" },
     image: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
@@ -32,6 +70,10 @@ const styles = {
     impactCard: { background: "#fff", borderRadius: "16px", padding: "1rem", border: "1px solid var(--border, #E5E7EB)" },
     impactLabel: { fontSize: "0.7rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.3rem" },
     impactValue: { fontSize: "1.25rem", fontWeight: "800", color: "var(--text-main)" },
+    analyticsGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.65rem" },
+    analyticsCard: { background: "#fff", borderRadius: "14px", padding: "0.85rem", border: "1px solid var(--border, #E5E7EB)" },
+    analyticsLabel: { fontSize: "0.68rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.25rem" },
+    analyticsValue: { fontSize: "1.05rem", fontWeight: "800", color: "var(--text-main)" },
     proCard: {
         background: "#111827",
         color: "#fff",
@@ -85,9 +127,12 @@ export default function ProjectDetailView() {
 
 function ProjectDetailInner() {
     const params = useParams();
+    const searchParams = useSearchParams();
     const id = params.id;
+    const from = searchParams?.get("from") || "";
 
     const [data, setData] = useState(null);
+    const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [lightboxIndex, setLightboxIndex] = useState(null);
@@ -107,10 +152,20 @@ function ProjectDetailInner() {
     useEffect(() => {
         const fetchDetail = async () => {
             try {
-                let res = await fetch(apiUrl(`/part/projects/${id}`), { headers: buildAuthHeaders() });
+                const suffix = from ? `?from=${encodeURIComponent(from)}` : "";
+                let res = await fetch(apiUrl(`/part/projects/${id}${suffix}`), { headers: buildAuthHeaders() });
                 const json = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(json.error || "Erreur de chargement");
                 setData(json);
+
+				// Le backend décide l'accès (proprio + abonnement), on évite les faux négatifs côté UI.
+				const statsRes = await fetch(apiUrl(`/pro/projects/${id}/analytics`), { headers: buildAuthHeaders() });
+				const statsData = await statsRes.json().catch(() => ({}));
+				if (statsRes.ok) {
+					setStats(statsData?.stats || null);
+				} else {
+					setStats(null);
+				}
             } catch (err) {
                 setError(err.message);
             } finally {
@@ -118,13 +173,26 @@ function ProjectDetailInner() {
             }
         };
         if (id) fetchDetail();
-    }, [id]);
+    }, [id, from]);
 
     if (loading) return <div style={styles.container}><p style={{ color: "var(--text-muted)" }}>Chargement du projet...</p></div>;
     if (error) return <div style={styles.container}><p style={{ color: "#B24A4A" }}>Erreur : {error}</p></div>;
     if (!data) return null;
 
     const { project, items, images, author } = data;
+    const normalizedSteps = Array.isArray(project?.steps)
+        ? project.steps
+            .map((step) => {
+                if (typeof step === "string") {
+                    return { text: step.trim(), imageUrl: "" };
+                }
+                return {
+                    text: String(step?.text || "").trim(),
+                    imageUrl: String(step?.imageUrl || "").trim(),
+                };
+            })
+            .filter((step) => step.text)
+        : [];
     const proInitials = (author?.fullName || "?")
         .split(" ")
         .map(n => n[0])
@@ -169,6 +237,25 @@ function ProjectDetailInner() {
                         <p style={styles.description}>{project.description || "Pas de description pour ce projet."}</p>
                     </div>
 
+                    {normalizedSteps.length > 0 && (
+                        <div style={styles.card}>
+                            <h2 style={styles.sectionTitle}><ListChecks size={18} /> Étapes de réalisation</h2>
+                            <div style={styles.stepsWrap}>
+                                {normalizedSteps.map((step, idx) => (
+                                    <div key={`step-${idx}`} style={styles.stepRow}>
+                                        <div style={styles.stepBullet}>{idx + 1}</div>
+                                        <div>
+                                            <p style={styles.stepText}>{step.text}</p>
+                                            {step.imageUrl ? (
+                                                <img src={step.imageUrl} alt={`Étape ${idx + 1}`} style={styles.stepImage} />
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Items */}
                     {items && items.length > 0 && (
                         <div style={styles.card}>
@@ -201,6 +288,30 @@ function ProjectDetailInner() {
                             </div>
                         </div>
                     </div>
+
+                    {stats && (
+                        <div style={styles.card}>
+                            <h2 style={styles.sectionTitle}><BarChart3 size={18} /> Statistiques de diffusion</h2>
+                            <div style={styles.analyticsGrid}>
+                                <div style={styles.analyticsCard}>
+                                    <div style={styles.analyticsLabel}>Passages dans le fil</div>
+                                    <div style={styles.analyticsValue}>{Number(stats.impressionCount || 0)}</div>
+                                </div>
+                                <div style={styles.analyticsCard}>
+                                    <div style={styles.analyticsLabel}>Clics sur le projet</div>
+                                    <div style={styles.analyticsValue}>{Number(stats.clickCount || 0)}</div>
+                                </div>
+                                <div style={styles.analyticsCard}>
+                                    <div style={styles.analyticsLabel}>Conv. en j'aime</div>
+                                    <div style={styles.analyticsValue}>{Number(stats.likeConversionPct || 0).toFixed(1)}%</div>
+                                </div>
+                                <div style={styles.analyticsCard}>
+                                    <div style={styles.analyticsLabel}>Conv. en enregistrement</div>
+                                    <div style={styles.analyticsValue}>{Number(stats.bookmarkConversionPct || 0).toFixed(1)}%</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <aside style={{ display: "flex", flexDirection: "column", gap: "1.5rem", position: "sticky", top: "1rem" }}>

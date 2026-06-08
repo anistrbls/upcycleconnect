@@ -15,6 +15,7 @@ import {
     ChevronDown,
     ChevronUp,
     Star,
+    FileDown,
 } from "lucide-react";
 
 const styles = {
@@ -398,6 +399,137 @@ function getPickupSpotPhoto(item) {
     if (item.image) return item.image;
     if (Array.isArray(item.photos) && item.photos.length > 0) return item.photos[0];
     return "/img/recyclage-materiau.jpg";
+}
+
+async function generatePickupReceiptPDF(item) {
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+
+    const margin = 18;
+    const W = 210;
+    const accentGreen = [35, 90, 72];
+    const darkText = [28, 35, 38];
+    const mutedText = [105, 115, 120];
+
+    // ── Header band ─────────────────────────────────────────────────────
+    doc.setFillColor(35, 90, 72);
+    doc.rect(0, 0, W, 32, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(17);
+    doc.text("UpcycleConnect", margin, 13);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Justificatif de récupération", margin, 21);
+    doc.setFontSize(8.5);
+    const now = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+    doc.text(`Généré le ${now}`, W - margin, 21, { align: "right" });
+
+    let y = 50;
+
+    const drawSection = (title, rows) => {
+        doc.setFillColor(245, 249, 247);
+        doc.roundedRect(margin, y - 3, W - margin * 2, 7, 2, 2, "F");
+        doc.setTextColor(...accentGreen);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text(title.toUpperCase(), margin + 4, y + 2);
+        y += 10;
+
+        rows.forEach(([label, value]) => {
+            if (!value) return;
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8.5);
+            doc.setTextColor(...mutedText);
+            doc.text(label, margin + 2, y);
+            doc.setTextColor(...darkText);
+            doc.setFont("helvetica", "bold");
+            const lines = doc.splitTextToSize(String(value), W - margin * 2 - 62);
+            doc.text(lines, W - margin, y, { align: "right" });
+            y += lines.length * 5.2 + 1.5;
+        });
+        y += 4;
+    };
+
+    // Status badge
+    const statusLabel = STATUS_LABEL[item.workflowStatus] || item.workflowStatus || "—";
+    const statusColors = {
+        picked_up: [22, 130, 80],
+        cancelled: [180, 35, 35],
+        pending_payment: [180, 120, 30],
+    };
+    const sc = statusColors[item.workflowStatus] || accentGreen;
+    doc.setFillColor(...sc);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    const sbW = doc.getTextWidth(statusLabel) + 10;
+    doc.roundedRect(W - margin - sbW, 36, sbW, 6.5, 1.5, 1.5, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.text(statusLabel, W - margin - sbW / 2, 40.5, { align: "center" });
+
+    const price = item.type === "vente"
+        ? (item.buyerPrice != null ? `${(Number(item.buyerPrice) / 100).toFixed(2)} €` : item.formattedPrice || "—")
+        : "Don (gratuit)";
+
+    const address = [
+        item.depositPointAddress,
+        [item.depositPointZipCode, item.depositPointCity].filter(Boolean).join(" "),
+        item.depositPointCountry,
+    ].filter(Boolean).join(", ") || "—";
+
+    const reservedAt = (() => {
+        const v = item.reservedAt || item.reserved_at;
+        if (!v) return "—";
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+    })();
+
+    const pickedUpAt = (() => {
+        const v = item.pickedUpAt || item.picked_up_at;
+        if (!v) return null;
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+    })();
+
+    drawSection("Objet récupéré", [
+        ["Titre", item.title || "Sans titre"],
+        ["Catégorie", item.category || null],
+        ["Type", item.type === "vente" ? "Vente" : "Don"],
+        ["Montant payé", price],
+    ]);
+
+    drawSection("Transaction", [
+        ["Référence", item.transactionRef || "—"],
+        ["Date de réservation", reservedAt],
+        ...(pickedUpAt ? [["Date de récupération", pickedUpAt]] : []),
+        ["Statut", statusLabel],
+    ]);
+
+    drawSection("Point de récupération", [
+        ["Nom du point", item.depositPointName || "—"],
+        ["Adresse", address],
+        ["Conteneur / box", item.containerName || null],
+    ]);
+
+    drawSection("Vendeur / donateur", [
+        ["Nom", item.sellerName || "—"],
+    ]);
+
+    // Separator
+    doc.setDrawColor(220, 230, 225);
+    doc.line(margin, y, W - margin, y);
+    y += 7;
+
+    // Footer
+    doc.setTextColor(...mutedText);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7.5);
+    doc.text("Ce document est un justificatif non contractuel généré par la plateforme UpcycleConnect.", margin, y);
+    y += 5;
+    doc.text("Conservez-le en cas de litige ou pour vos déclarations de traçabilité matière.", margin, y);
+
+    const safeRef = (item.transactionRef || item.id || "recuperation").replace(/[^a-z0-9]/gi, "_");
+    doc.save(`justificatif_recuperation_${safeRef}.pdf`);
 }
 
 function formatDate(value) {
@@ -874,6 +1006,28 @@ export default function MyRecoveriesPage() {
                             <p style={styles.detailErrorText}>{item.cancelReason}</p>
                         </div>
                     )}
+
+                    {/* Bouton téléchargement justificatif */}
+                    <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: "0.25rem" }}>
+                        <button
+                            type="button"
+                            className="receipt-btn"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                generatePickupReceiptPDF(item);
+                            }}
+                            style={{
+                                ...styles.button,
+                                background: "#2b4548",
+                                color: "#fff",
+                                fontSize: "0.83rem",
+                                padding: "0.55rem 1.1rem",
+                            }}
+                        >
+                            <FileDown size={14} />
+                            Télécharger le justificatif
+                        </button>
+                    </div>
                 </div>
             </div>
         );
@@ -1070,6 +1224,14 @@ export default function MyRecoveriesPage() {
             <style jsx>{`
                 .pay-btn:hover {
                     background: #35585b !important;
+                }
+                .receipt-btn:hover {
+                    background: #35585b !important;
+                    transform: translateY(-1px);
+                    box-shadow: 0 6px 18px rgba(35,69,72,0.25);
+                }
+                .receipt-btn {
+                    transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
                 }
                 @keyframes fadeIn {
                     from {

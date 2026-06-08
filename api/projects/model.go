@@ -7,6 +7,12 @@ const (
 	StatusPublished = "publie"
 )
 
+// ProjectStep représente une étape de réalisation d'un projet.
+type ProjectStep struct {
+	Text     string `json:"text"`
+	ImageURL string `json:"imageUrl,omitempty"`
+}
+
 // Project représente un projet d'upcycling créé par un professionnel.
 type Project struct {
 	ID                     int64     `json:"id"`
@@ -21,6 +27,7 @@ type Project struct {
 	AfterImage        string    `json:"afterImage,omitempty"`
 	Title             string    `json:"title"`
 	Description       string    `json:"description"`
+	Steps             []ProjectStep `json:"steps,omitempty"`
 	Category          string    `json:"category"`
 	Status            string    `json:"status"`
 	ModerationStatus  string    `json:"moderationStatus"` // pending | approved | rejected
@@ -77,10 +84,21 @@ type ProjectLiker struct {
 	Role        string `json:"role"`
 }
 
+// ProjectAnalytics représente les statistiques de diffusion d'un projet.
+type ProjectAnalytics struct {
+	ImpressionCount      int64   `json:"impressionCount"`
+	ClickCount           int64   `json:"clickCount"`
+	LikeCount            int64   `json:"likeCount"`
+	BookmarkCount        int64   `json:"bookmarkCount"`
+	LikeConversionPct    float64 `json:"likeConversionPct"`
+	BookmarkConversionPct float64 `json:"bookmarkConversionPct"`
+}
+
 // CreatePayload est le corps de requête pour créer un projet.
 type CreatePayload struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	Steps       []ProjectStep `json:"steps"`
 	Category    string `json:"category"`
 	Status      string `json:"status"`
 }
@@ -89,6 +107,7 @@ type CreatePayload struct {
 type UpdatePayload struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	Steps       *[]ProjectStep `json:"steps,omitempty"`
 	Category    string `json:"category"`
 	Status      string `json:"status"`
 }

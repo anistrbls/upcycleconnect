@@ -235,7 +235,8 @@ const styles = {
 };
 
 const normalizeModStatus = (status) => {
-    const value = String(status || "pending").toLowerCase();
+    const value = String(status || "").toLowerCase();
+    if (!value) return "";
     if (value === "approved") return "approved";
     if (value === "rejected") return "rejected";
     return "pending";
@@ -299,7 +300,7 @@ function ProjectsModerationContent() {
             const matchesSearch = text.includes(searchTerm.toLowerCase());
             const currentStatus = normalizeModStatus(project.moderationStatus);
             const matchesStatus = statusFilter === "all"
-                ? currentStatus !== "approved"
+                ? currentStatus === "pending" || currentStatus === "rejected"
                 : currentStatus === statusFilter;
             return matchesSearch && matchesStatus;
         });

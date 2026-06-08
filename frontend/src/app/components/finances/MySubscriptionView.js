@@ -10,6 +10,12 @@ export default function MySubscriptionView() {
     const [error, setError] = useState(null);
     const [actionLoading, setActionLoading] = useState(null);
     const [toast, setToast] = useState(null);
+    const [downgradeModal, setDowngradeModal] = useState({
+        open: false,
+        blocker: null,
+        selectedIds: [],
+        archiving: false,
+    });
     const [plans, setPlans] = useState([
         {
             key: "decouverte",
@@ -22,6 +28,7 @@ export default function MySubscriptionView() {
                 "Dépôt d'annonces de base",
                 "Accès au catalogue de matières upcycling",
                 "1 point de dépôt actif",
+                "Maximum 3 projets publiés",
                 "Assistance par email standard"
             ],
             ctaLabel: "Votre plan actuel",
@@ -125,6 +132,10 @@ export default function MySubscriptionView() {
         setTimeout(() => setToast(null), 3500);
     }, []);
 
+    const closeDowngradeModal = useCallback(() => {
+        setDowngradeModal({ open: false, blocker: null, selectedIds: [], archiving: false });
+    }, []);
+
     // Handle stripe redirect and success confirmation
     useEffect(() => {
         const queryParams = new URLSearchParams(window.location.search);
@@ -194,8 +205,8 @@ export default function MySubscriptionView() {
     };
 
     // Handle subscription cancellation
-    const handleCancelSubscription = async () => {
-        if (!window.confirm("Êtes-vous sûr de vouloir résilier votre abonnement payant ? Vous retournerez à l'offre Découverte à la fin de la période.")) {
+    const requestUnsubscribe = useCallback(async (requireConfirm = true) => {
+        if (requireConfirm && !window.confirm("Êtes-vous sûr de vouloir résilier votre abonnement payant ? Vous retournerez à l'offre Découverte à la fin de la période.")) {
             return;
         }
         setActionLoading("cancel");
@@ -205,7 +216,23 @@ export default function MySubscriptionView() {
                 headers: buildAuthHeaders(),
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || "Impossible de résilier l'abonnement.");
+            if (!res.ok) {
+                if (res.status === 409 && data?.code === "SUBSCRIPTION_DOWNGRADE_BLOCKED") {
+                    const blocker = Array.isArray(data.blockers)
+                        ? data.blockers.find((b) => b?.code === "published_projects_limit")
+                        : null;
+                    if (blocker) {
+                        setDowngradeModal({
+                            open: true,
+                            blocker,
+                            selectedIds: [],
+                            archiving: false,
+                        });
+                        return;
+                    }
+                }
+                throw new Error(data.error || "Impossible de résilier l'abonnement.");
+            }
             showToast("Votre abonnement a été résilié. Vous êtes repassé au plan Découverte.", "success");
             fetchUser();
         } catch (err) {
@@ -213,7 +240,51 @@ export default function MySubscriptionView() {
         } finally {
             setActionLoading(null);
         }
-    };
+    }, [fetchUser, showToast]);
+
+    const handleCancelSubscription = useCallback(async () => {
+        await requestUnsubscribe(true);
+    }, [requestUnsubscribe]);
+
+    const toggleDowngradeProjectSelection = useCallback((projectId) => {
+        setDowngradeModal((prev) => {
+            const exists = prev.selectedIds.includes(projectId);
+            return {
+                ...prev,
+                selectedIds: exists
+                    ? prev.selectedIds.filter((id) => id !== projectId)
+                    : [...prev.selectedIds, projectId],
+            };
+        });
+    }, []);
+
+    const archiveSelectedAndRetryDowngrade = useCallback(async () => {
+        const selectedIds = downgradeModal.selectedIds;
+        if (!selectedIds.length) {
+            showToast("Sélectionnez au moins un projet à archiver.", "error");
+            return;
+        }
+
+        setDowngradeModal((prev) => ({ ...prev, archiving: true }));
+        try {
+            for (const projectId of selectedIds) {
+                const res = await fetch(apiUrl(`/pro/projects/${projectId}/archive`), {
+                    method: "POST",
+                    headers: buildAuthHeaders(),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    throw new Error(data.error || "Impossible d'archiver un des projets sélectionnés.");
+                }
+            }
+            closeDowngradeModal();
+            showToast("Projets archivés. Nouvelle tentative de résiliation...", "success");
+            await requestUnsubscribe(false);
+        } catch (err) {
+            showToast(err.message, "error");
+            setDowngradeModal((prev) => ({ ...prev, archiving: false }));
+        }
+    }, [closeDowngradeModal, downgradeModal.selectedIds, requestUnsubscribe, showToast]);
 
     const formatDate = (dateStr) => {
         if (!dateStr) return "—";
@@ -462,6 +533,143 @@ export default function MySubscriptionView() {
                     );
                 })}
             </div>
+
+            {downgradeModal.open && downgradeModal.blocker && (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(16, 24, 40, 0.55)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "1rem",
+                        zIndex: 10000,
+                    }}
+                >
+                    <div
+                        style={{
+                            width: "min(760px, 100%)",
+                            maxHeight: "90vh",
+                            overflow: "auto",
+                            background: "#fff",
+                            borderRadius: "16px",
+                            border: "1px solid var(--border-color)",
+                            boxShadow: "0 24px 60px rgba(16, 24, 40, 0.25)",
+                            padding: "1.25rem",
+                        }}
+                    >
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-start" }}>
+                            <div>
+                                <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                    <AlertCircle size={18} color="#b45309" />
+                                    Downgrade bloqué
+                                </h3>
+                                <p style={{ margin: "0.45rem 0 0", color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                                    Vous avez actuellement {downgradeModal.blocker.currentPublishedCount} projets publiés ou en attente de validation pour une limite de {downgradeModal.blocker.limit} en offre Découverte.
+                                    Archivez au moins {downgradeModal.blocker.excess} projet(s), puis relancez la résiliation.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeDowngradeModal}
+                                disabled={downgradeModal.archiving}
+                                style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--text-muted)" }}
+                            >
+                                <XCircle size={20} />
+                            </button>
+                        </div>
+
+                        <div style={{ marginTop: "1rem", border: "1px solid var(--border-color)", borderRadius: "12px", overflow: "hidden" }}>
+                            {(downgradeModal.blocker.projects || []).map((project) => {
+                                const checked = downgradeModal.selectedIds.includes(project.id);
+                                return (
+                                    <label
+                                        key={project.id}
+                                        style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            gap: "1rem",
+                                            padding: "0.75rem 0.9rem",
+                                            borderBottom: "1px solid var(--border-color)",
+                                            background: checked ? "#f2f8f9" : "#fff",
+                                            cursor: "pointer",
+                                        }}
+                                    >
+                                        <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", minWidth: 0 }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                disabled={downgradeModal.archiving}
+                                                onChange={() => toggleDowngradeProjectSelection(project.id)}
+                                            />
+                                            <div style={{ minWidth: 0 }}>
+                                                <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{project.title || `Projet #${project.id}`}</div>
+                                                <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                                                    <span>Dernière mise à jour: {formatDate(project.updatedAt)}</span>
+                                                    {project.moderationStatus === "pending" ? (
+                                                        <span style={{ background: "#fff7ed", color: "#9a3412", border: "1px solid #fdba74", borderRadius: "999px", padding: "0.05rem 0.45rem", fontSize: "0.74rem", fontWeight: 700 }}>
+                                                            En attente
+                                                        </span>
+                                                    ) : (
+                                                        <span style={{ background: "#ecfeff", color: "#0f766e", border: "1px solid #5eead4", borderRadius: "999px", padding: "0.05rem 0.45rem", fontSize: "0.74rem", fontWeight: 700 }}>
+                                                            Publié
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0 }}>ID: {project.id}</span>
+                                    </label>
+                                );
+                            })}
+                        </div>
+
+                        <div style={{ marginTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.8rem", flexWrap: "wrap" }}>
+                            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                                {downgradeModal.selectedIds.length} projet(s) sélectionné(s)
+                            </span>
+                            <div style={{ display: "flex", gap: "0.6rem" }}>
+                                <button
+                                    type="button"
+                                    onClick={closeDowngradeModal}
+                                    disabled={downgradeModal.archiving}
+                                    style={{
+                                        border: "1px solid var(--border-color)",
+                                        background: "#fff",
+                                        color: "var(--text-main)",
+                                        borderRadius: "10px",
+                                        padding: "0.6rem 0.9rem",
+                                        fontWeight: 600,
+                                        cursor: "pointer",
+                                    }}
+                                >
+                                    Plus tard
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={archiveSelectedAndRetryDowngrade}
+                                    disabled={downgradeModal.archiving}
+                                    style={{
+                                        border: "none",
+                                        background: "#2E5C60",
+                                        color: "#fff",
+                                        borderRadius: "10px",
+                                        padding: "0.6rem 0.95rem",
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                    }}
+                                >
+                                    {downgradeModal.archiving ? "Archivage..." : "Archiver la sélection puis résilier"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Toast feedback */}
             {toast && (

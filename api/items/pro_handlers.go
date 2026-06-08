@@ -13,6 +13,69 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+type downgradePublishedProject struct {
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	ModerationStatus string `json:"moderationStatus"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type downgradePublishedBlocker struct {
+	Code                  string                     `json:"code"`
+	Limit                 int                        `json:"limit"`
+	CurrentPublishedCount int                        `json:"currentPublishedCount"`
+	Excess                int                        `json:"excess"`
+	Projects              []downgradePublishedProject `json:"projects"`
+}
+
+func getDowngradePublishedBlocker(repo *Repository, userID int64, limit int) (*downgradePublishedBlocker, error) {
+	var count int
+	if err := repo.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM upcycling_projects
+		WHERE pro_user_id = $1
+		  AND (status = 'publie' OR moderation_status = 'pending')
+	`, userID).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count <= limit {
+		return nil, nil
+	}
+
+	rows, err := repo.db.Query(`
+		SELECT id, COALESCE(title, ''), COALESCE(status, ''), COALESCE(moderation_status, ''), COALESCE(updated_at::text, '')
+		FROM upcycling_projects
+		WHERE pro_user_id = $1
+		  AND (status = 'publie' OR moderation_status = 'pending')
+		ORDER BY updated_at DESC, created_at DESC, id DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	projects := make([]downgradePublishedProject, 0)
+	for rows.Next() {
+		var p downgradePublishedProject
+		if err := rows.Scan(&p.ID, &p.Title, &p.Status, &p.ModerationStatus, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		projects = append(projects, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &downgradePublishedBlocker{
+		Code:                  "published_projects_limit",
+		Limit:                 limit,
+		CurrentPublishedCount: count,
+		Excess:                count - limit,
+		Projects:              projects,
+	}, nil
+}
+
 func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddleware func(http.Handler) http.Handler) {
 	professionalOnly := func(next http.HandlerFunc) http.Handler {
 		return authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -378,6 +441,20 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 		userID, _, _, err := getProfessionalUser(r)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+
+		blocker, err := getDowngradePublishedBlocker(repo, userID, 3)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not validate downgrade constraints")
+			return
+		}
+		if blocker != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "Downgrade blocked: archive some published projects first.",
+				"code":  "SUBSCRIPTION_DOWNGRADE_BLOCKED",
+				"blockers": []any{blocker},
+			})
 			return
 		}
 

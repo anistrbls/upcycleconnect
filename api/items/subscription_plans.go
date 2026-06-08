@@ -38,12 +38,14 @@ func (r *Repository) EnsureSubscriptionPlansSchema() error {
 				'Dépôt d''annonces de base',
 				'Accès au catalogue de matières upcycling',
 				'1 point de dépôt actif',
+				'Maximum 3 projets publiés',
 				'Assistance par email standard'
 			]),
 			('pro_essentiel', 'Pro Essentiel', 15, ARRAY[
 				'Toutes les fonctionnalités Découverte',
 				'Accès prioritaire limité aux annonces premium',
 				'Jusqu''à 5 points de dépôt actifs',
+				'Maximum 10 projets publiés',
 				'Statistiques d''impact et de récupération de base',
 				'Assistance prioritaire sous 48h'
 			]),

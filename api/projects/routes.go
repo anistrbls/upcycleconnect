@@ -93,6 +93,18 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 
+		// POST /api/pro/projects/{id}/archive
+		if strings.HasSuffix(path, "/archive") && r.Method == http.MethodPost {
+			h.ArchiveHandler(w, r)
+			return
+		}
+
+		// GET /api/pro/projects/{id}/analytics
+		if strings.HasSuffix(path, "/analytics") && r.Method == http.MethodGet {
+			h.ProjectAnalyticsHandler(w, r)
+			return
+		}
+
 		// POST /api/pro/projects/{id}/items
 		if strings.HasSuffix(path, "/items") && r.Method == http.MethodPost {
 			h.AddItemHandler(w, r)
@@ -102,6 +114,12 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		// DELETE /api/pro/projects/{id}/items/{item_id}
 		if strings.Contains(path, "/items/") && r.Method == http.MethodDelete {
 			h.RemoveItemHandler(w, r)
+			return
+		}
+
+		// POST /api/pro/projects/{id}/steps/images
+		if strings.HasSuffix(path, "/steps/images") && r.Method == http.MethodPost {
+			h.AddStepImageHandler(w, r)
 			return
 		}
 
