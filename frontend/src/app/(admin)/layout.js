@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../lib/api";
 import { NAV_MODULES, PRO_MODULES, PARTICULIER_MODULES, SALARIE_MODULES } from "../lib/constants";
 import { Icon } from "../components/admin/Icon";
+import TutorialOverlay from "../components/shared/TutorialOverlay";
 
 export default function AdminLayout({ children }) {
     const pathname = usePathname();
@@ -217,6 +218,7 @@ export default function AdminLayout({ children }) {
 
     return (
         <div className="app-wrapper">
+            {isParticulier && <TutorialOverlay userId={user?.id} />}
             <header className="topbar">
                 <div className="topbar-left">
                     <div className="brand-dot">
@@ -234,6 +236,7 @@ export default function AdminLayout({ children }) {
                             className={`action-btn ${currentSubKey === subItem.key ? "primary" : ""}`}
                             onClick={() => handleSubNavChange(subItem.key)}
                             type="button"
+                            data-tutorial-subnav-id={subItem.key}
                         >
                             <span className="action-label-long">{subItem.label}</span>
                             <span className="action-label-short">{subItem.shortLabel || subItem.label}</span>
@@ -262,6 +265,7 @@ export default function AdminLayout({ children }) {
                                     onClick={() => handleModuleChange(module.key)}
                                     type="button"
                                     data-tooltip={module.label}
+                                    data-tutorial-id={module.key}
                                 >
                                     <span className={`sidebar-icon ${isActive ? "active" : ""}`}>
                                         <Icon path={module.icon} />

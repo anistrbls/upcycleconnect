@@ -2695,3 +2695,311 @@ body {
     font-size: 0.98rem;
   }
 }
+
+/* ─── Tutorial Overlay ─────────────────────────────────────────── */
+
+.tutorial-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: all;
+}
+
+/* Spotlight */
+.tutorial-spotlight {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(15, 28, 30, 0.78);
+  z-index: 9001;
+  pointer-events: none;
+  transition:
+    top    0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    left   0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    width  0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: 1.5px solid rgba(229, 255, 188, 0.22);
+  outline-offset: 2px;
+}
+
+/* ── Card base ──────────────────────────────────────────────────── */
+.tutorial-card {
+  position: fixed;
+  z-index: 9002;
+  background: #ffffff;
+  border-radius: 14px;
+  width: 340px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.07),
+    0 4px 12px rgba(0, 0, 0, 0.08),
+    0 20px 48px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: all;
+}
+
+/* Anchored card entrance */
+.tutorial-card--anchored {
+  animation: tutorialSlideIn 0.26s cubic-bezier(0.34, 1.26, 0.64, 1) both;
+}
+@keyframes tutorialSlideIn {
+  from { opacity: 0; transform: translateX(-10px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0)     scale(1);    }
+}
+
+/* Centered card */
+.tutorial-card--centered {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  animation: tutorialFadeIn 0.28s cubic-bezier(0.34, 1.26, 0.64, 1) both;
+}
+@keyframes tutorialFadeIn {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 14px)) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%)               scale(1);   }
+}
+
+/* ── Gradient accent bar ────────────────────────────────────────── */
+.tutorial-card-accent {
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--gradient-start) 0%,
+    var(--gradient-mid)   60%,
+    var(--gradient-end)   100%
+  );
+  flex-shrink: 0;
+}
+
+/* ── Card body ──────────────────────────────────────────────────── */
+.tutorial-card-body {
+  padding: 1.2rem 1.35rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.tutorial-card--centered .tutorial-card-body {
+  padding: 1.4rem 2rem 1.6rem;
+  align-items: center;
+  text-align: center;
+}
+
+/* ── Brand dots (centered steps only) ──────────────────────────── */
+.tutorial-brand-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 0.25rem;
+}
+.tutorial-brand-dots span {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+/* ── Header row ─────────────────────────────────────────────────── */
+.tutorial-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.tutorial-step-badge {
+  font-size: 0.67rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--gradient-start);
+  background: rgba(77, 113, 117, 0.09);
+  padding: 0.18rem 0.55rem;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+
+.tutorial-close-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: background 0.13s, color 0.13s;
+}
+.tutorial-close-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-main);
+}
+
+/* ── Text ───────────────────────────────────────────────────────── */
+.tutorial-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.35;
+  margin: 0;
+}
+
+.tutorial-description {
+  font-size: 0.81rem;
+  color: var(--text-muted);
+  line-height: 1.72;
+  margin: 0;
+}
+
+/* ── Progress bar ───────────────────────────────────────────────── */
+.tutorial-progress-bar {
+  width: 100%;
+  height: 2px;
+  background: var(--border);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.tutorial-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gradient-start), var(--gradient-mid));
+  border-radius: 99px;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Step dots ──────────────────────────────────────────────────── */
+.tutorial-dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+}
+.tutorial-dot {
+  height: 4px;
+  width: 4px;
+  border-radius: 99px;
+  background: var(--border);
+  transition: width 0.22s ease, background 0.22s ease;
+}
+.tutorial-dot.active {
+  width: 14px;
+  background: var(--gradient-start);
+}
+.tutorial-dot.done {
+  background: var(--gradient-mid);
+  opacity: 0.45;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────── */
+.tutorial-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding-top: 0.15rem;
+}
+
+.tutorial-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────── */
+.tutorial-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 1rem;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s, opacity 0.13s, transform 0.1s;
+  white-space: nowrap;
+  line-height: 1;
+}
+.tutorial-btn:active { transform: scale(0.97); }
+
+.tutorial-btn--primary {
+  background: var(--gradient-start);
+  color: #ffffff;
+}
+.tutorial-btn--primary:hover { background: #3b5f63; }
+
+.tutorial-btn--ghost {
+  background: transparent;
+  color: var(--text-main);
+  border: 1px solid var(--border);
+}
+.tutorial-btn--ghost:hover {
+  background: var(--surface-hover);
+  border-color: var(--text-muted);
+}
+
+.tutorial-btn--skip {
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 0.76rem;
+  padding: 0.45rem 0.25rem;
+}
+.tutorial-btn--skip:hover { color: var(--text-main); }
+
+/* ── Arrows ─────────────────────────────────────────────────────── */
+.tutorial-card-arrow--left {
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  border-right: 9px solid #ffffff;
+  filter: drop-shadow(-2px 0 1px rgba(0, 0, 0, 0.07));
+}
+
+.tutorial-card-arrow--top {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 9px solid var(--gradient-start);
+  filter: drop-shadow(0 -1px 1px rgba(0, 0, 0, 0.07));
+}
+
+/* ── Loading spinner ─────────────────────────────────────────────── */
+.tutorial-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+}
+
+.tutorial-spinner {
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--border);
+  border-top-color: var(--gradient-start);
+  border-radius: 50%;
+  animation: tutorialSpin 0.65s linear infinite;
+}
+.tutorial-loading-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+@keyframes tutorialSpin {
+  to { transform: rotate(360deg); }
+}
