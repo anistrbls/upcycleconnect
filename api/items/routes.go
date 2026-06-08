@@ -24,6 +24,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	if err := repo.EnsureCodeSettingsSchema(); err != nil {
 		log.Fatalf("CodeSettings schema error: %v", err)
 	}
+	if err := repo.EnsureSubscriptionPlansSchema(); err != nil {
+		log.Fatalf("SubscriptionPlans schema error: %v", err)
+	}
 
 	// GET /api/items (public viewing of active items)
 	mux.HandleFunc("GET /api/items", func(w http.ResponseWriter, r *http.Request) {
@@ -522,6 +525,43 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 		writeJSON(w, http.StatusOK, cfg)
+	})))
+
+	// Subscription plans endpoints
+	mux.HandleFunc("GET /api/pro/subscription-plans", func(w http.ResponseWriter, r *http.Request) {
+		plans, err := repo.GetSubscriptionPlans(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load subscription plans")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"plans": plans})
+	})
+
+	mux.Handle("PUT /api/admin/subscription-plans", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		if claims["role"] != "admin" {
+			writeError(w, http.StatusForbidden, "admin only")
+			return
+		}
+		var payload struct {
+			Key       string   `json:"key"`
+			Name      string   `json:"name"`
+			PriceEuro int      `json:"price_euro"`
+			Features  []string `json:"features"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		if payload.Key == "" {
+			writeError(w, http.StatusBadRequest, "key is required")
+			return
+		}
+		if err := repo.UpdateSubscriptionPlan(r.Context(), payload.Key, payload.Name, payload.PriceEuro, payload.Features); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update subscription plan")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true})
 	})))
 
 	// Deposit Points Routes

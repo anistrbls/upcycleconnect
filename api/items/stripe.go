@@ -52,6 +52,8 @@ type stripeCheckoutSession struct {
 	Status        string            `json:"status"`
 	PaymentStatus string            `json:"payment_status"`
 	PaymentIntent string            `json:"payment_intent"`
+	Subscription  string            `json:"subscription"`
+	Customer      string            `json:"customer"`
 	Metadata      map[string]string `json:"metadata"`
 }
 
@@ -171,6 +173,7 @@ func fetchStripeCheckoutSession(cfg *StripeConfig, sessionID string) (*stripeChe
 		return nil, fmt.Errorf("stripe checkout fetch failed: %s", strings.TrimSpace(string(body)))
 	}
 
+	fmt.Printf("Stripe Checkout Session Body: %s\n", string(body))
 	var session stripeCheckoutSession
 	if err := json.Unmarshal(body, &session); err != nil {
 		return nil, err
@@ -193,6 +196,8 @@ type stripeWebhookEvent struct {
 type stripeWebhookCheckoutSession struct {
 	ID            string            `json:"id"`
 	PaymentIntent string            `json:"payment_intent"`
+	Subscription  string            `json:"subscription"`
+	Customer      string            `json:"customer"`
 	Metadata      map[string]string `json:"metadata"`
 }
 
@@ -226,6 +231,18 @@ type stripeWebhookRefund struct {
 type stripeWebhookCharge struct {
 	PaymentIntent  json.RawMessage `json:"payment_intent"`
 	AmountRefunded int64           `json:"amount_refunded"`
+}
+
+type stripeWebhookInvoice struct {
+	ID           string `json:"id"`
+	Subscription string `json:"subscription"`
+	Customer     string `json:"customer"`
+}
+
+type stripeWebhookSubscription struct {
+	ID       string            `json:"id"`
+	Customer string            `json:"customer"`
+	Metadata map[string]string `json:"metadata"`
 }
 
 func verifyStripeSignature(payload []byte, signatureHeader, webhookSecret string) error {

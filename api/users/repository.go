@@ -61,8 +61,10 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS zip_code TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS activity_type TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS intervention_zone TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_type TEXT NOT NULL DEFAULT 'gratuit'`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_type TEXT NOT NULL DEFAULT 'decouverte'`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_start TIMESTAMPTZ`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT NOT NULL DEFAULT ''`,
 
 		// Nouveaux champs Salarié
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_role TEXT NOT NULL DEFAULT ''`,
@@ -171,8 +173,8 @@ func (r *Repository) Create(p CreatePayload, passwordHash string) (User, error) 
 	if status == "" {
 		status = StatusPending
 	}
-	if p.SubscriptionType == "" {
-		p.SubscriptionType = "gratuit"
+	if p.SubscriptionType != "pro_essentiel" && p.SubscriptionType != "premium_atelier" {
+		p.SubscriptionType = "decouverte"
 	}
 
 	row := r.db.QueryRow(`
@@ -230,8 +232,8 @@ func (r *Repository) Update(id int64, p UpdatePayload) (User, error) {
 	if status == "" {
 		status = StatusPending
 	}
-	if p.SubscriptionType == "" {
-		p.SubscriptionType = "gratuit"
+	if p.SubscriptionType != "pro_essentiel" && p.SubscriptionType != "premium_atelier" {
+		p.SubscriptionType = "decouverte"
 	}
 
 	row := r.db.QueryRow(`
@@ -414,6 +416,11 @@ func scanRows(rows *sql.Rows) (User, error) {
 		t := sessionsInvalidBefore.Time
 		u.SessionsInvalidBefore = &t
 	}
+	if u.Role == "professionnel" {
+		if u.SubscriptionType != "pro_essentiel" && u.SubscriptionType != "premium_atelier" {
+			u.SubscriptionType = "decouverte"
+		}
+	}
 	return u, nil
 }
 
@@ -464,6 +471,11 @@ func scanRow(row *sql.Row) (User, error) {
 	if sessionsInvalidBefore.Valid {
 		t := sessionsInvalidBefore.Time
 		u.SessionsInvalidBefore = &t
+	}
+	if u.Role == "professionnel" {
+		if u.SubscriptionType != "pro_essentiel" && u.SubscriptionType != "premium_atelier" {
+			u.SubscriptionType = "decouverte"
+		}
 	}
 	return u, nil
 }

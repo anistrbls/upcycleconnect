@@ -3214,7 +3214,11 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var firstname, lastname string
-	err := db.QueryRow("SELECT firstname, lastname FROM users WHERE id = $1", id).Scan(&firstname, &lastname)
+	var subscriptionType, companyName, siret sql.NullString
+	var subscriptionStart sql.NullTime
+	err := db.QueryRow("SELECT firstname, lastname, subscription_type, subscription_start, company_name, siret FROM users WHERE id = $1", id).Scan(
+		&firstname, &lastname, &subscriptionType, &subscriptionStart, &companyName, &siret,
+	)
 	if err != nil {
 		firstname = ""
 		lastname = ""
@@ -3227,6 +3231,22 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		"role":      role,
 		"firstname": firstname,
 		"lastname":  lastname,
+	}
+	if subscriptionType.Valid {
+		userPayload["subscriptionType"] = subscriptionType.String
+	} else {
+		userPayload["subscriptionType"] = "decouverte"
+	}
+	if subscriptionStart.Valid {
+		userPayload["subscriptionStart"] = subscriptionStart.Time
+	} else {
+		userPayload["subscriptionStart"] = nil
+	}
+	if companyName.Valid {
+		userPayload["companyName"] = companyName.String
+	}
+	if siret.Valid {
+		userPayload["siret"] = siret.String
 	}
 	if role == "professionnel" && id > 0 {
 		prepo := projects.NewRepository(db)
@@ -5954,6 +5974,22 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON sb.user_id = u.id
 		WHERE sb.amount > 0
 		  AND sb.payment_status <> 'pending'
+
+		UNION ALL
+
+		SELECT 'Abonnement' AS source, u.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id, 
+		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name, 
+		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 'Abonnement Pro Essentiel' ELSE 'Abonnement Premium Atelier' END AS entity_name, 
+		       u.subscription_start AS date, 
+		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 15.0 ELSE 30.0 END AS amount, 
+		       'paid' AS status, 
+		       COALESCE(u.stripe_subscription_id, '') AS transaction_ref,
+		       0::double precision AS refund_amount,
+		       '' AS stripe_refund_id,
+		       '' AS refund_error
+		FROM users u
+		WHERE u.subscription_type IN ('pro_essentiel', 'premium_atelier')
+		  AND u.subscription_start IS NOT NULL
 		
 		ORDER BY date DESC;
 	`
@@ -5996,6 +6032,8 @@ func myFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := int64(userIDVal)
+	log.Printf("[Finances] my-payments request for userID: %d", userID)
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
 
 	query := `
 		SELECT 'Inscription événement' AS source, er.id AS source_id, e.id AS event_id, er.user_id AS user_id,
@@ -6087,6 +6125,23 @@ func myFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE sb.user_id = $1
 		  AND sb.amount > 0
 		  AND sb.payment_status <> 'pending'
+
+		UNION ALL
+
+		SELECT 'Abonnement' AS source, u.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id,
+		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name,
+		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 'Abonnement Pro Essentiel' ELSE 'Abonnement Premium Atelier' END AS entity_name,
+		       u.subscription_start AS date,
+		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 15.0 ELSE 30.0 END AS amount,
+		       'paid' AS status,
+		       COALESCE(u.stripe_subscription_id, '') AS transaction_ref,
+		       0::double precision AS refund_amount,
+		       '' AS stripe_refund_id,
+		       '' AS refund_error
+		FROM users u
+		WHERE u.id = $1
+		  AND u.subscription_type IN ('pro_essentiel', 'premium_atelier')
+		  AND u.subscription_start IS NOT NULL
 
 		ORDER BY date DESC
 	`

@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import PaymentsAdminView from "../../../components/admin/finances/PaymentsAdminView";
 import CommissionsAdminView from "../../../components/admin/finances/CommissionsAdminView";
+import SubscriptionsAdminView from "../../../components/admin/finances/SubscriptionsAdminView";
 import MyPaymentsView from "../../../components/finances/MyPaymentsView";
+import MySubscriptionView from "../../../components/finances/MySubscriptionView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 import { getRoleFromToken } from "../../../lib/api";
@@ -21,7 +23,10 @@ export default function FinancesSubPage() {
 
     useEffect(() => {
         if (role === null) return;
-        if (subpage === "commissions" && role !== "admin") {
+        if ((subpage === "commissions" || subpage === "abonnements") && role !== "admin") {
+            router.replace("/finances/paiements");
+        }
+        if (subpage === "abonnement" && role !== "professionnel") {
             router.replace("/finances/paiements");
         }
     }, [role, subpage, router]);
@@ -36,6 +41,14 @@ export default function FinancesSubPage() {
 
     if (subpage === "commissions") {
         return <CommissionsAdminView />;
+    }
+
+    if (subpage === "abonnements") {
+        return <SubscriptionsAdminView />;
+    }
+
+    if (subpage === "abonnement") {
+        return <MySubscriptionView />;
     }
 
     const activeModule = getModuleByKey("finances");

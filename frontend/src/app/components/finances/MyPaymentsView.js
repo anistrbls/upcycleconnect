@@ -54,6 +54,7 @@ export default function MyPaymentsView() {
         try {
             const res = await fetch(apiUrl("/finances/my-payments"), {
                 headers: buildAuthHeaders(),
+                cache: "no-store",
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || "Impossible de charger vos paiements");
