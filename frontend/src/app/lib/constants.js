@@ -246,6 +246,16 @@ export const PRO_MODULES = [
         ],
     },
     {
+        key: "parametres",
+        label: "Paramètres",
+        shortLabel: "Paramètres",
+        icon: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+        subNav: [
+            { key: "notifications", label: "Notifications", shortLabel: "Notifs" },
+            { key: "preferences", label: "Préférences", shortLabel: "Pref" },
+        ],
+    },
+    {
         key: "mon-compte",
         label: "Mon compte",
         shortLabel: "Compte",
@@ -415,6 +425,16 @@ export const PARTICULIER_MODULES = [
         shortLabel: "Finances",
         icon: "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
         subNav: [{ key: "paiements", label: "Mes paiements", shortLabel: "Paiements" }],
+    },
+    {
+        key: "parametres",
+        label: "Paramètres",
+        shortLabel: "Paramètres",
+        icon: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+        subNav: [
+            { key: "notifications", label: "Notifications", shortLabel: "Notifs" },
+            { key: "preferences", label: "Préférences", shortLabel: "Pref" },
+        ],
     },
     {
         key: "mon-compte",

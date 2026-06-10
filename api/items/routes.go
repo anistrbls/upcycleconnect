@@ -27,6 +27,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	if err := repo.EnsureSubscriptionPlansSchema(); err != nil {
 		log.Fatalf("SubscriptionPlans schema error: %v", err)
 	}
+	if err := EnsureNotificationsSchema(db); err != nil {
+		log.Fatalf("Notifications schema error: %v", err)
+	}
 
 	// GET /api/items (public viewing of active items)
 	mux.HandleFunc("GET /api/items", func(w http.ResponseWriter, r *http.Request) {
@@ -570,6 +573,67 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	// Logistics Workflow Routes
 	RegisterLogisticsRoutes(mux, repo, authMiddleware)
 	RegisterProfessionalRoutes(mux, repo, authMiddleware)
+
+	// GET /api/notifications
+	mux.Handle("GET /api/notifications", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		userID := int64(claims["userId"].(float64))
+
+		notifs, err := GetNotifications(r.Context(), db, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to get notifications")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"notifications": notifs})
+	})))
+
+	// POST /api/notifications/{id}/read
+	mux.Handle("POST /api/notifications/{id}/read", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		userID := int64(claims["userId"].(float64))
+
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid notification id")
+			return
+		}
+
+		if err := MarkNotificationAsRead(r.Context(), db, id, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to mark notification as read")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true})
+	})))
+
+	// POST /api/notifications/read-all
+	mux.Handle("POST /api/notifications/read-all", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		userID := int64(claims["userId"].(float64))
+
+		if err := MarkAllNotificationsAsRead(r.Context(), db, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to mark all notifications as read")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true})
+	})))
+
+	// DELETE /api/notifications/{id}
+	mux.Handle("DELETE /api/notifications/{id}", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		userID := int64(claims["userId"].(float64))
+
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid notification id")
+			return
+		}
+
+		if err := DeleteNotification(r.Context(), db, id, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete notification")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true})
+	})))
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

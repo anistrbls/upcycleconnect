@@ -25,11 +25,17 @@ export default function MySubscriptionView() {
             color: "#4F6163",
             bgHeader: "#EAF0F1",
             features: [
-                "Dépôt d'annonces de base",
-                "Accès au catalogue de matières upcycling",
-                "1 point de dépôt actif",
-                "Maximum 3 projets publiés",
-                "Assistance par email standard"
+                "Offre gratuite par défaut pour les professionnels",
+                "Accès aux annonces publiques",
+                "Réservation/récupération standard",
+                "Historique simple des récupérations",
+                "Justificatifs individuels",
+                "Gestion simple des projets",
+                "Accès aux conseils",
+                "Accès aux événements publics",
+                "Accès au forum",
+                "Notifications standards",
+                "Maximum 3 projets actif"
             ],
             ctaLabel: "Votre plan actuel",
         },
@@ -41,11 +47,16 @@ export default function MySubscriptionView() {
             color: "#2E5C60",
             bgHeader: "#D6EEF0",
             features: [
-                "Toutes les fonctionnalités Découverte",
-                "Accès prioritaire limité aux annonces premium",
-                "Jusqu'à 5 points de dépôt actifs",
-                "Statistiques d'impact et de récupération de base",
-                "Assistance prioritaire sous 48h"
+                "Tout ce qui est inclus dans Découverte",
+                "Maximum 10 projets actifs",
+                "Jusqu’à 5 alertes personnalisées",
+                "Alertes sur matériaux recherchés",
+                "Filtres avancés sur les annonces",
+                "Dashboard professionnel simple",
+                "Statistiques basiques",
+                "Export simple de l’historique",
+                "Notifications ciblées",
+                "Suivi et gestion amélioré des projets"
             ],
             ctaLabel: "Choisir Pro Essentiel",
         },
@@ -57,12 +68,16 @@ export default function MySubscriptionView() {
             color: "#3E4A1A",
             bgHeader: "#E5FFBC",
             features: [
-                "Toutes les fonctionnalités Pro Essentiel",
-                "Filtres de recherche avancés et multicritères",
-                "Alertes de matières personnalisées en temps réel",
-                "Nombre de points de dépôt illimité",
-                "Exports de données et bilans RSE",
-                "Assistance VIP 7j/7 avec réponse rapide"
+                "Tout ce qui est inclus dans Pro Essentiel",
+                "Projets actifs illimités",
+                "Jusqu’à 20 alertes personnalisées",
+                "Accès prioritaire limité aux annonces marquées premium",
+                "Dashboard professionnel avancé",
+                "Analyse d’impact écologique détaillée",
+                "Rapports PDF mensuels",
+                "Export groupé des données",
+                "Mise en avant du profil professionnel ou d’un projet",
+                "Support prioritaire"
             ],
             ctaLabel: "Choisir Premium Atelier",
             badge: "Recommandé"

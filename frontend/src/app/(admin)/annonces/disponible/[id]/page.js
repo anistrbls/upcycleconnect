@@ -184,6 +184,9 @@ export default function ProfessionalAvailableDetailPage() {
 
     const reserve = async () => {
         if (!item) return;
+        if (!window.confirm(`Êtes-vous sûr de vouloir réserver le matériau "${item.title}" ?`)) {
+            return;
+        }
         setBusy(true);
         setError("");
         try {
@@ -211,7 +214,7 @@ export default function ProfessionalAvailableDetailPage() {
                 window.location.assign(checkoutData.checkout_url);
                 return;
             } else {
-                window.alert("L'objet a été réservé ! Le code de récupération vous sera fourni une fois l'objet déposé par le particulier.");
+                window.alert(`Le matériau "${item.title}" a bien été réservé.`);
             }
             router.push("/annonces/mes-recuperations");
         } catch (err) {

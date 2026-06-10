@@ -721,7 +721,6 @@ func (r *Repository) GetProfessionalReservations(ctx context.Context, userID int
 	return results, nil
 }
 
-// UpsertProfessionalSellerRating enregistre ou met à jour la note du pro sur le vendeur pour cet objet (une seule note par objet et par pro).
 func (r *Repository) UpsertProfessionalSellerRating(ctx context.Context, itemID, proUserID int64, stars int, displayName, companyName string) error {
 	if stars < 1 || stars > 5 {
 		return fmt.Errorf("stars must be between 1 and 5")
@@ -729,8 +728,9 @@ func (r *Repository) UpsertProfessionalSellerRating(ctx context.Context, itemID,
 	normalizedName := strings.TrimSpace(displayName)
 	normalizedCompany := strings.TrimSpace(companyName)
 	var sellerID int64
+	var title string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT i.user_id
+		`SELECT i.user_id, i.title
 		 FROM items i
 		 INNER JOIN item_logistics l ON l.item_id = i.id
 		 WHERE i.id = $1
@@ -746,7 +746,7 @@ func (r *Repository) UpsertProfessionalSellerRating(ctx context.Context, itemID,
 		     )
 		   )`,
 		itemID, proUserID, normalizedName, normalizedCompany,
-	).Scan(&sellerID)
+	).Scan(&sellerID, &title)
 	if err != nil {
 		return err
 	}
@@ -762,7 +762,15 @@ func (r *Repository) UpsertProfessionalSellerRating(ctx context.Context, itemID,
 		   updated_at = NOW()`,
 		itemID, proUserID, sellerID, stars,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Notify seller (particulier)
+	msg := fmt.Sprintf("Vous avez reçu une évaluation de %d étoiles pour votre annonce '%s'.", stars, title)
+	_ = CreateNotification(ctx, r.db, sellerID, "Nouvelle évaluation", msg, "rating_received")
+
+	return nil
 }
 
 // UpsertSellerProfessionalRating enregistre la note du particulier (vendeur) sur le professionnel ayant récupéré l'objet (parcours terminé).
@@ -1032,9 +1040,17 @@ type AssignPayload struct {
 }
 
 func (r *Repository) AssignLogistics(ctx context.Context, itemID int64, p AssignPayload, adminID int64) error {
-	// Validate current status
+	// Validate current status and fetch metadata
 	var status string
-	err := r.db.QueryRowContext(ctx, `SELECT workflow_status FROM item_logistics WHERE item_id = $1`, itemID).Scan(&status)
+	var ownerID int64
+	var proUserID sql.NullInt64
+	var title string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT l.workflow_status, i.user_id, l.reserved_by_user_id, i.title
+		FROM item_logistics l
+		JOIN items i ON i.id = l.item_id
+		WHERE l.item_id = $1
+	`, itemID).Scan(&status, &ownerID, &proUserID, &title)
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
@@ -1087,7 +1103,21 @@ func (r *Repository) AssignLogistics(ctx context.Context, itemID int64, p Assign
 		 WHERE item_id = $5`,
 		p.DepositPointID, p.ContainerID, now, adminID, itemID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Notify owner (particulier)
+	msgPart := fmt.Sprintf("Un point de dépôt a été assigné pour votre matériau '%s'.", title)
+	_ = CreateNotification(ctx, r.db, ownerID, "Point de dépôt assigné", msgPart, "point_assigned")
+
+	// Notify professional
+	if proUserID.Valid {
+		msgPro := fmt.Sprintf("Un point de dépôt a été assigné pour le matériau '%s' que vous avez réservé.", title)
+		_ = CreateNotification(ctx, r.db, proUserID.Int64, "Point de dépôt assigné", msgPro, "point_assigned")
+	}
+
+	return nil
 }
 
 // ── Transition: Generate deposit code ────────────────────────────────────────
@@ -1124,11 +1154,17 @@ func (r *Repository) GenerateDepositCode(ctx context.Context, itemID int64) (str
 func (r *Repository) ConfirmDeposit(ctx context.Context, itemID int64, adminID int64) error {
 	var status string
 	var existingPickupCode string
+	var ownerID int64
+	var proUserID sql.NullInt64
+	var title string
 
 	err := r.db.QueryRowContext(ctx,
-		`SELECT workflow_status, pickup_code FROM item_logistics WHERE item_id = $1`,
+		`SELECT l.workflow_status, l.pickup_code, i.user_id, l.reserved_by_user_id, i.title
+		 FROM item_logistics l
+		 JOIN items i ON i.id = l.item_id
+		 WHERE l.item_id = $1`,
 		itemID,
-	).Scan(&status, &existingPickupCode)
+	).Scan(&status, &existingPickupCode, &ownerID, &proUserID, &title)
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
@@ -1160,6 +1196,16 @@ func (r *Repository) ConfirmDeposit(ctx context.Context, itemID int64, adminID i
 	)
 	if err != nil {
 		return err
+	}
+
+	// Notify owner (particulier)
+	msg := fmt.Sprintf("Votre dépôt pour le matériau '%s' a bien été enregistré.", title)
+	_ = CreateNotification(ctx, r.db, ownerID, "Dépôt enregistré", msg, "material_deposited")
+
+	// Notify professional
+	if proUserID.Valid {
+		msgPro := fmt.Sprintf("Le dépôt du matériau '%s' que vous avez réservé a bien été enregistré.", title)
+		_ = CreateNotification(ctx, r.db, proUserID.Int64, "Dépôt enregistré", msgPro, "material_deposited")
 	}
 
 	// Increment container count
@@ -1288,7 +1334,9 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 		}
 		return "", fmt.Errorf("cannot reserve from status %q", status)
 	}
-	err = r.db.QueryRowContext(ctx, `SELECT type, price FROM items WHERE id = $1`, itemID).Scan(&itemType, &price)
+	var ownerID int64
+	var title string
+	err = r.db.QueryRowContext(ctx, `SELECT type, price, user_id, title FROM items WHERE id = $1`, itemID).Scan(&itemType, &price, &ownerID, &title)
 	if err != nil {
 		return "", fmt.Errorf("item data not found: %w", err)
 	}
@@ -1359,6 +1407,11 @@ func (r *Repository) ReserveItem(ctx context.Context, itemID int64, p ReservePay
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return "", fmt.Errorf("item is no longer available")
 	}
+
+	// Notify owner that a pro reserved their material
+	msg := fmt.Sprintf("Un professionnel a réservé votre matériau '%s'.", title)
+	_ = CreateNotification(ctx, r.db, ownerID, "Matériau réservé", msg, "booking_received")
+
 	return pickupCode, err
 }
 
@@ -1613,14 +1666,17 @@ func (r *Repository) ConfirmPickup(ctx context.Context, itemID int64, code strin
 	var itemType string
 	var paymentValidatedAt *time.Time
 	var depositedAt *time.Time
+	var proUserID sql.NullInt64
+	var ownerID int64
+	var title string
 
 	err := r.db.QueryRowContext(ctx,
-		`SELECT l.workflow_status, l.pickup_code, l.pickup_code_expires_at, l.container_id, i.type, l.payment_validated_at, l.deposited_at
+		`SELECT l.workflow_status, l.pickup_code, l.pickup_code_expires_at, l.container_id, i.type, l.payment_validated_at, l.deposited_at, l.reserved_by_user_id, i.user_id, i.title
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 WHERE l.item_id = $1`,
 		itemID,
-	).Scan(&status, &storedCode, &expiresAt, &containerID, &itemType, &paymentValidatedAt, &depositedAt)
+	).Scan(&status, &storedCode, &expiresAt, &containerID, &itemType, &paymentValidatedAt, &depositedAt, &proUserID, &ownerID, &title)
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
@@ -1650,6 +1706,16 @@ func (r *Repository) ConfirmPickup(ctx context.Context, itemID int64, code strin
 	if err != nil {
 		return err
 	}
+
+	// Notify professional
+	if proUserID.Valid {
+		msg := fmt.Sprintf("La récupération du matériau '%s' a bien été enregistrée.", title)
+		_ = CreateNotification(ctx, r.db, proUserID.Int64, "Récupération enregistrée", msg, "material_recovered")
+	}
+
+	// Notify owner (particulier)
+	msgOwner := fmt.Sprintf("Votre matériau '%s' a été récupéré par le professionnel.", title)
+	_ = CreateNotification(ctx, r.db, ownerID, "Matériau récupéré", msgOwner, "material_recovered")
 
 	// Decrement container count
 	if containerID != nil {

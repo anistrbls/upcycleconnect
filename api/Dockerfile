@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o server .
 
 # Deuxième étape : l'image finale qui va tourner en prod
 # On repart d'une image Alpine vide (~5 Mo), on n'a plus besoin de Go
-FROM alpine:3.19
+FROM alpine:3.20
 
 # On a besoin des certificats SSL pour que l'API puisse faire des appels HTTPS
 RUN apk --no-cache add ca-certificates

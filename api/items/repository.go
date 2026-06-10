@@ -273,7 +273,16 @@ func (r *Repository) Create(userID int64, p CreatePayload) (Item, error) {
 }
 
 func (r *Repository) UpdateStatus(id int64, status, moderationNote, moderationDetails string) error {
-	_, err := r.db.Exec(`
+	// Get owner user_id and title of the item
+	var userID int64
+	var title string
+	err := r.db.QueryRow(`SELECT user_id, title FROM items WHERE id = $1`, id).Scan(&userID, &title)
+	if err != nil {
+		return err
+	}
+
+	// Perform the update
+	_, err = r.db.Exec(`
 		UPDATE items 
 		SET status = $1, 
 			moderation_note = $2, 
@@ -282,7 +291,25 @@ func (r *Repository) UpdateStatus(id int64, status, moderationNote, moderationDe
 			updated_at = NOW() 
 		WHERE id = $4
 	`, status, moderationNote, moderationDetails, id)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Create a notification based on the new status
+	ctx := context.Background()
+	if status == "actif" {
+		msg := fmt.Sprintf("Votre annonce '%s' a été validée par la modération et est désormais en ligne.", title)
+		_ = CreateNotification(ctx, r.db, userID, "Annonce validée", msg, "material")
+	} else if status == "refusee" || status == "desactivee" || status == "desactive" {
+		reason := moderationNote
+		if reason == "" {
+			reason = "Non spécifié"
+		}
+		msg := fmt.Sprintf("Votre annonce '%s' a été refusée. Motif : %s", title, reason)
+		_ = CreateNotification(ctx, r.db, userID, "Annonce refusée", msg, "tip")
+	}
+
+	return nil
 }
 
 func (r *Repository) Delete(id int64) error {

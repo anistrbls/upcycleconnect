@@ -4,9 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { formatBuyerCardPrice } from "../../../lib/salePrice";
-import { Filter, Star } from "lucide-react";
+import { Filter, Star, Check } from "lucide-react";
 import AdminModal from "../../../components/admin/AdminModal";
-import DepositCodeQrPanel from "../../../components/DepositCodeQrPanel";
 import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
 
 const SELECT_ARROW_BG = "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='292.4' height='292.4'%3E%3Cpath fill='%232b4548' d='M287 69.4a17.6 17.6 0 0 0-13-5.4H18.4c-5 0-9.3 1.8-12.9 5.4A17.6 17.6 0 0 0 0 82.2c0 5 1.8 9.3 5.4 12.9l128 127.9c3.6 3.6 7.8 5.4 12.8 5.4s9.2-1.8 12.8-5.4L287 95c3.5-3.5 5.4-7.8 5.4-12.8 0-5-1.9-9.2-5.5-12.8z'/%3E%3C/svg%3E\")";
@@ -298,6 +297,24 @@ const styles = {
         fontWeight: 600,
         marginBottom: "1rem",
     },
+    toast: {
+        position: "fixed",
+        bottom: "2.5rem",
+        right: "2.5rem",
+        padding: "1rem 1.5rem",
+        borderRadius: "16px",
+        background: "#0f172a",
+        color: "white",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+        zIndex: 10000,
+        display: "flex",
+        alignItems: "center",
+        gap: "0.75rem",
+        fontSize: "0.88rem",
+        fontWeight: "500",
+        border: "1px solid rgba(255,255,255,0.1)",
+        animation: "slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+    },
 };
 
 function formatPublishDate(item) {
@@ -319,7 +336,7 @@ export default function ProfessionalAvailablePage() {
     const [error, setError] = useState("");
     const [busyId, setBusyId] = useState(0);
     const [reserveConfirmItem, setReserveConfirmItem] = useState(null);
-    const [reserveSuccess, setReserveSuccess] = useState(null);
+    const [toast, setToast] = useState(null);
     const [searchText, setSearchText] = useState("");
     const [materialFilter, setMaterialFilter] = useState("");
     const [conditionFilter, setConditionFilter] = useState("");
@@ -605,16 +622,8 @@ export default function ProfessionalAvailablePage() {
                 return;
             } else {
                 setReserveConfirmItem(null);
-                const logistics = reserveData.logistics || {};
-                const pickupExp =
-                    logistics.pickup_code_expires_at ||
-                    logistics.pickupCodeExpiresAt ||
-                    null;
-                setReserveSuccess({
-                    title: item.title,
-                    pickupCode,
-                    pickupExpiresAt: pickupExp,
-                });
+                setToast(`Le matériau "${item.title}" a bien été réservé.`);
+                setTimeout(() => setToast(null), 4000);
             }
 
             await fetchItems();
@@ -886,7 +895,7 @@ export default function ProfessionalAvailablePage() {
             >
                 <div style={{ display: "grid", gap: "1rem", paddingTop: "0.2rem" }}>
                     <p style={{ margin: 0, color: "var(--text-main)", fontSize: "0.95rem", lineHeight: 1.5 }}>
-                        Confirmer la réservation de "{reserveConfirmItem?.title}" ?
+                        Êtes-vous sûr de vouloir réserver le matériau "{reserveConfirmItem?.title}" ?
                     </p>
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.7rem" }}>
                         <button
@@ -926,58 +935,12 @@ export default function ProfessionalAvailablePage() {
                 </div>
             </AdminModal>
 
-            <AdminModal
-                open={Boolean(reserveSuccess)}
-                title="Réservation confirmée"
-                onClose={() => setReserveSuccess(null)}
-            >
-                <div style={{ display: "grid", gap: "0.9rem", paddingTop: "0.2rem" }}>
-                    <p style={{ margin: 0, color: "var(--text-main)", fontSize: "0.95rem", lineHeight: 1.5 }}>
-                        La réservation de "{reserveSuccess?.title}" est confirmée.
-                    </p>
-                    <div style={{ borderRadius: "12px", background: "#f3f6f5", padding: "0.75rem 0.9rem" }}>
-                        <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: "0.45rem", textAlign: "center" }}>
-                            Code de récupération
-                        </div>
-                        {reserveSuccess?.pickupCode ? (
-                            <DepositCodeQrPanel
-                                code={reserveSuccess.pickupCode}
-                                purpose="pickup"
-                                variant="light"
-                                qrSize={168}
-                                expiresText={
-                                    reserveSuccess.pickupExpiresAt
-                                        ? `Expire le : ${new Date(reserveSuccess.pickupExpiresAt).toLocaleDateString("fr-FR", {
-                                              day: "2-digit",
-                                              month: "2-digit",
-                                              year: "numeric",
-                                          })}`
-                                        : undefined
-                                }
-                            />
-                        ) : (
-                            <div style={{ fontSize: "1.02rem", color: "var(--text-main)", fontWeight: 800, textAlign: "center" }}>—</div>
-                        )}
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                        <button
-                            type="button"
-                            onClick={() => setReserveSuccess(null)}
-                            style={{
-                                border: "none",
-                                borderRadius: "12px",
-                                padding: "0.62rem 1rem",
-                                background: "#1f3336",
-                                color: "#fff",
-                                fontWeight: 700,
-                                cursor: "pointer",
-                            }}
-                        >
-                            Fermer
-                        </button>
-                    </div>
+            {toast && (
+                <div style={styles.toast}>
+                    <Check size={16} color="#4ade80" />
+                    <span>{toast}</span>
                 </div>
-            </AdminModal>
+            )}
 
             <style jsx>{`
                 .annonce-card:hover {
@@ -996,6 +959,10 @@ export default function ProfessionalAvailablePage() {
                 @keyframes fadeIn {
                     from { opacity: 0; transform: translateY(10px); }
                     to { opacity: 1; transform: translateY(0); }
+                }
+                @keyframes slideIn {
+                    from { transform: translateY(20px); opacity: 0; }
+                    to { transform: translateY(0); opacity: 1; }
                 }
             `}</style>
         </div>
