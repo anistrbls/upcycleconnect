@@ -27,7 +27,7 @@ export default function ParametresModuleIndexPage() {
                     const data = await response.json();
                     const role = data.user?.role;
                     if (role === "admin") {
-                        router.replace("/parametres/general");
+                        router.replace("/parametres/configuration");
                     } else if (role === "professionnel" || role === "particulier") {
                         router.replace("/parametres/notifications");
                     } else {

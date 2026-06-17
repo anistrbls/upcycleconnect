@@ -27,6 +27,11 @@ CMD ["npm", "run", "dev"]
 # npm run build genere le dossier .next avec tous les assets optimises
 # On utilise le mode "standalone" de Next.js pour avoir un runtime tres leger
 FROM base AS builder
+ARG NEXT_PUBLIC_API_URL=/api
+ARG API_INTERNAL_URL=http://api:8080
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV API_INTERNAL_URL=${API_INTERNAL_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 RUN npm run build
 

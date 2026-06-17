@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
@@ -167,6 +168,7 @@ const styles = {
 };
 
 export default function SettingsSubPage({ params }) {
+    const router = useRouter();
     const [subpage, setSubpage] = useState(null);
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -236,6 +238,12 @@ export default function SettingsSubPage({ params }) {
         };
         fetchMe();
     }, []);
+
+    useEffect(() => {
+        if (user?.role === "admin" && subpage === "general") {
+            router.replace("/parametres/configuration");
+        }
+    }, [router, subpage, user]);
 
     const saveSetting = (key, value) => {
         if (!user) return;

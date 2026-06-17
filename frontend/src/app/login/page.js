@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl, fetchWithTimeout } from "../lib/api";
+import LanguageSwitcher from "../components/i18n/LanguageSwitcher";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -88,6 +89,7 @@ export default function LoginPage() {
 
     return (
         <main className="login-shell">
+            <LanguageSwitcher variant="login" />
             <div className="login-grid">
                 <section className="login-visual-panel">
                     <div className="visual-brand-row">

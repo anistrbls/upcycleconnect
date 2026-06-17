@@ -24,9 +24,9 @@ jobs:
             context: ./api
             dockerfile: ./api/Dockerfile
             target: ""
-          - image_name: upcycle-frontend-admin
-            context: ./frontend-admin
-            dockerfile: ./frontend-admin/Dockerfile
+          - image_name: upcycle-frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
             target: production
 
     steps:

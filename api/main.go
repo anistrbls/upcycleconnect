@@ -113,6 +113,11 @@ func main() {
 	}
 	log.Println("✓ Item materials schema initialized")
 
+	if err := ensureI18nSchema(); err != nil {
+		log.Fatalf("failed to init i18n schema: %v", err)
+	}
+	log.Println("✓ I18n schema initialized")
+
 	if err := ensureCitiesSchema(); err != nil {
 		log.Fatalf("failed to init cities schema: %v", err)
 	}
@@ -131,7 +136,12 @@ func main() {
 	mux.HandleFunc("GET /api/siret/validate", func(w http.ResponseWriter, r *http.Request) {
 		handleSiretValidate(w, r, inseeClient)
 	})
+	mux.HandleFunc("GET /api/i18n/languages", i18nLanguagesPublicHandler)
+	mux.HandleFunc("GET /api/i18n/messages/{locale}", i18nMessagesPublicHandler)
+	mux.HandleFunc("POST /api/i18n/translate", i18nTranslatePublicHandler)
 	mux.Handle("/api/auth/me", authMiddleware(http.HandlerFunc(meHandler)))
+	mux.Handle("/api/admin/i18n/languages", authMiddleware(http.HandlerFunc(i18nLanguagesAdminHandler)))
+	mux.Handle("/api/admin/i18n/languages/", authMiddleware(http.HandlerFunc(i18nLanguageByCodeAdminHandler)))
 	mux.Handle("/api/admin/service-categories", authMiddleware(http.HandlerFunc(serviceCategoriesHandler)))
 	mux.Handle("/api/admin/service-categories/", authMiddleware(http.HandlerFunc(serviceCategoryByIDHandler)))
 	mux.Handle("/api/admin/services", authMiddleware(http.HandlerFunc(servicesHandler)))
