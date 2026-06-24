@@ -243,7 +243,14 @@ const SIDEBAR_WIDTH = 60;
 const SPOTLIGHT_PAD = 8;
 const CARD_HEIGHT_EST = 270;
 
-export default function TutorialOverlay({ userId }) {
+function getTutorialStorageKey(userId, userEmail) {
+    const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+    if (normalizedEmail) return `${STORAGE_KEY_PREFIX}${normalizedEmail}`;
+    if (userId) return `${STORAGE_KEY_PREFIX}${userId}`;
+    return "";
+}
+
+export default function TutorialOverlay({ userId, userEmail }) {
     const [visible, setVisible] = useState(false);
     const [stepIndex, setStepIndex] = useState(0);
     const [spotlightRect, setSpotlightRect] = useState(null);
@@ -254,16 +261,17 @@ export default function TutorialOverlay({ userId }) {
     const router = useRouter();
     const timerRef = useRef(null);
     const prevPathRef = useRef(null);
+    const storageKey = getTutorialStorageKey(userId, userEmail);
 
     // Afficher uniquement à la première visite
     useEffect(() => {
-        if (!userId) return;
-        const done = localStorage.getItem(`${STORAGE_KEY_PREFIX}${userId}`);
+        if (!storageKey) return;
+        const done = localStorage.getItem(storageKey);
         if (!done) {
             const t = setTimeout(() => setVisible(true), 500);
             return () => clearTimeout(t);
         }
-    }, [userId]);
+    }, [storageKey]);
 
     const currentStep = TUTORIAL_STEPS[stepIndex];
 
@@ -353,7 +361,7 @@ export default function TutorialOverlay({ userId }) {
     };
 
     const finish = () => {
-        if (userId) localStorage.setItem(`${STORAGE_KEY_PREFIX}${userId}`, "1");
+        if (storageKey) localStorage.setItem(storageKey, "1");
         setVisible(false);
     };
 

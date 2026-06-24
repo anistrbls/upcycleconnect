@@ -182,6 +182,11 @@ export default function InscriptionPage() {
             if (!response.ok) throw new Error(data.error || "Inscription impossible");
             setSuccess(data.message || "Compte créé.");
             if (data.user?.role === "particulier" && data.user?.status === "active") {
+                const tutorialKeys = [
+                    data.user?.id ? `uc_tutorial_done_${data.user.id}` : "",
+                    data.user?.email ? `uc_tutorial_done_${String(data.user.email).trim().toLowerCase()}` : "",
+                ].filter(Boolean);
+                tutorialKeys.forEach((key) => window.localStorage.removeItem(key));
                 setTimeout(() => router.push("/login"), 2200);
             }
         } catch (err) {
