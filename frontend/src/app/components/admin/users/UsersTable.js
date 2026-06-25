@@ -71,10 +71,10 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
                 <tbody>
                     {users.map((u) => (
                         <tr key={u.id} style={{ borderBottom: "1px solid #F0F5F5" }}>
-                            <td style={{ padding: "0.6rem 0.75rem", fontWeight: 500 }}>
+                            <td style={{ padding: "0.6rem 0.75rem", fontWeight: 500 }} data-i18n-user-content="true">
                                 {u.firstname} {u.lastname}
                             </td>
-                            <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)" }}>
+                            <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)" }} data-i18n-user-content="true">
                                 {u.email}
                             </td>
                             <td style={{ padding: "0.6rem 0.75rem" }}>

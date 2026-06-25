@@ -99,11 +99,13 @@ function ServiceCard({ item, index, onEdit, onDelete, onDuplicate, onToggleStatu
                             preload="metadata"
                             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }}
                             aria-label={item.name}
+                            data-i18n-user-content="true"
                         />
                     ) : (
                         <img
                             src={item.imageUrl}
                             alt={item.name}
+                            data-i18n-user-content="true"
                             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }}
                             onError={(e) => { e.target.style.display = "none"; }}
                         />
@@ -134,19 +136,19 @@ function ServiceCard({ item, index, onEdit, onDelete, onDuplicate, onToggleStatu
 
             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.65rem", zIndex: 2 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "0.75rem" }}>
-                    <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }}>{item.name}</h3>
+                    <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }} data-i18n-user-content="true">{item.name}</h3>
                     <div style={{ padding: "5px 14px", borderRadius: "999px", background: "rgba(255,255,255,0.15)", color: "white", fontSize: "0.88rem", fontWeight: 700, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)", whiteSpace: "nowrap", flexShrink: 0 }}>
                         {Number(item.price || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                     </div>
                 </div>
-                <p style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.85)", margin: 0, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                <p style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.85)", margin: 0, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }} data-i18n-user-content="true">
                     {item.shortDescription || item.description || "—"}
                 </p>
                 <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.65)", margin: 0 }}>
                     Créé le {formatDateFR(item.createdAt)}
                 </p>
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <span style={tagStyle}>{item.categoryName || "Sans catégorie"}</span>
+                    <span style={tagStyle} data-i18n-user-content="true">{item.categoryName || "Sans catégorie"}</span>
                     {item.durationMinutes > 0 ? <span style={tagStyle}>{item.durationMinutes} min</span> : null}
                     <span style={tagStyle}>{formatTargetAudienceLabel(item.targetAudience)}</span>
                     <span style={tagStyle}>{bookingMode === "booking" ? "Réservation" : "Demande"}</span>
@@ -374,7 +376,7 @@ export default function ServiceAdminView({ services, categories, loading, errorM
                     >
                         <option value="all">Toutes les catégories</option>
                         {categories.map((item) => (
-                            <option key={item.id} value={String(item.id)}>{item.name}</option>
+                            <option key={item.id} value={String(item.id)} data-i18n-user-content="true">{item.name}</option>
                         ))}
                     </select>
                     <select

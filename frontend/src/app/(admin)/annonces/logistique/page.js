@@ -768,10 +768,10 @@ export default function LogisticsDashboard() {
             <AdminModal open={showAssignModal} title="Assignation Logistique" onClose={() => setShowAssignModal(false)}>
                 <div style={styles.modalBody}>
                     <div style={styles.modalItemInfo}>
-                        <img src={selectedItem?.item_image} style={styles.modalImg} />
+                        <img src={selectedItem?.item_image} style={styles.modalImg} data-i18n-user-content="true" />
                         <div>
-                            <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>{selectedItem?.item_title}</div>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{selectedItem?.owner_name}</div>
+                            <div style={{ fontWeight: '700', color: 'var(--text-main)' }} data-i18n-user-content="true">{selectedItem?.item_title}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }} data-i18n-user-content="true">{selectedItem?.owner_name}</div>
                         </div>
                     </div>
 
@@ -784,7 +784,7 @@ export default function LogisticsDashboard() {
                         >
                             <option value="">Sélectionner un point...</option>
                             {points.map(p => (
-                                <option key={p.id} value={p.id}>{p.name} ({p.city})</option>
+                                <option key={p.id} value={p.id} data-i18n-user-content="true">{p.name} ({p.city})</option>
                             ))}
                         </select>
                     </div>
@@ -814,7 +814,7 @@ export default function LogisticsDashboard() {
                                                 <Boxes size={16} />
                                             </div>
                                             <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: '700', fontSize: '0.85rem' }}>{c.name}</div>
+                                                <div style={{ fontWeight: '700', fontSize: '0.85rem' }} data-i18n-user-content="true">{c.name}</div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.current_count}/{c.capacity} objets</div>
                                             </div>
                                             {isFull && <div style={styles.fullBadge}>Plein</div>}
@@ -842,9 +842,10 @@ export default function LogisticsDashboard() {
                                 src={selectedItem.item_image}
                                 alt={selectedItem?.title}
                                 style={{ width: '56px', height: '56px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0 }}
+                                data-i18n-user-content="true"
                             />
                         )}
-                        <div style={{ fontWeight: '700', fontSize: '0.97rem', color: 'var(--text-main)', lineHeight: '1.3' }}>{selectedItem?.item_title}</div>
+                        <div style={{ fontWeight: '700', fontSize: '0.97rem', color: 'var(--text-main)', lineHeight: '1.3' }} data-i18n-user-content="true">{selectedItem?.item_title}</div>
                     </div>
                     <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginBottom: '1.5rem', lineHeight: '1.6' }}>
                         Confirmez-vous que cet objet a bien été déposé physiquement au point de collecte ?
@@ -864,7 +865,7 @@ export default function LogisticsDashboard() {
                         </div>
                         <div>
                             <div style={{ fontWeight: '700' }}>Réserver pour un pro</div>
-                            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{selectedItem?.item_title}</div>
+                            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }} data-i18n-user-content="true">{selectedItem?.item_title}</div>
                         </div>
                     </div>
                     
@@ -901,11 +902,11 @@ export default function LogisticsDashboard() {
                                     }}
                                 >
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>{p.firstname} {p.lastname}</div>
+                                        <div style={{ fontWeight: '600', color: 'var(--text-main)' }} data-i18n-user-content="true">{p.firstname} {p.lastname}</div>
                                         {p.role === 'professionnel' && <div style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--black)', color: '#fff', borderRadius: '4px' }}>PRO</div>}
                                     </div>
                                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                                        {p.email} • {p.siret ? `SIRET: ${p.siret}` : 'Pas de SIRET'}
+                                        <span data-i18n-user-content="true">{p.email}</span> • {p.siret ? <>SIRET: <span data-i18n-user-content="true">{p.siret}</span></> : 'Pas de SIRET'}
                                     </div>
                                 </div>
                             )) : (
@@ -918,7 +919,7 @@ export default function LogisticsDashboard() {
 
                     {reserveUserIdInput && (
                         <div style={{ padding: '0.75rem', background: 'var(--forest-light)', borderRadius: '12px', fontSize: '0.85rem', color: 'var(--forest-deep)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <CheckCircle2 size={16} /> Sélectionné : {reserveNameInput}
+                            <CheckCircle2 size={16} /> Sélectionné : <span data-i18n-user-content="true">{reserveNameInput}</span>
                         </div>
                     )}
 
@@ -932,10 +933,12 @@ export default function LogisticsDashboard() {
             <AdminModal open={showPickupModal} title="Confirmer la récupération" onClose={() => setShowPickupModal(false)}>
                 <div style={styles.modalBody}>
                     <div style={styles.modalItemInfo}>
-                        <img src={selectedItem?.item_image} style={styles.modalImg} />
+                        <img src={selectedItem?.item_image} style={styles.modalImg} data-i18n-user-content="true" />
                         <div>
-                            <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>{selectedItem?.item_title}</div>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{selectedItem?.reserved_by_name || "Réservation professionnelle"}</div>
+                            <div style={{ fontWeight: '700', color: 'var(--text-main)' }} data-i18n-user-content="true">{selectedItem?.item_title}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                {selectedItem?.reserved_by_name ? <span data-i18n-user-content="true">{selectedItem.reserved_by_name}</span> : "Réservation professionnelle"}
+                            </div>
                         </div>
                     </div>
 
@@ -1074,11 +1077,11 @@ function LogisticsCard({ item, actions, onClickCard }) {
 
             <div style={styles.cardBody}>
                 <div style={styles.itemMain}>
-                    <img src={item.item_image} style={styles.itemImg} />
+                    <img src={item.item_image} style={styles.itemImg} data-i18n-user-content="true" />
                     <div style={{ flex: 1 }}>
-                        <h3 style={styles.itemTitle}>{item.item_title}</h3>
+                        <h3 style={styles.itemTitle} data-i18n-user-content="true">{item.item_title}</h3>
                         <p style={styles.itemOwner}>
-                            <User size={13} /> {item.owner_name}
+                            <User size={13} /> <span data-i18n-user-content="true">{item.owner_name}</span>
                         </p>
                     </div>
                 </div>
@@ -1088,7 +1091,7 @@ function LogisticsCard({ item, actions, onClickCard }) {
                         <MapPin size={16} />
                     </div>
                     <span style={styles.infoText}>
-                        {item.deposit_point_name ? `${item.deposit_point_name} (${item.container_name})` : "Point non assigné"}
+                        {item.deposit_point_name ? <span data-i18n-user-content="true">{item.deposit_point_name} ({item.container_name})</span> : "Point non assigné"}
                     </span>
                 </div>
 
@@ -1101,7 +1104,7 @@ function LogisticsCard({ item, actions, onClickCard }) {
                 
                 {(item.workflow_status === 'deposited' || (item.workflow_status === 'reserved' && item.deposited_at)) && item.pickup_code && (
                     <div style={styles.codeBox}>
-                        <div style={styles.codeLabel}>Code Récupération ({item.reserved_by_name})</div>
+                        <div style={styles.codeLabel}>Code Récupération (<span data-i18n-user-content="true">{item.reserved_by_name}</span>)</div>
                         <DepositCodeQrPanel code={item.pickup_code} purpose="pickup" variant="darkCard" qrSize={108} />
                     </div>
                 )}

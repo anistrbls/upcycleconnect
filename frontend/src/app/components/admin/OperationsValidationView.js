@@ -80,6 +80,7 @@ function ValidationRowCard({
                         src={thumb}
                         alt={thumbAlt || ""}
                         style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center" }}
+                        data-i18n-user-content="true"
                     />
                 ) : (
                     emptyIcon || <Package size={32} color="var(--text-muted)" strokeWidth={1.25} aria-hidden />
@@ -87,14 +88,14 @@ function ValidationRowCard({
             </div>
             <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "0.45rem", justifyContent: "center" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 700, fontSize: "1rem", color: "var(--text-main)", lineHeight: 1.35 }}>{title}</span>
+                    <span style={{ fontWeight: 700, fontSize: "1rem", color: "var(--text-main)", lineHeight: 1.35 }} data-i18n-user-content="true">{title}</span>
                     {badges}
                 </div>
                 {line1 ? (
-                    <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.45 }}>{line1}</div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.45 }} data-i18n-user-content="true">{line1}</div>
                 ) : null}
                 {line2 ? (
-                    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", opacity: 0.92, lineHeight: 1.45 }}>{line2}</div>
+                    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", opacity: 0.92, lineHeight: 1.45 }} data-i18n-user-content="true">{line2}</div>
                 ) : null}
                 {(footerLeft || (onOpenDetail && detailHint)) && (
                     <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap", marginTop: "0.15rem" }}>
@@ -230,7 +231,7 @@ function ConseilsValidation({ contents, loading, errorMessage, onReload, onValid
                 })}
             </div>
 
-            <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.title || ""}`} onClose={() => setRejectTarget(null)}>
+            <AdminModal open={!!rejectTarget} title={<>Refuser : <span data-i18n-user-content="true">{rejectTarget?.title || ""}</span></>} onClose={() => setRejectTarget(null)}>
                 <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "0.75rem" }}>
                     <label style={labelStyle}>
                         Motif du refus (optionnel)
@@ -395,7 +396,7 @@ function EvenementsValidation({ events, loading, errorMessage, onReload, onValid
                     })}
             </div>
 
-            <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.name || ""}`} onClose={() => setRejectTarget(null)}>
+            <AdminModal open={!!rejectTarget} title={<>Refuser : <span data-i18n-user-content="true">{rejectTarget?.name || ""}</span></>} onClose={() => setRejectTarget(null)}>
                 <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "0.75rem" }}>
                     <label style={labelStyle}>
                         Motif du refus (optionnel)
@@ -517,7 +518,7 @@ function AnnoncesValidation({ items, loading, errorMessage, onReload, onValidate
                             badges={
                                 item.category ? (
                                     <span className="db-badge" style={{ background: "#EAF4FF", color: "#1e3a5f" }}>
-                                        {item.category}
+                                        <span data-i18n-user-content="true">{item.category}</span>
                                     </span>
                                 ) : null
                             }
@@ -556,7 +557,7 @@ function AnnoncesValidation({ items, loading, errorMessage, onReload, onValidate
                 })}
             </div>
 
-            <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.title || rejectTarget?.name || ""}`} onClose={() => setRejectTarget(null)}>
+            <AdminModal open={!!rejectTarget} title={<>Refuser : <span data-i18n-user-content="true">{rejectTarget?.title || rejectTarget?.name || ""}</span></>} onClose={() => setRejectTarget(null)}>
                 <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "0.75rem" }}>
                     <label style={labelStyle}>
                         Motif du refus (optionnel)
@@ -718,7 +719,7 @@ function ProjetsValidation({ projects, loading, errorMessage, onReload, onValida
                 })}
             </div>
 
-            <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.title || ""}`} onClose={() => setRejectTarget(null)}>
+            <AdminModal open={!!rejectTarget} title={<>Refuser : <span data-i18n-user-content="true">{rejectTarget?.title || ""}</span></>} onClose={() => setRejectTarget(null)}>
                 <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "0.75rem" }}>
                     <label style={labelStyle}>
                         Motif du refus (optionnel)
@@ -998,7 +999,7 @@ function RemboursementsValidation({ requests, loading, errorMessage, onReload, o
                 {reasonTarget && (
                     <div style={{ display: "grid", gap: "0.75rem" }}>
                         <p style={{ margin: 0, fontSize: "0.86rem", color: "var(--text-muted)" }}>
-                            <strong>{reasonTarget.eventName}</strong> — {reasonTarget.userName}
+                            <strong data-i18n-user-content="true">{reasonTarget.eventName}</strong> — <span data-i18n-user-content="true">{reasonTarget.userName}</span>
                         </p>
                         <div
                             style={{
@@ -1013,7 +1014,7 @@ function RemboursementsValidation({ requests, loading, errorMessage, onReload, o
                                 overflowY: "auto",
                             }}
                         >
-                            {reasonTarget.reason || "—"}
+                            {reasonTarget.reason ? <span data-i18n-user-content="true">{reasonTarget.reason}</span> : "—"}
                         </div>
                         <button type="button" className="action-cta" style={{ background: "#e8ecee", color: "var(--text-main)" }} onClick={() => setReasonTarget(null)}>
                             Fermer
@@ -1024,13 +1025,13 @@ function RemboursementsValidation({ requests, loading, errorMessage, onReload, o
 
             <AdminModal
                 open={!!refundModal}
-                title={refundModal ? `Rembourser — ${refundModal.eventName}` : ""}
+                title={refundModal ? <>Rembourser — <span data-i18n-user-content="true">{refundModal.eventName}</span></> : ""}
                 onClose={() => !submitting && closeRefundModal()}
             >
                 {refundModal && (
                     <form onSubmit={handleRefundSubmit} style={{ display: "grid", gap: "0.85rem" }}>
                         <p style={{ margin: 0, fontSize: "0.86rem", color: "var(--text-muted)" }}>
-                            {refundModal.userName} — billet max.{" "}
+                            <span data-i18n-user-content="true">{refundModal.userName}</span> — billet max.{" "}
                             <strong>{maxTicketEuro.toLocaleString("fr-FR", { style: "currency", currency: "EUR" })}</strong>
                         </p>
 
@@ -1098,7 +1099,7 @@ function RemboursementsValidation({ requests, loading, errorMessage, onReload, o
 
             <AdminModal
                 open={!!rejectModal}
-                title={rejectModal ? `Refuser le remboursement — ${rejectModal.eventName}` : ""}
+                title={rejectModal ? <>Refuser le remboursement — <span data-i18n-user-content="true">{rejectModal.eventName}</span></> : ""}
                 onClose={() => {
                     if (!submitting) {
                         setRejectModal(null);

@@ -657,12 +657,14 @@ export default function ProfessionalAvailablePage() {
                                 playsInline
                                 preload="metadata"
                                 aria-label={item.title}
+                                data-i18n-user-content="true"
                                 style={styles.cardImage}
                             />
                         ) : (
                             <img
                                 src={thumb}
                                 alt={item.title}
+                                data-i18n-user-content="true"
                                 style={styles.cardImage}
                             />
                         )}
@@ -672,16 +674,16 @@ export default function ProfessionalAvailablePage() {
 
                         <div style={styles.cardOverlay}>
                             <div style={styles.titlePriceRow}>
-                                <h3 style={styles.cardTitle}>{item.title}</h3>
+                                <h3 style={styles.cardTitle} data-i18n-user-content="true">{item.title}</h3>
                                 <div style={styles.pricePill}>{item.type === "don" ? "GRATUIT" : formatBuyerCardPrice(item)}</div>
                             </div>
 
                             <p style={styles.description}>Publiée le {formatPublishDate(item)}</p>
 
                             <div style={styles.tagsRow}>
-                                {item.category && <span style={styles.tag}>{item.category}</span>}
-                                {item.material && <span style={styles.tag}>{item.material}</span>}
-                                {item.condition && <span style={styles.tag}>{item.condition}</span>}
+                                {item.category && <span style={styles.tag} data-i18n-user-content="true">{item.category}</span>}
+                                {item.material && <span style={styles.tag} data-i18n-user-content="true">{item.material}</span>}
+                                {item.condition && <span style={styles.tag} data-i18n-user-content="true">{item.condition}</span>}
                             </div>
 
                             <div style={styles.cardActions}>

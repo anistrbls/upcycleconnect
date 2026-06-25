@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { apiUrl } from "../../lib/api";
 
 const STORAGE_KEY = "uc_locale";
@@ -14,8 +14,8 @@ const DEFAULT_LANGUAGES = [
 ];
 
 const TRANSLATABLE_ATTRIBUTES = ["placeholder", "title", "aria-label", "alt", "data-tooltip"];
-const RUNTIME_TRANSLATION_BATCH_SIZE = 60;
 const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "CODE", "PRE", "CANVAS"]);
+const ATTRIBUTE_SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "CODE", "PRE", "CANVAS"]);
 const originalTextNodes = new WeakMap();
 const translatedTextNodes = new WeakMap();
 
@@ -110,30 +110,25 @@ const findStaticTranslation = (value, messages = {}) => {
 
 export const translateStaticText = (value, messages = {}) => findStaticTranslation(value, messages).translated;
 
-const isRuntimeTranslatableText = (value) => {
-    const text = normalizeText(value);
-    if (!text || text.length > 700) return false;
-    if (/^(https?:\/\/|mailto:|tel:)/i.test(text)) return false;
-    return /\p{L}/u.test(text);
-};
-
-const collectMissingTranslation = (source, lookup, missingSet, locale, defaultLocale) => {
-    if (!missingSet || locale === defaultLocale || lookup.found) return;
-    const text = normalizeText(source);
-    if (isRuntimeTranslatableText(text)) missingSet.add(text);
-};
-
 const shouldSkipElement = (element) => {
     if (!element) return true;
     if (element.closest("[data-i18n-skip]")) return true;
+    if (element.closest("[data-i18n-user-content]")) return true;
     return SKIP_TAGS.has(element.tagName);
+};
+
+const shouldSkipElementAttributes = (element) => {
+    if (!element) return true;
+    if (element.closest("[data-i18n-skip]")) return true;
+    if (element.closest("[data-i18n-user-content]")) return true;
+    return ATTRIBUTE_SKIP_TAGS.has(element.tagName);
 };
 
 const sourceAttributeName = (attr) => `data-i18n-source-${attr.replace(/[^a-zA-Z0-9]/g, "-")}`;
 const translatedAttributeName = (attr) => `data-i18n-translated-${attr.replace(/[^a-zA-Z0-9]/g, "-")}`;
 
-const translateElementAttributes = (element, messages, missingSet, locale, defaultLocale) => {
-    if (!element || shouldSkipElement(element)) return;
+const translateElementAttributes = (element, messages) => {
+    if (!element || shouldSkipElementAttributes(element)) return;
 
     TRANSLATABLE_ATTRIBUTES.forEach((attr) => {
         if (!element.hasAttribute(attr)) return;
@@ -147,17 +142,15 @@ const translateElementAttributes = (element, messages, missingSet, locale, defau
         const source = (!previousSource || (current !== previousSource && current !== previousTranslated))
             ? current
             : previousSource;
-        const lookup = findStaticTranslation(source, messages);
-        const translated = lookup.translated;
+        const translated = findStaticTranslation(source, messages).translated;
 
         element.setAttribute(sourceAttr, source);
         element.setAttribute(translatedAttr, translated);
-        collectMissingTranslation(source, lookup, missingSet, locale, defaultLocale);
         if (current !== translated) element.setAttribute(attr, translated);
     });
 };
 
-const translateTextNode = (node, messages, missingSet, locale, defaultLocale) => {
+const translateTextNode = (node, messages) => {
     const parent = node.parentElement;
     if (shouldSkipElement(parent)) return;
 
@@ -171,23 +164,21 @@ const translateTextNode = (node, messages, missingSet, locale, defaultLocale) =>
         : previousSource;
     originalTextNodes.set(node, source);
 
-    const lookup = findStaticTranslation(source, messages);
-    const translated = lookup.translated;
+    const translated = findStaticTranslation(source, messages).translated;
     translatedTextNodes.set(node, translated);
-    collectMissingTranslation(source, lookup, missingSet, locale, defaultLocale);
     if (current !== translated) node.nodeValue = translated;
 };
 
-const translateTree = (root, messages, { locale = DEFAULT_LOCALE, defaultLocale = DEFAULT_LOCALE, missingSet = new Set() } = {}) => {
-    if (!root) return missingSet;
+const translateTree = (root, messages) => {
+    if (!root) return;
 
     if (root.nodeType === Node.TEXT_NODE) {
-        translateTextNode(root, messages, missingSet, locale, defaultLocale);
-        return missingSet;
+        translateTextNode(root, messages);
+        return;
     }
 
-    if (root.nodeType !== Node.ELEMENT_NODE) return missingSet;
-    translateElementAttributes(root, messages, missingSet, locale, defaultLocale);
+    if (root.nodeType !== Node.ELEMENT_NODE) return;
+    translateElementAttributes(root, messages);
 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode: (node) => shouldSkipElement(node.parentElement)
@@ -197,81 +188,26 @@ const translateTree = (root, messages, { locale = DEFAULT_LOCALE, defaultLocale 
 
     let node = walker.nextNode();
     while (node) {
-        translateTextNode(node, messages, missingSet, locale, defaultLocale);
+        translateTextNode(node, messages);
         node = walker.nextNode();
     }
 
-    root.querySelectorAll?.("*").forEach((element) => translateElementAttributes(element, messages, missingSet, locale, defaultLocale));
-    return missingSet;
+    root.querySelectorAll?.("*").forEach((element) => translateElementAttributes(element, messages));
 };
 
-function RuntimeTranslator({ messages, isReady, locale, defaultLocale, onRuntimeTranslations }) {
-    const requestedRef = useRef(new Set());
-    const pendingRef = useRef(new Set());
-    const inFlightRef = useRef(false);
-
-    useEffect(() => {
-        requestedRef.current = new Set();
-        pendingRef.current = new Set();
-        inFlightRef.current = false;
-    }, [locale]);
-
+function PageTranslator({ messages, isReady }) {
     useEffect(() => {
         if (!isReady || typeof window === "undefined" || !document.body) return undefined;
 
         let scheduled = false;
         let applying = false;
 
-        const requestMissingTranslations = async (missingSet) => {
-            if (locale === defaultLocale || !missingSet?.size) return;
-
-            const nextTexts = Array.from(missingSet).filter((text) => !requestedRef.current.has(text));
-            if (!nextTexts.length) return;
-
-            nextTexts.forEach((text) => {
-                requestedRef.current.add(text);
-                pendingRef.current.add(text);
-            });
-
-            if (inFlightRef.current) return;
-            inFlightRef.current = true;
-
-            try {
-                while (pendingRef.current.size) {
-                    const batch = Array.from(pendingRef.current).slice(0, RUNTIME_TRANSLATION_BATCH_SIZE);
-                    batch.forEach((text) => pendingRef.current.delete(text));
-
-                    const response = await fetch(apiUrl("/i18n/translate"), {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ targetLocale: locale, texts: batch }),
-                    });
-
-                    if (!response.ok) {
-                        const data = await response.json().catch(() => ({}));
-                        console.warn("Runtime translation failed", data?.error || response.statusText);
-                        continue;
-                    }
-
-                    const data = await response.json().catch(() => ({}));
-                    if (data?.phrases && typeof data.phrases === "object") {
-                        onRuntimeTranslations(locale, data.phrases);
-                    }
-                }
-            } catch (error) {
-                console.warn("Runtime translation failed", error);
-            } finally {
-                inFlightRef.current = false;
-            }
-        };
-
         const applyTranslations = () => {
             scheduled = false;
             if (applying) return;
             applying = true;
-            const missingSet = translateTree(document.body, messages, { locale, defaultLocale });
+            translateTree(document.body, messages);
             applying = false;
-            requestMissingTranslations(missingSet);
         };
 
         const scheduleApply = () => {
@@ -301,7 +237,7 @@ function RuntimeTranslator({ messages, isReady, locale, defaultLocale, onRuntime
         });
 
         return () => observer.disconnect();
-    }, [defaultLocale, isReady, locale, messages, onRuntimeTranslations]);
+    }, [isReady, messages]);
 
     return null;
 }
@@ -368,7 +304,7 @@ const mergeLanguages = (...languageLists) => {
     return Array.from(byCode.values());
 };
 
-const emptyCatalog = { phrases: {}, patterns: [] };
+const emptyCatalog = { meta: {}, i18n: {}, phrases: {}, patterns: [] };
 
 const normalizeCatalog = (catalog) => ({
     meta: catalog?.meta || {},
@@ -379,12 +315,37 @@ const normalizeCatalog = (catalog) => ({
     patterns: Array.isArray(catalog?.patterns) ? catalog.patterns : [],
 });
 
-const loadLanguageCatalog = async (locale) => {
-    const apiCatalog = await loadOptionalJSON(apiUrl(`/i18n/messages/${locale}`));
-    if (apiCatalog) return normalizeCatalog(apiCatalog);
+const mergePhraseMaps = (base = {}, incoming = {}) => {
+    const merged = { ...base };
 
+    Object.entries(incoming || {}).forEach(([source, translated]) => {
+        if (typeof translated !== "string") return;
+
+        const existing = merged[source];
+        const incomingIsIdentity = normalizeText(source) === normalizeText(translated);
+        const existingIsTranslation = typeof existing === "string" && normalizeText(existing) !== normalizeText(source);
+
+        if (incomingIsIdentity && existingIsTranslation) return;
+        merged[source] = translated;
+    });
+
+    return merged;
+};
+
+const mergeCatalogs = (...catalogs) => catalogs.reduce((merged, catalog) => {
+    const normalized = normalizeCatalog(catalog || emptyCatalog);
+    return {
+        meta: { ...merged.meta, ...normalized.meta },
+        i18n: { ...merged.i18n, ...normalized.i18n },
+        phrases: mergePhraseMaps(merged.phrases, normalized.phrases),
+        patterns: [...merged.patterns, ...normalized.patterns],
+    };
+}, emptyCatalog);
+
+const loadLanguageCatalog = async (locale) => {
     const staticCatalog = await loadOptionalJSON(`${LOCALES_BASE_PATH}/${locale}.json`);
-    return normalizeCatalog(staticCatalog || emptyCatalog);
+    const apiCatalog = await loadOptionalJSON(apiUrl(`/i18n/messages/${locale}`));
+    return mergeCatalogs(staticCatalog, apiCatalog);
 };
 
 const findLanguage = (languages, candidate) => {
@@ -437,15 +398,10 @@ export default function I18nProvider({ children }) {
     const [languages, setLanguages] = useState(DEFAULT_LANGUAGES);
     const [defaultLocale, setDefaultLocale] = useState(DEFAULT_LOCALE);
     const [locale, setLocaleState] = useState(DEFAULT_LOCALE);
-    const [messages, setMessages] = useState({ phrases: {}, patterns: [] });
+    const [messages, setMessages] = useState(emptyCatalog);
     const [catalogs, setCatalogs] = useState({});
     const [isReady, setIsReady] = useState(false);
     const [refreshToken, setRefreshToken] = useState(0);
-    const localeRef = useRef(locale);
-
-    useEffect(() => {
-        localeRef.current = locale;
-    }, [locale]);
 
     useEffect(() => {
         if (typeof window === "undefined") return undefined;
@@ -468,10 +424,14 @@ export default function I18nProvider({ children }) {
             const apiLanguages = Array.isArray(apiConfig?.locales) ? apiConfig.locales : [];
             const configuredLanguages = mergeLanguages(staticLanguages, apiLanguages);
             const configuredDefault = apiConfig?.defaultLocale || staticConfig?.defaultLocale || DEFAULT_LOCALE;
+            const nextLanguages = configuredLanguages.length ? configuredLanguages : DEFAULT_LANGUAGES;
 
-            setLanguages(configuredLanguages.length ? configuredLanguages : DEFAULT_LANGUAGES);
+            setLanguages(nextLanguages);
             setDefaultLocale(configuredDefault);
-            setLocaleState(resolveInitialLocale(configuredLanguages.length ? configuredLanguages : DEFAULT_LANGUAGES, configuredDefault));
+            setLocaleState((current) => {
+                const currentLanguage = findLanguage(nextLanguages, current);
+                return currentLanguage?.code || resolveInitialLocale(nextLanguages, configuredDefault);
+            });
         }
 
         loadLanguageConfig();
@@ -486,7 +446,7 @@ export default function I18nProvider({ children }) {
                 try {
                     return [language.code, await loadLanguageCatalog(language.code)];
                 } catch {
-                    return [language.code, { phrases: {}, patterns: [] }];
+                    return [language.code, emptyCatalog];
                 }
             }));
 
@@ -506,7 +466,7 @@ export default function I18nProvider({ children }) {
                 const data = await loadLanguageCatalog(locale);
                 if (!cancelled) setMessages(data);
             } catch {
-                if (!cancelled) setMessages({ phrases: {}, patterns: [] });
+                if (!cancelled) setMessages(emptyCatalog);
             } finally {
                 if (!cancelled) setIsReady(true);
             }
@@ -541,38 +501,6 @@ export default function I18nProvider({ children }) {
         translationMemory,
     }), [messages, translationMemory]);
 
-    const mergeRuntimeTranslations = useCallback((targetLocale, phrases) => {
-        if (!phrases || typeof phrases !== "object") return;
-
-        const cleanPhrases = Object.entries(phrases).reduce((acc, [source, translated]) => {
-            const key = normalizeText(source);
-            if (key && typeof translated === "string" && translated.trim()) {
-                acc[key] = translated;
-            }
-            return acc;
-        }, {});
-
-        if (!Object.keys(cleanPhrases).length) return;
-
-        setCatalogs((currentCatalogs) => {
-            const currentCatalog = normalizeCatalog(currentCatalogs[targetLocale] || emptyCatalog);
-            return {
-                ...currentCatalogs,
-                [targetLocale]: {
-                    ...currentCatalog,
-                    phrases: { ...currentCatalog.phrases, ...cleanPhrases },
-                },
-            };
-        });
-
-        if (targetLocale === localeRef.current) {
-            setMessages((currentMessages) => ({
-                ...currentMessages,
-                phrases: { ...(currentMessages.phrases || {}), ...cleanPhrases },
-            }));
-        }
-    }, []);
-
     const t = useCallback((key, fallback = key, variables = {}) => {
         const translated = getNestedValue(messages, key);
         return interpolate(typeof translated === "string" ? translated : fallback, variables);
@@ -596,13 +524,7 @@ export default function I18nProvider({ children }) {
         <I18nContext.Provider value={contextValue}>
             {children}
             <DialogTranslator messages={activeMessages} isReady={isReady} />
-            <RuntimeTranslator
-                messages={activeMessages}
-                isReady={isReady}
-                locale={locale}
-                defaultLocale={defaultLocale}
-                onRuntimeTranslations={mergeRuntimeTranslations}
-            />
+            <PageTranslator messages={activeMessages} isReady={isReady} />
         </I18nContext.Provider>
     );
 }

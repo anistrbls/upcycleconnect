@@ -342,6 +342,7 @@ export default function ProfessionalAvailableDetailPage() {
                                     <img
                                         src={photos[activePhoto]}
                                         alt={item.title}
+                                        data-i18n-user-content="true"
                                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
                                     />
                                 )}
@@ -422,7 +423,7 @@ export default function ProfessionalAvailableDetailPage() {
                                     <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.38rem" }}>{label}</div>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.94rem", fontWeight: "600", color: "var(--text-main)", lineHeight: "1.45" }}>
                                         <span style={{ color: "var(--forest-deep)", display: "flex", flexShrink: 0 }}>{icon}</span>
-                                        <span>{val}</span>
+                                        <span data-i18n-user-content="true">{val}</span>
                                     </div>
                                 </div>
                             ))}
@@ -434,7 +435,7 @@ export default function ProfessionalAvailableDetailPage() {
                         <div style={{ background: "#F7F8F7", borderRadius: "24px", padding: "1rem", border: "none", display: "flex", flexDirection: "column", justifyContent: "flex-start", minHeight: 0 }}>
                             <div>
                                 <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>Vue professionnel</div>
-                                <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: "1.12", letterSpacing: "-0.03em" }}>{item.title}</h1>
+                                <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: "1.12", letterSpacing: "-0.03em" }} data-i18n-user-content="true">{item.title}</h1>
                                 {isDon ? (
                                     <div style={{ fontSize: "1.5rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>Gratuit</div>
                                 ) : saleModeAdded && feeCents > 0 ? (
@@ -625,7 +626,7 @@ export default function ProfessionalAvailableDetailPage() {
                                     <Box size={18} />
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text-main)" }}>{item.depositPointName ? item.depositPointName : `Ville : ${item.city || "Non renseignée"}`}</div>
+                                    <div style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text-main)" }} data-i18n-user-content="true">{item.depositPointName ? item.depositPointName : `Ville : ${item.city || "Non renseignée"}`}</div>
                                     <div style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{item.containerName || "Point à assigner après réservation"}</div>
                                     <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.18rem", lineHeight: "1.45" }}>{depositAddress}</div>
                                 </div>
@@ -639,7 +640,7 @@ export default function ProfessionalAvailableDetailPage() {
                         <span style={sectionLabel}>Description</span>
                         <div style={{ display: "grid", gap: "1rem", maxWidth: "78ch" }}>
                             <p style={{ fontSize: "0.98rem", lineHeight: "1.9", color: "var(--text-main)", margin: 0 }}>
-                                {item.description || "Aucune description fournie."}
+                                {item.description ? <span data-i18n-user-content="true">{item.description}</span> : "Aucune description fournie."}
                             </p>
                         </div>
                     </section>

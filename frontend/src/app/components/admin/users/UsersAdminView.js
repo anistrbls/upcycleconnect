@@ -273,7 +273,7 @@ export default function UsersAdminView({ subpage }) {
                                                     onMouseEnter={(e) => e.currentTarget.style.background = "#f5f5f5"}
                                                     onMouseLeave={(e) => e.currentTarget.style.background = String(s.id) === String(selectedPlanningEmployee) ? "#f0f7f7" : "transparent"}
                                                 >
-                                                    {s.firstname} {s.lastname}
+                                                    <span data-i18n-user-content="true">{s.firstname} {s.lastname}</span>
                                                 </div>
                                             ))
                                         }

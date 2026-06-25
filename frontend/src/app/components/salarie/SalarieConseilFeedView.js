@@ -53,7 +53,7 @@ function SalarieConseilCard({ item, isOwn, onDetail, onEdit, onDelete, delay = 0
             )}
             <div className="conseil-card-head">
                 <div className="conseil-card-head__author">
-                    <span className="conseil-card-head__name">{item.authorName}</span>
+                    <span className="conseil-card-head__name" data-i18n-user-content="true">{item.authorName}</span>
                     <IcVerified />
                     <span style={{ color: "#71767B", fontSize: "0.84rem" }}>·</span>
                     <span className="conseil-card-head__date">{formatDateFR(item.createdAt)}</span>
@@ -74,7 +74,7 @@ function SalarieConseilCard({ item, isOwn, onDetail, onEdit, onDelete, delay = 0
             {item.rejectionComment && (
                 <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.85rem", borderRadius: "12px", background: "#FDE8E8", border: "1px solid #f5c6c6" }}>
                     <p style={{ fontSize: "0.78rem", fontWeight: 600, color: "#B24A4A", margin: "0 0 0.15rem 0" }}>Motif de refus</p>
-                    <p style={{ fontSize: "0.8rem", color: "#B24A4A", margin: 0 }}>{item.rejectionComment}</p>
+                    <p style={{ fontSize: "0.8rem", color: "#B24A4A", margin: 0 }} data-i18n-user-content="true">{item.rejectionComment}</p>
                 </div>
             )}
             {!workspaceCard && (

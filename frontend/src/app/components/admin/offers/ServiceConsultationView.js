@@ -321,6 +321,7 @@ export default function ServiceConsultationView({ serviceId }) {
                                     <img
                                         src={currentPhoto}
                                         alt={service.name}
+                                        data-i18n-user-content="true"
                                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
                                     />
                                 )
@@ -392,11 +393,11 @@ export default function ServiceConsultationView({ serviceId }) {
                                 Consultation prestation
                             </div>
                             <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: 1.12 }}>
-                                {service.name}
+                                <span data-i18n-user-content="true">{service.name}</span>
                             </h1>
                             {service.shortDescription ? (
                                 <p style={{ fontSize: "0.95rem", color: "var(--text-muted)", margin: "0 0 0.7rem", lineHeight: 1.5 }}>
-                                    {service.shortDescription}
+                                    <span data-i18n-user-content="true">{service.shortDescription}</span>
                                 </p>
                             ) : null}
                             <div style={{ fontSize: "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>
@@ -404,7 +405,7 @@ export default function ServiceConsultationView({ serviceId }) {
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", color: "var(--text-muted)", fontSize: "0.84rem", marginBottom: "1rem" }}>
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                                    <Tag size={12} /> {service.categoryName || "—"}
+                                    <Tag size={12} /> {service.categoryName ? <span data-i18n-user-content="true">{service.categoryName}</span> : "—"}
                                 </span>
                                 {service.durationMinutes > 0 ? (
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
@@ -494,7 +495,7 @@ export default function ServiceConsultationView({ serviceId }) {
                                             fontWeight: 600,
                                         }}
                                     >
-                                        <Users size={14} /> {p.name || `Expert #${p.id}`}
+                                        <Users size={14} /> {p.name ? <span data-i18n-user-content="true">{p.name}</span> : <>Expert #{p.id}</>}
                                     </span>
                                 ))}
                             </div>
@@ -518,9 +519,9 @@ export default function ServiceConsultationView({ serviceId }) {
                             <tbody>
                                 {serviceBookings.slice(0, 8).map((b) => (
                                     <tr key={b.id} style={{ borderBottom: "1px solid #F0F5F5" }}>
-                                        <td style={{ padding: "0.55rem 0.65rem" }}>{b.userName}</td>
+                                        <td style={{ padding: "0.55rem 0.65rem" }} data-i18n-user-content="true">{b.userName}</td>
                                         <td style={{ padding: "0.55rem 0.65rem", whiteSpace: "nowrap" }}>{formatDateTimeFR(b.bookingDate)}</td>
-                                        <td style={{ padding: "0.55rem 0.65rem" }}>{b.employeeName || "—"}</td>
+                                        <td style={{ padding: "0.55rem 0.65rem" }}>{b.employeeName ? <span data-i18n-user-content="true">{b.employeeName}</span> : "—"}</td>
                                         <td style={{ padding: "0.55rem 0.65rem" }}>{b.status}</td>
                                         <td style={{ padding: "0.55rem 0.65rem" }}>{b.paymentStatus}</td>
                                         <td style={{ padding: "0.55rem 0.65rem", fontWeight: 600 }}>{Number(b.amount).toFixed(2)} €</td>
@@ -543,7 +544,7 @@ export default function ServiceConsultationView({ serviceId }) {
                             <div style={{ display: "grid", gap: "1rem", maxWidth: "78ch" }}>
                                 {descriptionParts.map((part, index) => (
                                     <p key={index} style={{ fontSize: "0.98rem", lineHeight: 1.9, color: "var(--text-main)", margin: 0, whiteSpace: "pre-wrap" }}>
-                                        {part}
+                                        <span data-i18n-user-content="true">{part}</span>
                                     </p>
                                 ))}
                             </div>
@@ -555,18 +556,20 @@ export default function ServiceConsultationView({ serviceId }) {
                         <span style={sectionLabel}>Détails</span>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem 1.2rem" }}>
                             {[
-                                { label: "Catégorie", val: service.categoryName || "—" },
+                                { label: "Catégorie", val: service.categoryName || "—", userContent: Boolean(service.categoryName) },
                                 { label: "Statut", val: STATUS_LABELS[statusKey] || statusKey },
                                 { label: "Durée", val: service.durationMinutes > 0 ? `${service.durationMinutes} min` : "—" },
                                 { label: "Type d'offre", val: bookingMode === "booking" ? "Réservation" : "Demande" },
                                 { label: "Créée le", val: formatDateTimeFR(service.createdAt) },
                                 { label: "Photos", val: `${photos.length} média${photos.length > 1 ? "s" : ""}` },
-                            ].map(({ label, val }) => (
+                            ].map(({ label, val, userContent }) => (
                                 <div key={label} style={{ paddingBottom: "0.85rem", borderBottom: "1px solid rgba(35,59,61,0.08)" }}>
                                     <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.38rem" }}>
                                         {label}
                                     </div>
-                                    <div style={{ fontSize: "0.94rem", fontWeight: "600", color: "var(--text-main)" }}>{val}</div>
+                                    <div style={{ fontSize: "0.94rem", fontWeight: "600", color: "var(--text-main)" }}>
+                                        {userContent ? <span data-i18n-user-content="true">{val}</span> : val}
+                                    </div>
                                 </div>
                             ))}
                         </div>

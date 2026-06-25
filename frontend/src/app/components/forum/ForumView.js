@@ -125,11 +125,11 @@ function ForumTopicList({ topics, loading, onSelect, onNew, role }) {
                         <Avatar name={t.authorName} size={40} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.15rem" }}>
-                                <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#0F1419", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+                                <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#0F1419", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} data-i18n-user-content="true">{t.title}</span>
                                 <StatusBadge status={t.status} />
                             </div>
                             <div style={{ fontSize: "0.78rem", color: "#71767B", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                                <span>{t.authorName}</span>
+                                <span data-i18n-user-content="true">{t.authorName}</span>
                                 <span>·</span>
                                 <span>{formatDateFR(t.createdAt)}</span>
                             </div>
@@ -290,7 +290,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                 <button className="back-btn" onClick={onBack} title="Retour"><IcBack /></button>
                 <div className="title-area" style={{ flex: 1, minWidth: 0 }}>
                     <span className="activities-label">Forum</span>
-                    <h1 style={{ fontSize: "1.6rem", overflow: "hidden", textOverflow: "ellipsis" }}>{topic.title}</h1>
+                    <h1 style={{ fontSize: "1.6rem", overflow: "hidden", textOverflow: "ellipsis" }} data-i18n-user-content="true">{topic.title}</h1>
                 </div>
                 <div style={{ display: "flex", gap: "0.5rem", alignSelf: "flex-end", marginBottom: "0.5rem", flexWrap: "wrap" }}>
                     <StatusBadge status={topic.status} />
@@ -338,7 +338,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                     <Avatar name={topic.authorName} size={40} />
                     <div style={{ flex: 1 }}>
                         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem", flexWrap: "wrap" }}>
-                            <span style={{ fontWeight: 700, fontSize: "0.93rem" }}>{topic.authorName}</span>
+                            <span style={{ fontWeight: 700, fontSize: "0.93rem" }} data-i18n-user-content="true">{topic.authorName}</span>
                             <span style={{ color: "#71767B", fontSize: "0.8rem" }}>· {formatDateFR(topic.createdAt)}</span>
                             {!topic.isOwn && (
                                 <button
@@ -352,7 +352,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                             )}
                         </div>
                         {topic.content ? (
-                            <p style={{ fontSize: "0.93rem", lineHeight: 1.7, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }}>{topic.content}</p>
+                            <p style={{ fontSize: "0.93rem", lineHeight: 1.7, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }} data-i18n-user-content="true">{topic.content}</p>
                         ) : null}
                         <ForumPhotosGrid photos={topic.photos} />
                     </div>
@@ -382,7 +382,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                         <Avatar name={r.authorName} size={34} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.3rem", flexWrap: "wrap" }}>
-                                <span style={{ fontWeight: 700, fontSize: "0.88rem" }}>{r.authorName}</span>
+                                <span style={{ fontWeight: 700, fontSize: "0.88rem" }} data-i18n-user-content="true">{r.authorName}</span>
                                 <span style={{ color: "#71767B", fontSize: "0.78rem" }}>· {formatDateFR(r.createdAt)}</span>
                             </div>
                             {editReplyId === r.id ? (
@@ -401,7 +401,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                             ) : (
                                 <>
                                     {r.content ? (
-                                        <p style={{ fontSize: "0.9rem", lineHeight: 1.65, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }}>{r.content}</p>
+                                        <p style={{ fontSize: "0.9rem", lineHeight: 1.65, color: "#0F1419", whiteSpace: "pre-wrap", margin: 0 }} data-i18n-user-content="true">{r.content}</p>
                                     ) : null}
                                     <ForumPhotosGrid photos={r.photos} />
                                 </>

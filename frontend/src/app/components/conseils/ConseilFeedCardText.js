@@ -36,18 +36,18 @@ export default function ConseilFeedCardText({
     return (
         <div className="conseil-card-text">
             {item?.title && (
-                <h3 className="conseil-card-text__title">{item.title}</h3>
+                <h3 className="conseil-card-text__title" data-i18n-user-content="true">{item.title}</h3>
             )}
 
             {summary && (
-                <p className="conseil-card-text__summary">{summary}</p>
+                <p className="conseil-card-text__summary" data-i18n-user-content="true">{summary}</p>
             )}
 
             <ConseilCardFactsStrip item={item} />
 
             {showBody && (
                 <div className="conseil-card-text__body-wrap">
-                    <p className="conseil-card-text__body">
+                    <p className="conseil-card-text__body" data-i18n-user-content="true">
                         {hasMaterialsIntro && <ConseilMaterialsIntro materials={item?.materials} />}
                         {hasMaterialsIntro && displayCore && (
                             <>

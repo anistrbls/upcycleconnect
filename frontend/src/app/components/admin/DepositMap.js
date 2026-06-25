@@ -109,6 +109,7 @@ export default function DepositMap({ points = [], onPointClick }) {
                     <img
                       src={point.photos[0]}
                       alt={point.name}
+                      data-i18n-user-content="true"
                       style={{
                         width: "100%",
                         height: "96px",
@@ -119,8 +120,8 @@ export default function DepositMap({ points = [], onPointClick }) {
                       }}
                     />
                   )}
-                  <strong style={{ fontSize: "1rem", lineHeight: 1.3, display: "block" }}>{point.name}</strong>
-                  <span style={{ fontSize: "0.85rem", color: "#666" }}>{point.address}</span>
+                  <strong style={{ fontSize: "1rem", lineHeight: 1.3, display: "block" }} data-i18n-user-content="true">{point.name}</strong>
+                  <span style={{ fontSize: "0.85rem", color: "#666" }} data-i18n-user-content="true">{point.address}</span>
                   <div
                     style={{
                       marginTop: "0.65rem",

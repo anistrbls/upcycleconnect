@@ -270,7 +270,7 @@ export default function ServiceFormView({ categories, employees = [], initialDat
                                 >
                                     <option value="">Choisir une catégorie</option>
                                     {categories.map((item) => (
-                                        <option key={item.id} value={String(item.id)}>{item.name}</option>
+                                        <option key={item.id} value={String(item.id)} data-i18n-user-content="true">{item.name}</option>
                                     ))}
                                 </select>
                             </div>
@@ -515,4 +515,3 @@ export default function ServiceFormView({ categories, employees = [], initialDat
         </div>
     );
 }
-

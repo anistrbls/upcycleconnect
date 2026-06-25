@@ -477,7 +477,7 @@ function ProjetsPostesContent() {
                                 <div style={styles.mediaSplit}>
                                     <div style={styles.mediaPane}>
                                         {beforeSrc ? (
-                                            <img src={beforeSrc} alt={`Avant - ${project.title || "Projet"}`} style={styles.paneImage} />
+                                            <img src={beforeSrc} alt={`Avant - ${project.title || "Projet"}`} style={styles.paneImage} data-i18n-user-content="true" />
                                         ) : (
                                             <div style={styles.paneFallback}>Avant</div>
                                         )}
@@ -485,7 +485,7 @@ function ProjetsPostesContent() {
                                     </div>
                                     <div style={styles.mediaPane}>
                                         {afterSrc ? (
-                                            <img src={afterSrc} alt={`Après - ${project.title || "Projet"}`} style={styles.paneImage} />
+                                            <img src={afterSrc} alt={`Après - ${project.title || "Projet"}`} style={styles.paneImage} data-i18n-user-content="true" />
                                         ) : (
                                             <div style={styles.paneFallback}>Apres</div>
                                         )}
@@ -505,13 +505,17 @@ function ProjetsPostesContent() {
                         <div style={styles.cardOverlay}>
                             <div style={styles.contentGrid} className="card-content-grid">
                                 <div style={styles.descriptionWrap}>
-                                    <h3 style={styles.cardTitle}>{project.title || `Projet #${project.id}`}</h3>
+                                    <h3 style={styles.cardTitle}>
+                                        {project.title ? <span data-i18n-user-content="true">{project.title}</span> : <>Projet #{project.id}</>}
+                                    </h3>
                                     <p style={styles.meta}>
-                                        {project.category || "Catégorie non définie"} · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
+                                        {project.category ? <span data-i18n-user-content="true">{project.category}</span> : "Catégorie non définie"} · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
                                     </p>
-                                    <p style={styles.description}>{project.description || "Description non renseignée."}</p>
+                                    <p style={styles.description}>
+                                        {project.description ? <span data-i18n-user-content="true">{project.description}</span> : "Description non renseignée."}
+                                    </p>
                                     <div style={styles.tagsRow}>
-                                        {project.category ? <span style={styles.tag}>{project.category}</span> : null}
+                                        {project.category ? <span style={styles.tag} data-i18n-user-content="true">{project.category}</span> : null}
                                         <span style={styles.tag}>{project.itemCount || 0} objet(s)</span>
                                         <span style={styles.tag}>{Number(project.upcyclingScore || 0).toFixed(1)} points UC</span>
                                         <span style={styles.tag}>{Number(project.totalWeightKg || 0).toFixed(1)} kg revalorisés</span>
@@ -522,14 +526,14 @@ function ProjetsPostesContent() {
                                     <div style={styles.proHeader}>
                                         <div style={styles.proAvatar}>
                                             {proAvatarUrl ? (
-                                                <img src={proAvatarUrl} alt={proName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                                <img src={proAvatarUrl} alt={proName} style={{ width: "100%", height: "100%", objectFit: "cover" }} data-i18n-user-content="true" />
                                             ) : (
                                                 <span>{proInitials}</span>
                                             )}
                                         </div>
                                         <div>
                                             <p style={styles.proHeading}>Professionnel</p>
-                                            <p style={styles.proName}>{proName}</p>
+                                            <p style={styles.proName} data-i18n-user-content="true">{proName}</p>
                                         </div>
                                     </div>
                                     <div style={styles.proStatsRow}>

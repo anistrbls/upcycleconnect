@@ -102,15 +102,15 @@ export default function ContentModerationView({ contents = [], loading, errorMes
                     <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "1rem", alignItems: "start", padding: "1rem 0", borderBottom: "1px solid #EAF0F1" }}>
                         <div style={{ minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.3rem" }}>
-                                <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>{item.title}</span>
+                                <span style={{ fontWeight: 600, fontSize: "0.95rem" }} data-i18n-user-content="true">{item.title}</span>
                                 <span className="db-badge" style={{ background: "#EAF4FF", textTransform: "capitalize" }}>
                                     {TYPE_LABELS[item.type] || item.type}
                                 </span>
                                 {item.authorName && (
-                                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>par {item.authorName}</span>
+                                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>par <span data-i18n-user-content="true">{item.authorName}</span></span>
                                 )}
                             </div>
-                            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.5, maxHeight: "3rem", overflow: "hidden" }}>{item.body}</p>
+                            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.5, maxHeight: "3rem", overflow: "hidden" }} data-i18n-user-content="true">{item.body}</p>
                         </div>
                         <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0, paddingTop: "0.15rem" }}>
                             <button
@@ -136,7 +136,7 @@ export default function ContentModerationView({ contents = [], loading, errorMes
 
             <AdminModal
                 open={!!rejectTarget}
-                title={`Refuser : ${rejectTarget?.title || ""}`}
+                title={<>Refuser : <span data-i18n-user-content="true">{rejectTarget?.title || ""}</span></>}
                 onClose={() => setRejectTarget(null)}
             >
                 <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "0.75rem" }}>

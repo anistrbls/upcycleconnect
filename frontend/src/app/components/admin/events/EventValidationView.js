@@ -148,6 +148,7 @@ export default function EventValidationView({ events = [], loading, errorMessage
                                         alt={event.name}
                                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
                                         onError={(e) => { e.currentTarget.style.display = "none"; }}
+                                        data-i18n-user-content="true"
                                     />
                                 )}
                                 <div style={{ position: "absolute", inset: 0, backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", maskImage: "linear-gradient(to top, black 0%, black 40%, transparent 65%)", WebkitMaskImage: "linear-gradient(to top, black 0%, black 40%, transparent 65%)", pointerEvents: "none" }} />
@@ -162,7 +163,7 @@ export default function EventValidationView({ events = [], loading, errorMessage
                                 <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "1.5rem", display: "flex", flexDirection: "column", gap: "0.75rem", zIndex: 2 }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "0.75rem" }}>
                                         <h3 style={{ margin: 0, color: "white", fontWeight: 700, fontSize: "1.25rem", lineHeight: 1.2, flex: 1 }}>
-                                            {event.name}
+                                            <span data-i18n-user-content="true">{event.name}</span>
                                         </h3>
                                         <div style={{ padding: "5px 14px", borderRadius: "999px", background: "rgba(255, 255, 255, 0.15)", color: "white", fontSize: "0.88rem", fontWeight: 700, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255, 255, 255, 0.25)", whiteSpace: "nowrap" }}>
                                             {event.pricingType === "payant" && Number(event.price) > 0 ? `${Number(event.price).toLocaleString("fr-FR")} €` : "Gratuit"}
@@ -178,7 +179,7 @@ export default function EventValidationView({ events = [], loading, errorMessage
                                         {event.lieu && (
                                             <>
                                                 <span style={{ opacity: 0.5 }}>•</span>
-                                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.lieu}</span>
+                                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} data-i18n-user-content="true">{event.lieu}</span>
                                             </>
                                         )}
                                     </div>
@@ -191,7 +192,7 @@ export default function EventValidationView({ events = [], loading, errorMessage
                                         )}
                                         {event.intervenant && (
                                             <span style={{ padding: "4px 10px", borderRadius: "999px", background: "rgba(255, 255, 255, 0.08)", fontSize: "0.72rem", color: "rgba(255, 255, 255, 0.8)", fontWeight: 500, border: "1px solid rgba(255, 255, 255, 0.15)" }}>
-                                                Par {event.intervenant}
+                                                Par <span data-i18n-user-content="true">{event.intervenant}</span>
                                             </span>
                                         )}
                                     </div>
@@ -228,7 +229,7 @@ export default function EventValidationView({ events = [], loading, errorMessage
             <AdminModal open={!!validateTarget} title="Confirmer la validation" onClose={() => setValidateTarget(null)}>
                 <div style={{ display: "grid", gap: "1rem" }}>
                     <p style={{ margin: 0, fontSize: "0.95rem", lineHeight: 1.5 }}>
-                        Souhaitez-vous valider l'événement <strong>"{validateTarget?.name}"</strong> ?
+                        Souhaitez-vous valider l'événement <strong data-i18n-user-content="true">"{validateTarget?.name}"</strong> ?
                         Il deviendra alors visible par tous les utilisateurs.
                     </p>
                     {localError && <p style={{ color: "#a23b3b", fontSize: "0.85rem", margin: 0 }}>{localError}</p>}
@@ -243,7 +244,7 @@ export default function EventValidationView({ events = [], loading, errorMessage
                 </div>
             </AdminModal>
 
-            <AdminModal open={!!rejectTarget} title={`Refuser : ${rejectTarget?.name || ""}`} onClose={() => setRejectTarget(null)}>
+            <AdminModal open={!!rejectTarget} title={<>Refuser : <span data-i18n-user-content="true">{rejectTarget?.name || ""}</span></>} onClose={() => setRejectTarget(null)}>
                 <form onSubmit={handleRejectSubmit} style={{ display: "grid", gap: "1rem" }}>
                     <label style={labelStyle}>
                         Motif du refus (optionnel)

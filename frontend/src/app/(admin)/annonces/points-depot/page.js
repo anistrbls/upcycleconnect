@@ -430,6 +430,7 @@ function PointsDepotContent() {
                                     src={point.photos[0]}
                                     alt={point.name}
                                     style={{ width: "100%", height: "180px", objectFit: "cover", borderRadius: "20px", marginBottom: "0.2rem" }}
+                                    data-i18n-user-content="true"
                                 />
                             )}
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -441,9 +442,9 @@ function PointsDepotContent() {
                             </div>
                             
                             <div>
-                                <h3 style={{ margin: "0 0 0.4rem 0", fontSize: "1.2rem", fontWeight: "700" }}>{point.name}</h3>
+                                <h3 style={{ margin: "0 0 0.4rem 0", fontSize: "1.2rem", fontWeight: "700" }} data-i18n-user-content="true">{point.name}</h3>
                                 <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                                    <MapPin size={14} /> {point.address}, {point.city}
+                                    <MapPin size={14} /> <span data-i18n-user-content="true">{point.address}, {point.city}</span>
                                 </p>
                             </div>
 
@@ -460,7 +461,7 @@ function PointsDepotContent() {
                             <div style={{ display: "flex", gap: "0.8rem", marginTop: "0.5rem" }}>
                                 <div style={{ flex: 1, background: "#f8fafb", padding: "0.75rem", borderRadius: "16px", textAlign: "center" }}>
                                     <div style={{ fontSize: "0.65rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: "700" }}>Type</div>
-                                    <div style={{ fontSize: "0.9rem", fontWeight: "700", marginTop: "0.2rem" }}>{point.type}</div>
+                                    <div style={{ fontSize: "0.9rem", fontWeight: "700", marginTop: "0.2rem" }} data-i18n-user-content="true">{point.type}</div>
                                 </div>
                                 <div style={{ flex: 1, background: "#f8fafb", padding: "0.75rem", borderRadius: "16px", textAlign: "center" }}>
                                     <div style={{ fontSize: "0.65rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: "700" }}>Capacité</div>
@@ -533,8 +534,8 @@ function PointsDepotContent() {
                                                     onMouseEnter={e => e.target.style.background = "#f7f9fa"}
                                                     onMouseLeave={e => e.target.style.background = "white"}
                                                 >
-                                                    <div style={{ fontWeight: "700" }}>{s.properties.name}</div>
-                                                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{s.properties.postcode} {s.properties.city}</div>
+                                                    <div style={{ fontWeight: "700" }} data-i18n-user-content="true">{s.properties.name}</div>
+                                                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }} data-i18n-user-content="true">{s.properties.postcode} {s.properties.city}</div>
                                                 </div>
                                             ))}
                                         </div>
@@ -568,7 +569,7 @@ function PointsDepotContent() {
                                     <select style={styles.input} value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} required>
                                         <option value="">Sélectionner un type...</option>
                                         {types.map(t => (
-                                            <option key={t.id} value={t.label}>{t.label}</option>
+                                            <option key={t.id} value={t.label} data-i18n-user-content="true">{t.label}</option>
                                         ))}
                                     </select>
                                 </div>

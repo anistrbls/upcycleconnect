@@ -2,8 +2,26 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useI18n } from "../../i18n/I18nProvider";
 
-const WEEKDAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+const WEEKDAY_LABELS = {
+    fr: ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"],
+    en: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+};
+
+const DATE_LOCALES = {
+    fr: "fr-FR",
+    en: "en-US",
+};
+
+const getLocaleCode = (locale) => String(locale || "fr").toLowerCase().split("-")[0];
+const getDateLocale = (locale) => DATE_LOCALES[getLocaleCode(locale)] || "fr-FR";
+const getWeekdayLabels = (locale) => WEEKDAY_LABELS[getLocaleCode(locale)] || WEEKDAY_LABELS.fr;
+const getWeekPrefix = (locale) => {
+    const code = getLocaleCode(locale);
+    if (code === "en") return "Week of";
+    return "Sem. du";
+};
 
 const toDayKey = (rawDate) => {
     const date = new Date(rawDate);
@@ -33,6 +51,7 @@ const isSameDay = (left, right) => (
 
 export default function EventPlanningView({ events = [], title = "Planning des √©v√©nements", subtitle = "√âv√©nements", onOpenEvent }) {
     const router = useRouter();
+    const { locale } = useI18n();
     const [viewMode, setViewMode] = useState("month");
     const [currentDate, setCurrentDate] = useState(() => {
         const today = new Date();
@@ -93,10 +112,12 @@ export default function EventPlanningView({ events = [], title = "Planning des √
 
     const selectedDayKey = toDayKey(selectedDate);
     const selectedDayEvents = eventsByDay.get(selectedDayKey) || [];
+    const dateLocale = getDateLocale(locale);
+    const weekdayLabels = getWeekdayLabels(locale);
 
     const monthLabel = viewMode === "month"
-        ? currentDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
-        : `Sem. du ${getStartOfWeek(currentDate).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
+        ? currentDate.toLocaleDateString(dateLocale, { month: "long", year: "numeric" })
+        : `${getWeekPrefix(locale)} ${getStartOfWeek(currentDate).toLocaleDateString(dateLocale, { day: "numeric", month: "short" })}`;
 
     const goToPrevious = () => {
         if (viewMode === "month") {
@@ -164,7 +185,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                         const isSelected = isSameDay(dayDate, selectedDate);
                                         return (
                                             <div key={toDayKey(dayDate)} onClick={() => setSelectedDate(new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate()))} style={{ flex: 1, borderRight: i < 6 ? "1px solid #d7e0e1" : "none", minWidth: "100px", height: "45px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: isToday ? "#EEF3F3" : "#fff", cursor: "pointer", borderBottom: isSelected ? "2px solid #749193" : "2px solid transparent" }}>
-                                                <span style={{ fontSize: "0.7rem", color: isToday ? "var(--text-main)" : "var(--text-muted)", fontWeight: 700, textTransform: "uppercase" }}>{WEEKDAY_LABELS[i]}</span>
+                                                <span style={{ fontSize: "0.7rem", color: isToday ? "var(--text-main)" : "var(--text-muted)", fontWeight: 700, textTransform: "uppercase" }}>{weekdayLabels[i]}</span>
                                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "22px", height: "22px", borderRadius: "999px", background: isToday ? "#CFC0BB" : "transparent", color: isToday ? "var(--text-main)" : "var(--text-main)", fontSize: "0.85rem", fontWeight: 700, marginTop: "2px" }}>
                                                     {dayDate.getDate()}
                                                 </div>
@@ -220,8 +241,8 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                                         const top = (startH - START_HOUR) * HOUR_HEIGHT;
                                                         const height = Math.max((endH - startH) * HOUR_HEIGHT, 25);
 
-                                                        const hourText = start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-                                                        const endText = end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                                                        const hourText = start.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
+                                                        const endText = end.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
 
                                                         return (
                                                             <div
@@ -248,11 +269,11 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                                                     flexDirection: "column",
                                                                     gap: "0.15rem"
                                                                 }}
-                                                                title={`${hourText} - ${endText} | ${item.name}`}
+                                                                title={`${hourText} - ${endText}`}
                                                             >
-                                                                <span style={{ fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{item.name}</span>
+                                                                <span style={{ fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }} data-i18n-user-content="true">{item.name}</span>
                                                                 {height > 35 && <span style={{ opacity: 0.85, fontSize: "0.65rem", fontWeight: 600 }}>{hourText} - {endText}</span>}
-                                                                {height > 55 && item.lieu && <span style={{ opacity: 0.75, fontSize: "0.65rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>üìç {item.lieu}</span>}
+                                                                {height > 55 && item.lieu && <span style={{ opacity: 0.75, fontSize: "0.65rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} data-i18n-user-content="true">üìç {item.lieu}</span>}
                                                             </div>
                                                         );
                                                     })}
@@ -266,7 +287,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                     );
                 })() : (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: "0.5rem" }}>
-                        {WEEKDAY_LABELS.map((label) => (
+                        {weekdayLabels.map((label) => (
                             <div key={label} style={{ textAlign: "center", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, padding: "0.35rem 0" }}>
                                 {label}
                             </div>
@@ -323,7 +344,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                             const start = new Date(item.dateDebut);
                                             const hourText = Number.isNaN(start.getTime())
                                                 ? "--:--"
-                                                : start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                                                : start.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
 
                                             return (
                                                 <span
@@ -348,9 +369,9 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                                         textOverflow: "ellipsis",
                                                         whiteSpace: "nowrap",
                                                     }}
-                                                    title={`${hourText} - ${item.name}`}
+                                                    title={hourText}
                                                 >
-                                                    {hourText} {item.name}
+                                                    {hourText} <span data-i18n-user-content="true">{item.name}</span>
                                                 </span>
                                             );
                                         })}
@@ -367,7 +388,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                 <div style={{ background: "#F8FBFB", borderRadius: "16px", padding: "0.95rem" }}>
                     <div className="section-header" style={{ marginBottom: "0.5rem" }}>
                         <span className="section-title" style={{ fontSize: "0.98rem" }}>
-                            {selectedDate.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
+                            {selectedDate.toLocaleDateString(dateLocale, { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
                         </span>
                         <span className="db-badge">{selectedDayEvents.length} √©v√©nement(s)</span>
                     </div>
@@ -381,10 +402,10 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                 const end = new Date(item.dateFin);
                                 const startText = Number.isNaN(start.getTime())
                                     ? "--:--"
-                                    : start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                                    : start.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
                                 const endText = Number.isNaN(end.getTime())
                                     ? "--:--"
-                                    : end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                                    : end.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
 
                                 return (
                                     <button
@@ -420,12 +441,14 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                         </div>
                                         <div style={{ flex: 1, display: "grid", gap: "0.25rem" }}>
                                             <div style={{ display: "flex", justifyContent: "space-between", gap: "0.7rem", alignItems: "center" }}>
-                                                <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>{item.name}</span>
+                                                <span style={{ fontWeight: 700, fontSize: "0.95rem" }} data-i18n-user-content="true">{item.name}</span>
                                                 <span className="db-badge" style={{ background: item.status === "valide" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>{item.status}</span>
                                             </div>
                                             <div style={{ display: "flex", flexDirection: "column" }}>
                                                 <span style={{ color: "var(--text-muted)", fontSize: "0.82rem", fontWeight: 500 }}>{startText} - {endText}</span>
-                                                <span style={{ fontSize: "0.84rem", color: "var(--text-main)", opacity: 0.8 }}>{item.lieu || "Lieu √† confirmer"}</span>
+                                                <span style={{ fontSize: "0.84rem", color: "var(--text-main)", opacity: 0.8 }}>
+                                                    {item.lieu ? <span data-i18n-user-content="true">{item.lieu}</span> : "Lieu √† confirmer"}
+                                                </span>
                                             </div>
                                         </div>
                                     </button>

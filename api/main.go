@@ -138,7 +138,6 @@ func main() {
 	})
 	mux.HandleFunc("GET /api/i18n/languages", i18nLanguagesPublicHandler)
 	mux.HandleFunc("GET /api/i18n/messages/{locale}", i18nMessagesPublicHandler)
-	mux.HandleFunc("POST /api/i18n/translate", i18nTranslatePublicHandler)
 	mux.Handle("/api/auth/me", authMiddleware(http.HandlerFunc(meHandler)))
 	mux.Handle("/api/admin/i18n/languages", authMiddleware(http.HandlerFunc(i18nLanguagesAdminHandler)))
 	mux.Handle("/api/admin/i18n/languages/", authMiddleware(http.HandlerFunc(i18nLanguageByCodeAdminHandler)))

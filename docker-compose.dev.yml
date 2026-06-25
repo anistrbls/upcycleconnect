@@ -64,7 +64,6 @@ services:
       # Compte admin créé automatiquement au démarrage
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@upcycleconnect.fr}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin1234}
-      - DEEPL_AUTH_KEY=${DEEPL_AUTH_KEY:-}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL:-http://localhost:3000/annonces/mes-recuperations?stripe=success&session_id={CHECKOUT_SESSION_ID}}

@@ -132,7 +132,6 @@ Cette commande reconstruit localement `api` et `frontend` puis démarre les serv
 | `JWT_EXPIRES_HOURS` | Durée du token |
 | `ADMIN_EMAIL` | Email admin par défaut |
 | `ADMIN_PASSWORD` | Mot de passe admin par défaut |
-| `DEEPL_AUTH_KEY` | Clé API DeepL utilisée par le backend pour traduire automatiquement l'interface et mettre les résultats en cache |
 | `NEXT_PUBLIC_API_URL` | URL API exposee au navigateur (`/api` recommande) |
 | `API_INTERNAL_URL` | URL API utilisee par Next.js cote serveur/proxy |
 | `STRIPE_SECRET_KEY` | Cle secrete Stripe (test/prod) |

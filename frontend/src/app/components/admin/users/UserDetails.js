@@ -64,7 +64,7 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
     const isSalarie = user.role === "salarie";
 
     return (
-        <AdminModal open={open} title={currentTab === "rules" ? `Règles de travail - ${user.firstname}` : "Fiche utilisateur"} onClose={onClose}>
+        <AdminModal open={open} title={currentTab === "rules" ? "Règles de travail" : "Fiche utilisateur"} onClose={onClose}>
             <div style={{ display: "grid", gap: "0.9rem" }}>
                 
                 {/* Tabs for Salarie */}
@@ -104,8 +104,8 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
 
                         {/* Rôle & statut */}
                         <Section title="Compte">
-                            <Row label="Rôle"   value={ROLE_LABELS[user.role] ?? user.role} />
-                            <Row label="Statut" value={STATUS_LABELS[user.status] ?? user.status} />
+                            <Row label="Rôle"   value={ROLE_LABELS[user.role] ?? user.role} translateValue />
+                            <Row label="Statut" value={STATUS_LABELS[user.status] ?? user.status} translateValue />
                         </Section>
 
                         {/* Professionnel */}
@@ -116,9 +116,9 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
                                 {user.siret            && <Row label="SIRET"               value={user.siret} />}
                                 {user.address          && <Row label="Adresse"             value={user.address} />}
                                 {user.zipCode          && <Row label="Code postal"          value={user.zipCode} />}
-                                {user.activityType     && <Row label="Type d'activité"      value={ACTIVITY_TYPE_LABELS[user.activityType] ?? user.activityType} />}
+                                {user.activityType     && <Row label="Type d'activité"      value={ACTIVITY_TYPE_LABELS[user.activityType] ?? user.activityType} translateValue />}
                                 {user.interventionZone && <Row label="Zone d'intervention"  value={user.interventionZone} />}
-                                <Row label="Abonnement" value={SUBSCRIPTION_LABELS[user.subscriptionType] ?? user.subscriptionType} />
+                                <Row label="Abonnement" value={SUBSCRIPTION_LABELS[user.subscriptionType] ?? user.subscriptionType} translateValue />
                                 {user.subscriptionStart && <Row label="Début abonnement" value={formatDateFR(user.subscriptionStart)} />}
                             </Section>
                         )}
@@ -126,9 +126,9 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
                         {/* Salarié */}
                         {isSalarie && (
                             <Section title="Informations salarié">
-                                {user.employeeRole     && <Row label="Type de rôle"        value={EMPLOYEE_ROLE_LABELS[user.employeeRole] ?? user.employeeRole} />}
-                                {user.employmentStatus && <Row label="Statut d'emploi"     value={EMP_STATUS_LABELS[user.employmentStatus] ?? user.employmentStatus} />}
-                                {user.jobFunction      && <Row label="Fonction"             value={JOB_FUNCTION_LABELS[user.jobFunction] ?? user.jobFunction} />}
+                                {user.employeeRole     && <Row label="Type de rôle"        value={EMPLOYEE_ROLE_LABELS[user.employeeRole] ?? user.employeeRole} translateValue />}
+                                {user.employmentStatus && <Row label="Statut d'emploi"     value={EMP_STATUS_LABELS[user.employmentStatus] ?? user.employmentStatus} translateValue />}
+                                {user.jobFunction      && <Row label="Fonction"             value={JOB_FUNCTION_LABELS[user.jobFunction] ?? user.jobFunction} translateValue />}
                                 {user.siteLocation     && <Row label="Site rattaché"         value={user.siteLocation} />}
                                 {user.skills           && <Row label="Compétences"           value={user.skills} />}
                             </Section>
@@ -137,7 +137,7 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
                         {/* Admin */}
                         {user.role === "admin" && user.adminRole && (
                             <Section title="Paramètres administrateur">
-                                <Row label="Rôle admin" value={ADMIN_ROLE_LABELS[user.adminRole] ?? user.adminRole} />
+                                <Row label="Rôle admin" value={ADMIN_ROLE_LABELS[user.adminRole] ?? user.adminRole} translateValue />
                             </Section>
                         )}
 
@@ -151,7 +151,7 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
                         {/* Note admin */}
                         {user.adminNote && (
                             <Section title="Note admin">
-                                <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", lineHeight: 1.5 }}>
+                                <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", lineHeight: 1.5 }} data-i18n-user-content="true">
                                     {user.adminNote}
                                 </p>
                             </Section>
@@ -185,11 +185,11 @@ function Section({ title, children }) {
     );
 }
 
-function Row({ label, value }) {
+function Row({ label, value, translateValue = false }) {
     return (
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.875rem", gap: "0.5rem" }}>
             <span style={{ color: "var(--text-muted)", flexShrink: 0 }}>{label}</span>
-            <span style={{ fontWeight: 500, textAlign: "right" }}>{value ?? "–"}</span>
+            <span style={{ fontWeight: 500, textAlign: "right" }} {...(!translateValue ? { "data-i18n-user-content": "true" } : {})}>{value ?? "–"}</span>
         </div>
     );
 }

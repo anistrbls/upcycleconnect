@@ -428,11 +428,11 @@ function FavoritesContent() {
 
                             <div style={styles.cardOverlay}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                                    <h3 style={styles.cardTitle}>{project.title}</h3>
+                                    <h3 style={styles.cardTitle} data-i18n-user-content="true">{project.title}</h3>
                                     <p style={styles.meta}>
-                                        {project.category} · Par {project.proDisplayName}
+                                        <span data-i18n-user-content="true">{project.category}</span> · Par <span data-i18n-user-content="true">{project.proDisplayName}</span>
                                     </p>
-                                    <p style={styles.description}>{project.description}</p>
+                                    <p style={styles.description} data-i18n-user-content="true">{project.description}</p>
                                     <div style={styles.tagsRow}>
                                         <span style={styles.tag}>{Number(project.upcyclingScore).toFixed(1)} points UC</span>
                                         <span style={styles.tag}>{Number(project.totalWeightKg).toFixed(1)} kg sauvés</span>

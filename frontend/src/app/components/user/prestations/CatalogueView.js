@@ -99,6 +99,7 @@ function CatalogueServiceCard({ item, index, onSelect }) {
                         <img
                             src={item.imageUrl}
                             alt={item.name}
+                            data-i18n-user-content="true"
                             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
                             onError={(e) => { e.target.style.display = "none"; }}
                         />
@@ -159,7 +160,7 @@ function CatalogueServiceCard({ item, index, onSelect }) {
                 onClick={(e) => e.stopPropagation()}
             >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "0.75rem" }}>
-                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }}>
+                    <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }} data-i18n-user-content="true">
                         {item.name}
                     </h3>
                     <div style={pricePillStyle}>{formatPrice(item)}</div>
@@ -175,11 +176,12 @@ function CatalogueServiceCard({ item, index, onSelect }) {
                         WebkitBoxOrient: "vertical",
                         overflow: "hidden",
                     }}
+                    data-i18n-user-content="true"
                 >
                     {item.shortDescription || item.description || "Découvrez cette prestation sur UpcycleConnect."}
                 </p>
                 <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                    <span style={tagStyle}>{item.categoryName || "Sans catégorie"}</span>
+                    <span style={tagStyle} data-i18n-user-content="true">{item.categoryName || "Sans catégorie"}</span>
                     {item.durationMinutes > 0 ? <span style={tagStyle}>{item.durationMinutes} min</span> : null}
                     <span style={tagStyle}>{formatTargetAudienceLabel(item.targetAudience)}</span>
                 </div>
@@ -283,8 +285,9 @@ export default function CatalogueView({ services, loading, errorMessage, onReloa
             {!loading && visibleServices.length > 0 ? (
                 <p style={{ margin: "0 0 1rem", color: "var(--text-muted)", fontSize: "0.86rem", display: "flex", alignItems: "center", gap: "0.45rem" }}>
                     <Filter size={15} aria-hidden />
-                    {visibleServices.length} prestation{visibleServices.length > 1 ? "s" : ""}
-                    {hasActiveFilters ? " correspondant à votre recherche" : ` disponible${visibleServices.length > 1 ? "s" : ""}`}
+                    {hasActiveFilters
+                        ? `${visibleServices.length} prestation${visibleServices.length > 1 ? "s" : ""} correspondant à votre recherche`
+                        : `${visibleServices.length} prestation${visibleServices.length > 1 ? "s" : ""} disponible${visibleServices.length > 1 ? "s" : ""}`}
                 </p>
             ) : null}
 

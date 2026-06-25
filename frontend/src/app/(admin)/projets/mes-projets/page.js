@@ -347,6 +347,7 @@ export default function ProjetsList() {
                                     src={p.previewImage}
                                     alt={p.title || "Projet upcycling"}
                                     style={styles.cardImage}
+                                    data-i18n-user-content="true"
                                 />
                             ) : (
                                 <div style={styles.cardFallback}>UpcycleConnect</div>
@@ -357,14 +358,16 @@ export default function ProjetsList() {
 
                             <div style={styles.cardOverlay}>
                                 <div style={styles.cardTop}>
-                                    <h3 style={styles.cardTitle}>{p.title}</h3>
+                                    <h3 style={styles.cardTitle} data-i18n-user-content="true">{p.title}</h3>
                                     <span style={styles.projectPill}>Projet</span>
                                 </div>
-                                <p style={styles.description}>{(p.description || "Projet d'upcycling").slice(0, 120)}{(p.description || "").length > 120 ? "..." : ""}</p>
+                                <p style={styles.description}>
+                                    {p.description ? <span data-i18n-user-content="true">{p.description.slice(0, 120)}{p.description.length > 120 ? "..." : ""}</span> : "Projet d'upcycling"}
+                                </p>
 
                                 <div style={styles.meta}>
                                     {p.category && (
-                                        <span style={styles.metaItem}><Tag size={12} />{p.category}</span>
+                                        <span style={styles.metaItem} data-i18n-user-content="true"><Tag size={12} />{p.category}</span>
                                     )}
                                     <span style={styles.metaItem}><Box size={12} />{p.itemCount} objet{p.itemCount !== 1 ? "s" : ""}</span>
                                     <span style={styles.metaItem}><Calendar size={12} />{formatDate(p.createdAt)}</span>

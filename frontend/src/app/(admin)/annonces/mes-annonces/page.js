@@ -692,6 +692,7 @@ function MesAnnoncesContent() {
                         <img
                             src={annonce.image}
                             alt={annonce.title}
+                            data-i18n-user-content="true"
                             style={styles.cardImage}
                         />
                         <div style={styles.blurLayer} />
@@ -701,17 +702,17 @@ function MesAnnoncesContent() {
                         </div>
                         <div style={styles.cardOverlay}>
                             <div style={styles.titlePriceRow}>
-                                <h3 style={styles.cardTitle}>{annonce.title}</h3>
+                                <h3 style={styles.cardTitle} data-i18n-user-content="true">{annonce.title}</h3>
                                 <div style={styles.pricePill}>
                                     {annonce.type === "don" ? "GRATUIT" : formatBuyerCardPrice(annonce)}
                                 </div>
                             </div>
                             <p style={styles.description}>
-                                {annonce.city} · Publiée le {annonce.date}
+                                <span data-i18n-user-content="true">{annonce.city}</span> · Publiée le <span data-i18n-user-content="true">{annonce.date}</span>
                             </p>
                             {isAdmin && (
                                 <p style={{ ...styles.description, color: "rgba(255,255,255,0.86)" }}>
-                                    Par {getAnnonceAuthor(annonce)}
+                                    Par <span data-i18n-user-content="true">{getAnnonceAuthor(annonce)}</span>
                                 </p>
                             )}
                             <div style={styles.tagsRow}>

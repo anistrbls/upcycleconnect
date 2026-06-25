@@ -209,7 +209,7 @@ export default function EventCategoryAdminView({ categories, loading, errorMessa
                             }}
                         >
                             <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", alignItems: "flex-start" }}>
-                                <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>{item.name}</h3>
+                                <h3 style={{ fontSize: "1rem", fontWeight: 600 }} data-i18n-user-content="true">{item.name}</h3>
                                 <span className="db-badge" style={{ background: item.status === "actif" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>
                                     {item.status}
                                 </span>
@@ -228,7 +228,7 @@ export default function EventCategoryAdminView({ categories, loading, errorMessa
                                     WebkitBoxOrient: "vertical",
                                 }}
                             >
-                                {item.description || "-"}
+                                {item.description ? <span data-i18n-user-content="true">{item.description}</span> : "-"}
                             </p>
 
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem", fontSize: "0.78rem", alignItems: "center" }}>

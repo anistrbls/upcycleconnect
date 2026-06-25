@@ -42,7 +42,7 @@ export default function ResetPasswordModal({ open, user, onClose, onSubmit }) {
         >
             <form onSubmit={handleSubmit} style={{ display: "grid", gap: "1.2rem" }}>
                 <p style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>
-                    Vous allez réinitialiser le mot de passe de <strong>{user.firstname} {user.lastname}</strong> ({user.email}).
+                    Vous allez réinitialiser le mot de passe de <strong data-i18n-user-content="true">{user.firstname} {user.lastname}</strong> (<span data-i18n-user-content="true">{user.email}</span>).
                 </p>
 
                 <label style={labelStyle}>

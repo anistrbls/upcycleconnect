@@ -595,7 +595,7 @@ function SellerRatingBlock({ item, busy, onSubmit }) {
         <div style={styles.detailCard}>
             <p style={styles.detailLabel}>Évaluation du vendeur</p>
             <p style={styles.detailMuted}>
-                <span style={styles.detailMutedEm}>{sellerLabel}</span>
+                <span style={styles.detailMutedEm} data-i18n-user-content="true">{sellerLabel}</span>
                 {displayAvg != null ? (
                     <>
                         {" "}
@@ -880,9 +880,9 @@ export default function MyRecoveriesPage() {
                         <div style={styles.detailRow}>
                             <MapPin size={18} style={styles.detailIcon} aria-hidden />
                             <div style={{ minWidth: 0 }}>
-                                <p style={styles.detailPrimary}>{pointName}</p>
+                                <p style={styles.detailPrimary} data-i18n-user-content="true">{pointName}</p>
                                 <p style={styles.detailMuted}>
-                                    Conteneur / box : <span style={styles.detailMutedEm}>{boxName}</span>
+                                    Conteneur / box : <span style={styles.detailMutedEm} data-i18n-user-content="true">{boxName}</span>
                                 </p>
                             </div>
                         </div>
@@ -902,7 +902,7 @@ export default function MyRecoveriesPage() {
                     {item.transactionRef ? (
                         <div style={styles.detailCard}>
                             <p style={styles.detailLabel}>Référence de transaction</p>
-                            <p style={styles.detailMono}>{item.transactionRef}</p>
+                            <p style={styles.detailMono} data-i18n-user-content="true">{item.transactionRef}</p>
                             <p style={styles.detailMuted}>À conserver pour vos échanges avec le support ou le point de dépôt.</p>
                         </div>
                     ) : null}
@@ -956,16 +956,17 @@ export default function MyRecoveriesPage() {
                                         src={pickupSpotPhoto}
                                         alt={`Lieu de récupération : ${pickupSpotName}`}
                                         style={styles.pickupSpotImage}
+                                        data-i18n-user-content="true"
                                         onError={(e) => {
                                             e.currentTarget.src = "/img/recyclage-materiau.jpg";
                                         }}
                                     />
                                     <div style={styles.pickupSpotBody}>
                                         <p style={{ ...styles.detailLabel, color: "#047857", margin: "0 0 0.35rem 0" }}>Adresse du point</p>
-                                        <p style={styles.detailPrimary}>{pickupSpotName}</p>
+                                        <p style={styles.detailPrimary} data-i18n-user-content="true">{pickupSpotName}</p>
                                         <p style={styles.detailMutedRow}>
                                             <MapPin size={14} style={{ ...styles.detailIcon, marginTop: "0.05rem" }} aria-hidden />
-                                            <span>{pickupSpotAddress}</span>
+                                            <span data-i18n-user-content="true">{pickupSpotAddress}</span>
                                         </p>
                                     </div>
                                 </div>
@@ -1003,7 +1004,7 @@ export default function MyRecoveriesPage() {
                             }}
                         >
                             <p style={{ ...styles.detailLabel, color: "#991b1b" }}>Annulation</p>
-                            <p style={styles.detailErrorText}>{item.cancelReason}</p>
+                            <p style={styles.detailErrorText} data-i18n-user-content="true">{item.cancelReason}</p>
                         </div>
                     )}
 
@@ -1070,14 +1071,16 @@ export default function MyRecoveriesPage() {
                         )}
                     </div>
                     <div style={{ minWidth: 0 }}>
-                        <h3 style={styles.rowTitle}>{item.title || "Sans titre"}</h3>
+                        <h3 style={styles.rowTitle}>
+                            {item.title ? <span data-i18n-user-content="true">{item.title}</span> : "Sans titre"}
+                        </h3>
                         <p style={styles.rowMeta}>
                             <CalendarClock size={12} />
                             {formatDate(item.reservedAt || item.reserved_at)}
                             {item.transactionRef ? (
                                 <>
                                     <span aria-hidden>·</span>
-                                    <span style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>{item.transactionRef}</span>
+                                    <span style={{ fontFamily: "monospace", fontSize: "0.72rem" }} data-i18n-user-content="true">{item.transactionRef}</span>
                                 </>
                             ) : null}
                         </p>

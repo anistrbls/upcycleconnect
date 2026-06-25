@@ -502,7 +502,7 @@ export default function ProjetDetail() {
 
             <div style={styles.headerRow}>
                 <div>
-                    <h1 style={styles.title}>{project.title}</h1>
+                    <h1 style={styles.title} data-i18n-user-content="true">{project.title}</h1>
                     <span style={styles.badge(project.status, moderationStatus)}>{displayStatusLabel}</span>
                 </div>
             </div>
@@ -634,13 +634,13 @@ export default function ProjetDetail() {
                             <div key={item.id} style={styles.itemRow}>
                                 <span style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.92rem", color: "var(--text-main)" }}>
                                     {item.itemImage ? (
-                                        <img src={item.itemImage} alt={item.itemTitle || "Objet"} style={styles.itemThumb} />
+                                        <img src={item.itemImage} alt={item.itemTitle || "Objet"} style={styles.itemThumb} data-i18n-user-content="true" />
                                     ) : null}
                                     <Box size={14} style={{ color: "var(--accent)", flexShrink: 0 }} />
                                     <span>
-                                        {item.itemTitle || `Objet #${item.itemId}`}
+                                        {item.itemTitle ? <span data-i18n-user-content="true">{item.itemTitle}</span> : <>Objet #{item.itemId}</>}
                                         <span style={{ display: "block", color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "0.2rem" }}>
-                                            {item.material || "Matériau non défini"} · {formatItemWeight(item)}
+                                            {item.material ? <span data-i18n-user-content="true">{item.material}</span> : "Matériau non défini"} · {formatItemWeight(item)}
                                         </span>
                                     </span>
                                 </span>
@@ -662,7 +662,7 @@ export default function ProjetDetail() {
                                         defaultValue="">
                                         <option value="">— Choisir un objet —</option>
                                         {availableToAdd.map((ri) => (
-                                            <option key={ri.id} value={ri.id}>{ri.title} ({ri.category})</option>
+                                            <option key={ri.id} value={ri.id} data-i18n-user-content="true">{ri.title} ({ri.category})</option>
                                         ))}
                                     </select>
                                 )}
@@ -869,10 +869,10 @@ export default function ProjetDetail() {
                                                 borderBottom: idx < likers.length - 1 ? "1px solid var(--border)" : "none",
                                             }}
                                         >
-                                            <div style={{ fontWeight: 600, fontSize: "0.95rem", color: "var(--text-main)" }}>
+                                            <div style={{ fontWeight: 600, fontSize: "0.95rem", color: "var(--text-main)" }} data-i18n-user-content="true">
                                                 {liker.displayName || `Utilisateur #${liker.userId}`}
                                             </div>
-                                            <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                                            <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginTop: "0.25rem" }} data-i18n-user-content="true">
                                                 {liker.role || "—"}
                                             </div>
                                         </li>

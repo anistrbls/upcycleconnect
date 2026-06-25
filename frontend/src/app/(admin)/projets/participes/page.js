@@ -568,11 +568,11 @@ function ProjetsParticipesContent() {
                             <div style={styles.cardOverlay}>
                                 <div style={styles.contentGrid} className="card-content-grid">
                                     <div style={styles.descriptionWrap}>
-                                        <h3 style={styles.cardTitle}>{project.title}</h3>
+                                        <h3 style={styles.cardTitle} data-i18n-user-content="true">{project.title}</h3>
                                         <p style={styles.meta}>
-                                            {project.category} · Finalisé le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
+                                            <span data-i18n-user-content="true">{project.category}</span> · Finalisé le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
                                         </p>
-                                        <p style={styles.description}>{project.description}</p>
+                                        <p style={styles.description} data-i18n-user-content="true">{project.description}</p>
                                         <div style={styles.tagsRow}>
                                             <span style={styles.tag}>{project.itemCount} objet(s) au total</span>
                                             <span style={styles.tag}>
@@ -601,7 +601,9 @@ function ProjetsParticipesContent() {
                                         <div style={styles.proStatsRow}>
                                             <div style={styles.proStat}>
                                                 <span style={styles.proStatLabel}>SOCIÉTÉ</span>
-                                                <span style={styles.proStatValue}>{project.companyName || "Professionnel"}</span>
+                                                <span style={styles.proStatValue}>
+                                                    {project.companyName ? <span data-i18n-user-content="true">{project.companyName}</span> : "Professionnel"}
+                                                </span>
                                             </div>
                                         </div>
                                     </aside>

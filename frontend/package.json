@@ -6,7 +6,9 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "i18n:extract": "node scripts/extract-admin-i18n.mjs",
+    "i18n:translate:en": "node scripts/translate-en-local.mjs"
   },
   "dependencies": {
     "jspdf": "^4.2.1",

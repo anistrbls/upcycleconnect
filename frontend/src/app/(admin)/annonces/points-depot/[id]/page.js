@@ -354,7 +354,7 @@ function ContainerManagementContent({ id }) {
                     <ArrowLeft size={20} />
                 </button>
                 <div>
-                    <h1 style={{ fontSize: "2rem", fontWeight: "700", margin: 0 }}>{point?.name}</h1>
+                    <h1 style={{ fontSize: "2rem", fontWeight: "700", margin: 0 }} data-i18n-user-content="true">{point?.name}</h1>
                     <p style={{ color: "var(--text-muted)", margin: 0 }}>Gestion des unités de stockage (Containers)</p>
                 </div>
                 <button 
@@ -372,7 +372,7 @@ function ContainerManagementContent({ id }) {
                             Photos du point de dépôt
                         </div>
                         <div style={{ fontSize: "0.92rem", color: "var(--text-main)", fontWeight: "700" }}>
-                            {point.name}
+                            <span data-i18n-user-content="true">{point.name}</span>
                         </div>
                     </div>
                     <div style={styles.photoStrip}>
@@ -386,7 +386,7 @@ function ContainerManagementContent({ id }) {
                                     background: "#f8fafc",
                                 }}
                             >
-                                <img src={photo} alt={`${point.name} ${index + 1}`} style={styles.photoThumb} />
+                                <img src={photo} alt={`${point.name} ${index + 1}`} style={styles.photoThumb} data-i18n-user-content="true" />
                             </div>
                         ))}
                     </div>
@@ -401,7 +401,7 @@ function ContainerManagementContent({ id }) {
                             <div style={{ display: "flex", justifyContent: "space-between" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                     <Package size={20} color="var(--forest-deep)" />
-                                    <h3 style={{ margin: 0, fontWeight: "700" }}>{c.name}</h3>
+                                    <h3 style={{ margin: 0, fontWeight: "700" }} data-i18n-user-content="true">{c.name}</h3>
                                 </div>
                                 <div style={{ display: "flex", gap: "0.4rem" }}>
                                     <button onClick={() => { setEditingContainer(c); setFormData({ ...c, capacity: String(c.capacity ?? ""), maintenance_reason: c.maintenance_reason || "", maintenance_start: toLocalDateTimeInput(c.maintenance_start), maintenance_end: toLocalDateTimeInput(c.maintenance_end) }); setShowModal(true); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)" }}><Edit3 size={16} /></button>
@@ -462,11 +462,11 @@ function ContainerManagementContent({ id }) {
                                                 )}
                                                 <div style={{ flex: 1, minWidth: 0 }}>
                                                     <div style={{ fontWeight: 700, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                                        {item.title || "Sans titre"}
+                                                        {item.title ? <span data-i18n-user-content="true">{item.title}</span> : "Sans titre"}
                                                     </div>
                                                     <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>
-                                                        {item.reference ? `Réf. ${item.reference}` : item.category || "—"}
-                                                        {item.userName ? ` · ${item.userName}` : ""}
+                                                        {item.reference ? <>Réf. <span data-i18n-user-content="true">{item.reference}</span></> : item.category ? <span data-i18n-user-content="true">{item.category}</span> : "—"}
+                                                        {item.userName ? <> · <span data-i18n-user-content="true">{item.userName}</span></> : ""}
                                                     </div>
                                                     <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--forest-deep)", marginTop: "0.2rem" }}>
                                                         {wf}

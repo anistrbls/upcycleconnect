@@ -157,7 +157,7 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                 Salarié intervenant
                                 <select value={formState.intervenantId} onChange={set("intervenantId")} style={S.select}>
                                     <option value="">— Aucun —</option>
-                                    {salaries.map(s => <option key={s.id} value={String(s.id)}>{s.firstname} {s.lastname}</option>)}
+                                    {salaries.map(s => <option key={s.id} value={String(s.id)} data-i18n-user-content="true">{s.firstname} {s.lastname}</option>)}
                                 </select>
                             </label>
                             {formState.intervenantId && <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginTop: "0.65rem", marginBottom: 0, lineHeight: 1.5 }}>L'événement apparaîtra dans le planning du salarié sélectionné.</p>}
@@ -178,8 +178,8 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                             <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "#fff", borderRadius: "12px", boxShadow: "0 10px 25px rgba(0,0,0,0.15)", zIndex: 20, overflow: "hidden" }}>
                                                 {adresseSuggestions.map((s, idx) => (
                                                     <div key={idx} onClick={() => selectSuggestion(s)} style={{ padding: "0.7rem 1rem", fontSize: "0.84rem", cursor: "pointer", borderBottom: idx === adresseSuggestions.length - 1 ? "none" : "1px solid #f0f0f0" }} onMouseEnter={e => e.currentTarget.style.background = "#f7f9fa"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-                                                        <div style={{ fontWeight: 600 }}>{s.properties.name}</div>
-                                                        <div style={{ fontSize: "0.73rem", color: "var(--text-muted)" }}>{s.properties.postcode} {s.properties.city}</div>
+                                                        <div style={{ fontWeight: 600 }} data-i18n-user-content="true">{s.properties.name}</div>
+                                                        <div style={{ fontSize: "0.73rem", color: "var(--text-muted)" }} data-i18n-user-content="true">{s.properties.postcode} {s.properties.city}</div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -514,7 +514,7 @@ export default function EventAdminView({ events, categories, salaries = [], load
                 <div style={{ display: "grid", gap: "1.5rem", padding: "0.5rem 0" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                         <p style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, lineHeight: 1.4 }}>
-                            Annuler l'événement <span style={{ color: "var(--black)" }}>"{eventToCancel?.name}"</span> ?
+                            Annuler l'événement <span style={{ color: "var(--black)" }} data-i18n-user-content="true">"{eventToCancel?.name}"</span> ?
                         </p>
                         <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
                             Cette action est <strong style={{ color: "#DC2626" }}>irréversible</strong>. 
@@ -547,7 +547,7 @@ export default function EventAdminView({ events, categories, salaries = [], load
                 <div style={{ display: "grid", gap: "1.5rem", padding: "0.5rem 0" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                         <p style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, lineHeight: 1.4 }}>
-                            Supprimer l'événement <span style={{ color: "var(--black)" }}>"{eventToDelete?.name}"</span> ?
+                            Supprimer l'événement <span style={{ color: "var(--black)" }} data-i18n-user-content="true">"{eventToDelete?.name}"</span> ?
                         </p>
                         <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
                             Cette action est <strong style={{ color: "#DC2626" }}>irréversible</strong>. 
@@ -576,7 +576,11 @@ export default function EventAdminView({ events, categories, salaries = [], load
                 </div>
             </AdminModal>
 
-            <AdminModal open={participantsOpen} title={"Participants — " + (participantsEvent?.name || "")} onClose={() => { setParticipantsOpen(false); setParticipants([]); }}>
+            <AdminModal
+                open={participantsOpen}
+                title={<>Participants{participantsEvent?.name ? <> — <span data-i18n-user-content="true">{participantsEvent.name}</span></> : null}</>}
+                onClose={() => { setParticipantsOpen(false); setParticipants([]); }}
+            >
                 {participantsLoading ? (
                     <p style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Chargement…</p>
                 ) : participants.length === 0 ? (
@@ -601,8 +605,8 @@ export default function EventAdminView({ events, categories, salaries = [], load
                             return (
                                 <div key={p.userId ?? p.id} style={{ display: "flex", flexDirection: "column", padding: "0.75rem", background: isCancelled ? "rgba(255,100,100,0.05)" : "var(--surface-hover)", borderRadius: "12px", gap: "0.5rem" }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.82rem", gap: "0.5rem", flexWrap: "wrap" }}>
-                                        <span style={{ fontWeight: 600, textDecoration: isCancelled ? "line-through" : "none" }}>{p.firstname} {p.lastname}</span>
-                                        <span style={{ color: "var(--text-muted)" }}>{p.email}</span>
+                                        <span style={{ fontWeight: 600, textDecoration: isCancelled ? "line-through" : "none" }} data-i18n-user-content="true">{p.firstname} {p.lastname}</span>
+                                        <span style={{ color: "var(--text-muted)" }} data-i18n-user-content="true">{p.email}</span>
                                         
                                         <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "99px", background: isPaid ? "#E5FFBC" : isPending ? "#FFF3E0" : "#E6EDEE", color: isPaid ? "#166534" : isPending ? "#A56A2A" : "#555" }}>{isPaid ? "Payé" : isPending ? "En attente" : "Gratuit"}</span>
                                         
@@ -681,9 +685,10 @@ export default function EventAdminView({ events, categories, salaries = [], load
                                             preload="metadata"
                                             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }}
                                             aria-label={item.name}
+                                            data-i18n-user-content="true"
                                         />
                                     ) : (
-                                        <img src={item.imageUrl} alt={item.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} onError={(e) => { e.target.style.display = "none"; }} />
+                                        <img src={item.imageUrl} alt={item.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} onError={(e) => { e.target.style.display = "none"; }} data-i18n-user-content="true" />
                                     )}
                                     <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(5,10,5,0.95) 0%, rgba(5,10,5,0.6) 40%, transparent 100%)", pointerEvents: "none" }} />
                                 </>
@@ -701,17 +706,17 @@ export default function EventAdminView({ events, categories, salaries = [], load
                             </div>
                             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.65rem", zIndex: 2 }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "0.75rem" }}>
-                                    <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }}>{item.name}</h3>
+                                    <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "white", margin: 0, lineHeight: 1.3, flex: 1 }} data-i18n-user-content="true">{item.name}</h3>
                                     <div style={{ padding: "5px 14px", borderRadius: "999px", background: "rgba(255,255,255,0.15)", color: "white", fontSize: "0.88rem", fontWeight: 700, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)", whiteSpace: "nowrap", flexShrink: 0 }}>
                                         {item.pricingType === "payant" && item.price > 0 ? `${Number(item.price).toLocaleString("fr-FR")} €` : "Gratuit"}
                                     </div>
                                 </div>
                                 <p style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.85)", margin: 0, lineHeight: 1.5 }}>
                                     {!isNaN(start.getTime()) && start.toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                                    {item.lieu && ` · ${item.lieu}`}
+                                    {item.lieu && <> · <span data-i18n-user-content="true">{item.lieu}</span></>}
                                 </p>
-                                {item.intervenant && <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.7)", margin: 0 }}>{item.intervenant}</p>}
-                                {item.validationStatus === "rejected" && item.status !== "annule" && item.rejectionComment && <p style={{ fontSize: "0.76rem", color: "#ff8080", margin: 0, lineHeight: 1.5 }}>{item.rejectionComment}</p>}
+                                {item.intervenant && <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.7)", margin: 0 }} data-i18n-user-content="true">{item.intervenant}</p>}
+                                {item.validationStatus === "rejected" && item.status !== "annule" && item.rejectionComment && <p style={{ fontSize: "0.76rem", color: "#ff8080", margin: 0, lineHeight: 1.5 }} data-i18n-user-content="true">{item.rejectionComment}</p>}
                                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                                     <span style={{ padding: "4px 12px", borderRadius: "999px", background: "rgba(255,255,255,0.12)", fontSize: "0.75rem", color: "rgba(255,255,255,0.9)", fontWeight: 500, border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)" }}>{TYPE_LABELS[item.type] || item.type}</span>
                                     {item.capacite != null && (

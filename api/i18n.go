@@ -1,24 +1,17 @@
 package main
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 const defaultI18nLocale = "fr"
-const i18nRuntimeMaxTexts = 80
-const i18nRuntimeMaxTextLength = 700
-const i18nRuntimeMaxTotalChars = 30000
 
 var localeCodePattern = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})?$`)
 
@@ -52,31 +45,54 @@ type i18nLanguageRecord struct {
 	UpdatedAt    time.Time
 }
 
-type i18nRuntimeTranslatePayload struct {
-	TargetLocale string   `json:"targetLocale"`
-	Texts        []string `json:"texts"`
-}
-
-type deeplTranslateRequest struct {
-	Text               []string `json:"text"`
-	SourceLang         string   `json:"source_lang,omitempty"`
-	TargetLang         string   `json:"target_lang"`
-	PreserveFormatting bool     `json:"preserve_formatting"`
-	SplitSentences     string   `json:"split_sentences,omitempty"`
-	Context            string   `json:"context,omitempty"`
-}
-
-type deeplTranslateResponse struct {
-	Translations []struct {
-		DetectedSourceLanguage string `json:"detected_source_language"`
-		Text                   string `json:"text"`
-	} `json:"translations"`
-}
-
 var builtinI18nLanguages = []i18nLanguageRecord{
 	{Code: "fr", Label: "Français", NativeLabel: "Français", Dir: "ltr", Enabled: true, IsBuiltin: true},
-	{Code: "en", Label: "Anglais", NativeLabel: "English", Dir: "ltr", Enabled: true, IsBuiltin: true},
-	{Code: "es", Label: "Espagnol", NativeLabel: "Español", Dir: "ltr", Enabled: true, IsBuiltin: true},
+	{
+		Code:        "en",
+		Label:       "Anglais",
+		NativeLabel: "English",
+		Dir:         "ltr",
+		Enabled:     true,
+		IsBuiltin:   true,
+		Phrases: map[string]string{
+			"Connexion":                  "Login",
+			"Se connecter":               "Log in",
+			"S'inscrire":                 "Sign up",
+			"Votre email":                "Your email",
+			"Mot de passe":               "Password",
+			"Mot de passe oublie ?":      "Forgot password?",
+			"Afficher le mot de passe":   "Show password",
+			"Pas encore de compte ?":     "No account yet?",
+			"Console de gestion":         "Management console",
+			"Vérification de session...": "Checking session...",
+			"Se déconnecter":             "Log out",
+			"Notifications":              "Notifications",
+			"Navigation principale":      "Main navigation",
+			"Vue globale":                "Overview",
+			"Annonces":                   "Listings",
+			"Utilisateurs":               "Users",
+			"Paramètres":                 "Settings",
+			"Configuration":              "Configuration",
+			"Préférences générales":      "General preferences",
+			"Langues de l'interface":     "Interface languages",
+			"Nouvelle langue":            "New language",
+			"Catégories d'objets":        "Item categories",
+			"États des objets":           "Item conditions",
+			"Matériaux":                  "Materials",
+			"Pays":                       "Countries",
+			"Types de points de dépôt":   "Drop-off point types",
+			"Catégories de prestations":  "Service categories",
+			"Catégories de conseils":     "Advice categories",
+			"Motifs de modération":       "Moderation reasons",
+			"Ajouter":                    "Add",
+			"Annuler":                    "Cancel",
+			"Enregistrer":                "Save",
+			"Modifier":                   "Edit",
+			"Supprimer":                  "Delete",
+			"Chargement...":              "Loading...",
+			"Aucun élément. Ajoutez-en un ci-dessus.": "No item yet. Add one above.",
+		},
+	},
 }
 
 func ensureI18nSchema() error {
@@ -106,15 +122,34 @@ func ensureI18nSchema() error {
 	}
 
 	for _, language := range builtinI18nLanguages {
-		if _, err := db.Exec(`
-			INSERT INTO i18n_languages (code, label, native_label, dir, enabled, is_builtin, phrases, patterns)
-			VALUES ($1, $2, $3, $4, TRUE, TRUE, '{}'::jsonb, '[]'::jsonb)
-			ON CONFLICT (code) DO UPDATE SET
-				is_builtin = TRUE,
-				updated_at = i18n_languages.updated_at
-		`, language.Code, language.Label, language.NativeLabel, language.Dir); err != nil {
+		phrasesJSON, patternsJSON, err := marshalI18nCatalog(language.Phrases, language.Patterns)
+		if err != nil {
 			return err
 		}
+		if _, err := db.Exec(`
+			INSERT INTO i18n_languages (code, label, native_label, dir, enabled, is_builtin, phrases, patterns)
+			VALUES ($1, $2, $3, $4, TRUE, TRUE, $5::jsonb, $6::jsonb)
+			ON CONFLICT (code) DO UPDATE SET
+				label = EXCLUDED.label,
+				native_label = EXCLUDED.native_label,
+				dir = EXCLUDED.dir,
+				enabled = TRUE,
+				is_builtin = TRUE,
+				phrases = CASE
+					WHEN i18n_languages.phrases = '{}'::jsonb THEN EXCLUDED.phrases
+					ELSE i18n_languages.phrases
+				END,
+				patterns = CASE
+					WHEN i18n_languages.patterns = '[]'::jsonb THEN EXCLUDED.patterns
+					ELSE i18n_languages.patterns
+				END
+		`, language.Code, language.Label, language.NativeLabel, language.Dir, string(phrasesJSON), string(patternsJSON)); err != nil {
+			return err
+		}
+	}
+
+	if _, err := db.Exec(`DELETE FROM i18n_languages WHERE code = 'es' AND is_builtin = TRUE`); err != nil {
+		return err
 	}
 
 	return nil
@@ -125,7 +160,7 @@ func i18nLanguagesPublicHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT code, label, native_label, dir
 		FROM i18n_languages
 		WHERE enabled = TRUE
-		ORDER BY CASE code WHEN 'fr' THEN 0 WHEN 'en' THEN 1 WHEN 'es' THEN 2 ELSE 3 END, code ASC
+		ORDER BY CASE code WHEN 'fr' THEN 0 WHEN 'en' THEN 1 ELSE 3 END, code ASC
 	`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list languages")
@@ -175,7 +210,7 @@ func i18nMessagesPublicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !language.Enabled && !language.IsBuiltin {
+	if !language.Enabled {
 		writeError(w, http.StatusNotFound, "language not found")
 		return
 	}
@@ -190,124 +225,6 @@ func i18nMessagesPublicHandler(w http.ResponseWriter, r *http.Request) {
 		},
 		"phrases":  language.Phrases,
 		"patterns": language.Patterns,
-	})
-}
-
-func i18nTranslatePublicHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	var payload i18nRuntimeTranslatePayload
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128*1024))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-
-	targetLocale := normalizeLocaleCode(payload.TargetLocale)
-	if !isValidLocaleCode(targetLocale) {
-		writeError(w, http.StatusBadRequest, "invalid locale code")
-		return
-	}
-
-	texts := cleanRuntimeTranslationTexts(payload.Texts)
-	if len(texts) == 0 {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"provider":     "deepl",
-			"sourceLocale": defaultI18nLocale,
-			"targetLocale": targetLocale,
-			"phrases":      map[string]string{},
-			"cachedCount":  0,
-			"generated":    0,
-		})
-		return
-	}
-
-	if targetLocale == defaultI18nLocale {
-		phrases := make(map[string]string, len(texts))
-		for _, text := range texts {
-			phrases[text] = text
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"provider":     "source",
-			"sourceLocale": defaultI18nLocale,
-			"targetLocale": targetLocale,
-			"phrases":      phrases,
-			"cachedCount":  len(phrases),
-			"generated":    0,
-		})
-		return
-	}
-
-	language, err := getI18nLanguage(targetLocale)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			writeError(w, http.StatusNotFound, "language not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "could not load language")
-		return
-	}
-	if !language.Enabled && !language.IsBuiltin {
-		writeError(w, http.StatusNotFound, "language not found")
-		return
-	}
-
-	phrases := make(map[string]string, len(texts))
-	missing := make([]string, 0)
-	for _, text := range texts {
-		if translated, ok := language.Phrases[text]; ok {
-			phrases[text] = translated
-			continue
-		}
-		missing = append(missing, text)
-	}
-
-	generated := map[string]string{}
-	if len(missing) > 0 {
-		targetLang, err := deeplTargetLang(targetLocale)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		translated, err := translateTextsWithDeepL(missing, targetLang)
-		if err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
-			return
-		}
-		if len(translated) != len(missing) {
-			writeError(w, http.StatusBadGateway, "deepl translation count mismatch")
-			return
-		}
-
-		for index, source := range missing {
-			value := strings.TrimSpace(translated[index])
-			if value == "" {
-				value = source
-			}
-			generated[source] = value
-			phrases[source] = value
-		}
-
-		if err := updateI18nLanguagePhrases(targetLocale, generated); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not cache translations")
-			return
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"provider":       "deepl",
-		"sourceLocale":   defaultI18nLocale,
-		"targetLocale":   targetLocale,
-		"phrases":        phrases,
-		"cachedCount":    len(texts) - len(generated),
-		"generated":      len(generated),
-		"generatedAt":    time.Now().UTC().Format(time.RFC3339),
-		"reviewRequired": false,
 	})
 }
 
@@ -366,7 +283,7 @@ func listI18nLanguagesAdmin(w http.ResponseWriter) {
 			created_at,
 			updated_at
 		FROM i18n_languages
-		ORDER BY CASE code WHEN 'fr' THEN 0 WHEN 'en' THEN 1 WHEN 'es' THEN 2 ELSE 3 END, code ASC
+		ORDER BY CASE code WHEN 'fr' THEN 0 WHEN 'en' THEN 1 ELSE 3 END, code ASC
 	`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list languages")
@@ -583,207 +500,6 @@ func marshalI18nCatalog(phrases map[string]string, patterns []i18nPattern) ([]by
 	return phrasesJSON, patternsJSON, nil
 }
 
-func cleanRuntimeTranslationTexts(values []string) []string {
-	seen := make(map[string]bool, len(values))
-	result := make([]string, 0, len(values))
-	totalChars := 0
-
-	for _, value := range values {
-		cleaned := strings.TrimSpace(strings.Join(strings.Fields(value), " "))
-		if cleaned == "" || seen[cleaned] || len([]rune(cleaned)) > i18nRuntimeMaxTextLength || !containsLetter(cleaned) {
-			continue
-		}
-
-		nextTotal := totalChars + len(cleaned)
-		if nextTotal > i18nRuntimeMaxTotalChars {
-			break
-		}
-
-		seen[cleaned] = true
-		totalChars = nextTotal
-		result = append(result, cleaned)
-		if len(result) >= i18nRuntimeMaxTexts {
-			break
-		}
-	}
-
-	return result
-}
-
-func updateI18nLanguagePhrases(code string, phrases map[string]string) error {
-	if len(phrases) == 0 {
-		return nil
-	}
-
-	phrasesJSON, err := json.Marshal(phrases)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`
-		UPDATE i18n_languages
-		SET phrases = phrases || $2::jsonb,
-			updated_at = NOW()
-		WHERE code = $1
-	`, code, string(phrasesJSON))
-	return err
-}
-
-func containsLetter(value string) bool {
-	for _, r := range value {
-		if unicode.IsLetter(r) {
-			return true
-		}
-	}
-	return false
-}
-
-func deeplTargetLang(locale string) (string, error) {
-	normalized := strings.ToUpper(normalizeLocaleCode(locale))
-	switch normalized {
-	case "":
-		return "", fmt.Errorf("target language is required")
-	case "FR":
-		return "", fmt.Errorf("target language must be different from French")
-	case "EN":
-		return "EN-US", nil
-	case "PT":
-		return "PT-PT", nil
-	case "ZH":
-		return "ZH-HANS", nil
-	default:
-		return normalized, nil
-	}
-}
-
-func translateTextsWithDeepL(texts []string, targetLang string) ([]string, error) {
-	authKey := strings.TrimSpace(getEnv("DEEPL_AUTH_KEY", ""))
-	if authKey == "" {
-		return nil, fmt.Errorf("deepl auth key missing")
-	}
-
-	baseURL := strings.TrimRight(strings.TrimSpace(getEnv("DEEPL_API_URL", "")), "/")
-	if baseURL == "" {
-		baseURL = "https://api.deepl.com"
-		if strings.HasSuffix(authKey, ":fx") {
-			baseURL = "https://api-free.deepl.com"
-		}
-	}
-
-	client := &http.Client{Timeout: 45 * time.Second}
-	result := make([]string, 0, len(texts))
-	for start := 0; start < len(texts); {
-		end := deepLBatchEnd(texts, start, targetLang)
-		batch := texts[start:end]
-		translated, err := translateDeepLBatch(client, baseURL, authKey, batch, targetLang)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, translated...)
-		start = end
-	}
-
-	return result, nil
-}
-
-func deepLBatchEnd(texts []string, start int, targetLang string) int {
-	end := start
-	for end < len(texts) && end-start < 50 {
-		candidate := texts[start : end+1]
-		body, _ := json.Marshal(deeplTranslateRequest{
-			Text:               candidate,
-			SourceLang:         "FR",
-			TargetLang:         targetLang,
-			PreserveFormatting: true,
-			SplitSentences:     "0",
-			Context:            deeplUIContext(),
-		})
-		if len(body) > 110*1024 && end > start {
-			break
-		}
-		end++
-	}
-	if end == start {
-		return start + 1
-	}
-	return end
-}
-
-func translateDeepLBatch(client *http.Client, baseURL, authKey string, texts []string, targetLang string) ([]string, error) {
-	requestPayload := deeplTranslateRequest{
-		Text:               texts,
-		SourceLang:         "FR",
-		TargetLang:         targetLang,
-		PreserveFormatting: true,
-		SplitSentences:     "0",
-		Context:            deeplUIContext(),
-	}
-	body, err := json.Marshal(requestPayload)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/v2/translate", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "DeepL-Auth-Key "+authKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "UpcycleConnect/1.0")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("deepl request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message := readDeepLError(resp.Body)
-		if message == "" {
-			message = resp.Status
-		}
-		return nil, fmt.Errorf("deepl error: %s", message)
-	}
-
-	var payload deeplTranslateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("could not parse deepl response: %v", err)
-	}
-	if len(payload.Translations) != len(texts) {
-		return nil, fmt.Errorf("deepl translation count mismatch")
-	}
-
-	translated := make([]string, 0, len(payload.Translations))
-	for _, translation := range payload.Translations {
-		translated = append(translated, translation.Text)
-	}
-	return translated, nil
-}
-
-func readDeepLError(reader io.Reader) string {
-	raw, err := io.ReadAll(io.LimitReader(reader, 4096))
-	if err != nil {
-		return ""
-	}
-	var payload struct {
-		Message string `json:"message"`
-		Detail  string `json:"detail"`
-	}
-	if err := json.Unmarshal(raw, &payload); err == nil {
-		if strings.TrimSpace(payload.Message) != "" {
-			return strings.TrimSpace(payload.Message)
-		}
-		if strings.TrimSpace(payload.Detail) != "" {
-			return strings.TrimSpace(payload.Detail)
-		}
-	}
-	return strings.TrimSpace(string(raw))
-}
-
-func deeplUIContext() string {
-	return "Traduction de libellés courts pour l'interface web UpcycleConnect, une plateforme de réemploi, annonces, événements, finances, paramètres et gestion administrative."
-}
-
 type i18nValidationError struct {
 	message string
 }
@@ -858,6 +574,7 @@ func i18nLanguageAdminPayload(language i18nLanguageRecord) map[string]interface{
 		"dir":          language.Dir,
 		"enabled":      language.Enabled,
 		"isBuiltin":    language.IsBuiltin,
+		"canDelete":    !language.IsBuiltin && language.Code != defaultI18nLocale,
 		"phraseCount":  language.PhraseCount,
 		"patternCount": language.PatternCount,
 		"phrases":      language.Phrases,

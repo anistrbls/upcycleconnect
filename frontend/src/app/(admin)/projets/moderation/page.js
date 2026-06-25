@@ -345,7 +345,7 @@ function ProjectsModerationContent() {
                     return (
                             <div key={project.id} style={{ ...styles.card, cursor: "pointer" }} onClick={() => router.push(`/projets/moderation/${project.id}`)}>
                             {project.previewImage ? (
-                                <img src={project.previewImage} alt={project.title || "Projet"} style={styles.cardImage} />
+                                <img src={project.previewImage} alt={project.title || "Projet"} style={styles.cardImage} data-i18n-user-content="true" />
                             ) : (
                                 <div style={styles.cardFallback}>UpcycleConnect</div>
                             )}
@@ -355,7 +355,7 @@ function ProjectsModerationContent() {
 
                             <div style={styles.cardOverlay}>
                                 <div style={styles.titlePriceRow}>
-                                    <h3 style={styles.cardTitle}>{project.title || `Projet #${project.id}`}</h3>
+                                    <h3 style={styles.cardTitle} data-i18n-user-content="true">{project.title || `Projet #${project.id}`}</h3>
                                 </div>
 
                                 <p style={styles.description}>
@@ -364,7 +364,7 @@ function ProjectsModerationContent() {
                                 <p style={styles.authorLine}>Par {project.proDisplayName || "Professionnel"}</p>
 
                                 <div style={styles.tagsRow}>
-                                    {project.category ? <span style={styles.tag}>{project.category}</span> : null}
+                                    {project.category ? <span style={styles.tag} data-i18n-user-content="true">{project.category}</span> : null}
                                     <span style={styles.tag}>{project.itemCount || 0} objet(s)</span>
                                 </div>
 

@@ -566,7 +566,7 @@ export default function NouveauProjet() {
                     </div>
 
                     <div style={styles.card}>
-                        <h2 style={styles.sectionTitle}><Box size={16} /> Objets utilisés ({items.length})</h2>
+                        <h2 style={styles.sectionTitle}><Box size={16} /> {`Objets utilisés (${items.length})`}</h2>
                         {items.length === 0 && (
                             <p style={{ color: "var(--text-muted)", fontSize: "0.88rem", marginBottom: "1rem" }}>
                                 Aucun objet associé. Ajoutez des objets récupérés par votre compte professionnel.
@@ -576,13 +576,13 @@ export default function NouveauProjet() {
                             <div key={item.id} style={styles.itemRow}>
                                 <span style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.92rem", color: "var(--text-main)" }}>
                                     {item.itemImage ? (
-                                        <img src={item.itemImage} alt={item.itemTitle || "Objet"} style={styles.itemThumb} />
+                                        <img src={item.itemImage} alt={item.itemTitle || "Objet"} style={styles.itemThumb} data-i18n-user-content="true" />
                                     ) : null}
                                     <Box size={14} style={{ color: "var(--accent)", flexShrink: 0 }} />
                                     <span>
-                                        {item.itemTitle || `Objet #${item.itemId}`}
+                                        {item.itemTitle ? <span data-i18n-user-content="true">{item.itemTitle}</span> : <>Objet #{item.itemId}</>}
                                         <span style={{ display: "block", color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "0.2rem" }}>
-                                            {item.material || "Matériau non défini"} · {formatItemWeight(item)}
+                                            {item.material ? <span data-i18n-user-content="true">{item.material}</span> : "Matériau non défini"} · {formatItemWeight(item)}
                                         </span>
                                     </span>
                                 </span>
@@ -603,7 +603,7 @@ export default function NouveauProjet() {
                                     <select style={styles.select} onChange={(e) => { if (e.target.value) addItem(Number(e.target.value)); }} defaultValue="">
                                         <option value="">— Choisir un objet récupéré —</option>
                                         {availableToAdd.map((ri) => (
-                                            <option key={ri.id} value={ri.id}>
+                                            <option key={ri.id} value={ri.id} data-i18n-user-content="true">
                                                 {ri.title} · {ri.material || "matériau ?"} · {formatItemWeight(ri)}
                                             </option>
                                         ))}

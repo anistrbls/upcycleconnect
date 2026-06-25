@@ -147,7 +147,7 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                     >
                         <option value="all">Toutes les prestations</option>
                         {services.map((s) => (
-                            <option key={s.id} value={String(s.id)}>{s.name}</option>
+                            <option key={s.id} value={String(s.id)} data-i18n-user-content="true">{s.name}</option>
                         ))}
                     </select>
                     <button className="action-cta task-action-btn" type="button" onClick={onReload}>Actualiser</button>
@@ -189,13 +189,13 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                                     <td style={{ padding: "0.6rem 0.75rem", fontWeight: 600, color: b.bookingType === "request" ? "#7A5E00" : "#233B3D" }}>
                                         {b.bookingType === "request" ? "Demande" : "Créneau"}
                                     </td>
-                                    <td style={{ padding: "0.6rem 0.75rem", fontWeight: 500 }}>{b.userName}</td>
-                                    <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)" }}>{b.serviceName}</td>
+                                    <td style={{ padding: "0.6rem 0.75rem", fontWeight: 500 }} data-i18n-user-content="true">{b.userName}</td>
+                                    <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)" }} data-i18n-user-content="true">{b.serviceName}</td>
                                     <td style={{ padding: "0.6rem 0.75rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                                         {formatDateTimeFR(b.bookingDate)}
                                     </td>
                                     <td style={{ padding: "0.6rem 0.75rem", color: b.employeeName ? "var(--text-main)" : "var(--text-muted)" }}>
-                                        {b.employeeName || "Non assigné"}
+                                        {b.employeeName ? <span data-i18n-user-content="true">{b.employeeName}</span> : "Non assigné"}
                                     </td>
                                     <td style={{ padding: "0.6rem 0.75rem" }}>
                                         <Badge value={b.status} map={BOOKING_STATUS_COLORS} />
@@ -238,10 +238,10 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                     <form onSubmit={handleStatusSubmit} style={{ display: "grid", gap: "0.75rem" }}>
                         <div style={{ background: "var(--surface-hover)", padding: "1rem", borderRadius: "12px", display: "grid", gap: "0.5rem" }}>
                             <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", fontWeight: 600 }}>
-                                Client : <span style={{ fontWeight: 400 }}>{selectedBooking.userName}</span>
+                                Client : <span style={{ fontWeight: 400 }} data-i18n-user-content="true">{selectedBooking.userName}</span>
                             </p>
                             <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", fontWeight: 600 }}>
-                                Prestation : <span style={{ fontWeight: 400 }}>{selectedBooking.serviceName}</span>
+                                Prestation : <span style={{ fontWeight: 400 }} data-i18n-user-content="true">{selectedBooking.serviceName}</span>
                             </p>
                             <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-main)", fontWeight: 600 }}>
                                 Type : <span style={{ fontWeight: 400 }}>{selectedBooking.bookingType === "request" ? "Demande libre" : "Réservation de créneau"}</span>
@@ -250,7 +250,7 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                                 <div style={{ marginTop: "0.5rem" }}>
                                     <p style={{ margin: "0 0 0.25rem 0", fontSize: "0.85rem", fontWeight: 600 }}>Message du client :</p>
                                     <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)", background: "#fff", padding: "0.5rem", borderRadius: "8px", border: "1px solid #E2EAEA" }}>
-                                        {selectedBooking.message}
+                                        <span data-i18n-user-content="true">{selectedBooking.message}</span>
                                     </p>
                                 </div>
                             )}
@@ -293,7 +293,7 @@ export default function ReservationsAdminView({ bookings, services, employees, l
                             >
                                 <option value="">Non assigné</option>
                                 {employees && employees.map((emp) => (
-                                    <option key={emp.id} value={String(emp.id)}>{emp.firstname} {emp.lastname} ({emp.employeeRole || "Salarié"})</option>
+                                    <option key={emp.id} value={String(emp.id)} data-i18n-user-content="true">{emp.firstname} {emp.lastname} ({emp.employeeRole || "Salarié"})</option>
                                 ))}
                             </select>
                         </label>

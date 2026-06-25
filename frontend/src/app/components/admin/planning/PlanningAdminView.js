@@ -593,7 +593,7 @@ export default function PlanningAdminView({
                         <label style={labelStyle}>Salarié concerné
                             <select style={fieldStyle} value={formState.employeeId} onChange={e => setFormState(p => ({ ...p, employeeId: e.target.value }))} required>
                                 <option value="">Sélectionner un salarié</option>
-                                {salaries.map(s => <option key={s.id} value={s.id}>{s.firstname} {s.lastname}</option>)}
+                                {salaries.map(s => <option key={s.id} value={s.id} data-i18n-user-content="true">{s.firstname} {s.lastname}</option>)}
                             </select>
                         </label>
                     )}

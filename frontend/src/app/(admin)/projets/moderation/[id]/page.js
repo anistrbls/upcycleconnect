@@ -382,7 +382,7 @@ function ProjectModerationDetailContent() {
                     <div style={styles.mediaFrame}>
                         <div style={styles.mediaStage}>
                             {currentImg ? (
-                                <img src={currentImg.url} alt={project.title} style={styles.mediaImg} />
+                                <img src={currentImg.url} alt={project.title} style={styles.mediaImg} data-i18n-user-content="true" />
                             ) : (
                                 <div style={styles.mediaFallback}>UpcycleConnect</div>
                             )}
@@ -423,10 +423,12 @@ function ProjectModerationDetailContent() {
                     <div style={styles.summaryCard}>
                         <div>
                             <div style={sectionLabel}>Vue administrateur</div>
-                            <h1 style={styles.h1}>{project.title || `Projet #${project.id}`}</h1>
+                            <h1 style={styles.h1}>
+                                {project.title ? <span data-i18n-user-content="true">{project.title}</span> : <>Projet #{project.id}</>}
+                            </h1>
 
                             <div style={styles.subMeta}>
-                                {project.category ? <span style={styles.subMetaChip}><Tag size={12} /> {project.category}</span> : null}
+                                {project.category ? <span style={styles.subMetaChip} data-i18n-user-content="true"><Tag size={12} /> {project.category}</span> : null}
                                 <span style={styles.subMetaChip}><Calendar size={12} /> Mis a jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}</span>
                             </div>
 
@@ -495,7 +497,7 @@ function ProjectModerationDetailContent() {
                             <div style={styles.authorAvatar}><User2 size={18} /></div>
                             <div>
                                 <div style={{ fontSize: "0.94rem", fontWeight: "700", color: "var(--text-main)" }}>{proDisplayName}</div>
-                                <div style={styles.inlineInfo}>{companyName}</div>
+                                <div style={styles.inlineInfo} data-i18n-user-content="true">{companyName}</div>
                             </div>
                         </div>
                         <div style={styles.inlineInfo}>Score UC total: {totalUCLabel}</div>
@@ -508,7 +510,7 @@ function ProjectModerationDetailContent() {
                 <div style={styles.contentCard}>
                     <div style={sectionLabel}>Description</div>
                     {project.description ? (
-                        <p style={styles.description}>{project.description}</p>
+                        <p style={styles.description} data-i18n-user-content="true">{project.description}</p>
                     ) : (
                         <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>Aucune description.</p>
                     )}
@@ -523,7 +525,7 @@ function ProjectModerationDetailContent() {
                                 <div key={`step-${idx}`} style={styles.stepRow}>
                                     <div style={styles.stepBadge}>{idx + 1}</div>
                                     <div>
-                                        <p style={styles.stepText}>{step.text}</p>
+                                        <p style={styles.stepText} data-i18n-user-content="true">{step.text}</p>
                                         {step.imageUrl ? (
                                             <img src={step.imageUrl} alt={`Étape ${idx + 1}`} style={styles.stepImage} />
                                         ) : null}
@@ -546,12 +548,17 @@ function ProjectModerationDetailContent() {
                                 <div style={styles.itemImgFallback}><Box size={18} color="#5a9e8f" /></div>
                             )}
                             <div>
-                                <p style={styles.itemTitle}>{item.itemTitle || `Objet #${item.itemId}`}</p>
+                                <p style={styles.itemTitle}>
+                                    {item.itemTitle ? <span data-i18n-user-content="true">{item.itemTitle}</span> : <>Objet #{item.itemId}</>}
+                                </p>
                                 <p style={styles.itemMeta}>
-                                    {[
-                                        item.material,
-                                        Number.isFinite(Number(item.weightGrams)) && Number(item.weightGrams) > 0 ? `${Number(item.weightGrams).toFixed(0)} g` : null,
-                                    ].filter(Boolean).join(" · ") || "Aucune info materiau"}
+                                    {item.material || (Number.isFinite(Number(item.weightGrams)) && Number(item.weightGrams) > 0) ? (
+                                        <>
+                                            {item.material ? <span data-i18n-user-content="true">{item.material}</span> : null}
+                                            {item.material && Number.isFinite(Number(item.weightGrams)) && Number(item.weightGrams) > 0 ? " · " : ""}
+                                            {Number.isFinite(Number(item.weightGrams)) && Number(item.weightGrams) > 0 ? `${Number(item.weightGrams).toFixed(0)} g` : null}
+                                        </>
+                                    ) : "Aucune info materiau"}
                                 </p>
                             </div>
                         </div>

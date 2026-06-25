@@ -240,15 +240,15 @@ export default function LogisticsDetailPage({ params }) {
 
                         <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
                             {logistics.item_image ? (
-                                <img src={logistics.item_image} alt={logistics.item_title} style={{ width: "64px", height: "64px", borderRadius: "16px", objectFit: "cover", background: "#f8fafb" }} />
+                                <img src={logistics.item_image} alt={logistics.item_title} style={{ width: "64px", height: "64px", borderRadius: "16px", objectFit: "cover", background: "#f8fafb" }} data-i18n-user-content="true" />
                             ) : (
                                 <div style={{ width: "64px", height: "64px", borderRadius: "16px", background: "#f8fafb", display: "flex", alignItems: "center", justifyContent: "center" }}>
                                     <Package size={24} color="var(--text-muted)" />
                                 </div>
                             )}
                             <div>
-                                <h3 style={{ margin: "0 0 4px 0", fontSize: "1rem", fontWeight: "700" }}>{logistics.item_title}</h3>
-                                <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>Déposé par {logistics.owner_name}</p>
+                                <h3 style={{ margin: "0 0 4px 0", fontSize: "1rem", fontWeight: "700" }} data-i18n-user-content="true">{logistics.item_title}</h3>
+                                <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>Déposé par <span data-i18n-user-content="true">{logistics.owner_name}</span></p>
                             </div>
                         </div>
 
@@ -259,8 +259,8 @@ export default function LogisticsDetailPage({ params }) {
                                 </div>
                                 <div>
                                     <div style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: "700", color: "var(--text-muted)", marginBottom: "2px" }}>Point de dépôt assigné</div>
-                                    <div style={{ fontWeight: "600", fontSize: "0.95rem" }}>{logistics.deposit_point_name}</div>
-                                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Conteneur: {logistics.container_name}</div>
+                                    <div style={{ fontWeight: "600", fontSize: "0.95rem" }} data-i18n-user-content="true">{logistics.deposit_point_name}</div>
+                                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Conteneur: <span data-i18n-user-content="true">{logistics.container_name}</span></div>
                                 </div>
                             </div>
                         )}
@@ -275,7 +275,7 @@ export default function LogisticsDetailPage({ params }) {
                                         Numero de transaction
                                     </div>
                                     <div style={{ fontWeight: "700", fontSize: "0.95rem", letterSpacing: "0.2px", color: "var(--text-main)" }}>
-                                        {logistics.transaction_ref}
+                                        <span data-i18n-user-content="true">{logistics.transaction_ref}</span>
                                     </div>
                                 </div>
                             </div>

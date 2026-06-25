@@ -7,12 +7,10 @@ import { NAV_MODULES, PRO_MODULES, PARTICULIER_MODULES, SALARIE_MODULES } from "
 import { Icon } from "../components/admin/Icon";
 import TutorialOverlay from "../components/shared/TutorialOverlay";
 import LanguageSwitcher from "../components/i18n/LanguageSwitcher";
-import { useI18n } from "../components/i18n/I18nProvider";
 
 export default function AdminLayout({ children }) {
     const pathname = usePathname();
     const router = useRouter();
-    const { translateText } = useI18n();
     const [user, setUser] = useState(null);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -415,7 +413,7 @@ export default function AdminLayout({ children }) {
     if (isCheckingAuth) {
         return (
             <div className="auth-loading-screen">
-                <div className="auth-loading-card">{translateText("Vérification de session...")}</div>
+                <div className="auth-loading-card">Vérification de session...</div>
             </div>
         );
     }
@@ -501,7 +499,7 @@ export default function AdminLayout({ children }) {
                     </div>
                     <span style={{ marginLeft: "0.5rem" }}>UpcycleConnect</span>
                     <span className="slash">|</span>
-                    <span style={{ color: "var(--text-muted)" }}>{translateText(activeModule.label)}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{activeModule.label}</span>
                 </div>
 
                 <div className="topbar-center">
@@ -513,8 +511,8 @@ export default function AdminLayout({ children }) {
                             type="button"
                             data-tutorial-subnav-id={subItem.key}
                         >
-                            <span className="action-label-long">{translateText(subItem.label)}</span>
-                            <span className="action-label-short">{translateText(subItem.shortLabel || subItem.label)}</span>
+                            <span className="action-label-long">{subItem.label}</span>
+                            <span className="action-label-short">{subItem.shortLabel || subItem.label}</span>
                         </button>
                     ))}
                 </div>
@@ -523,12 +521,12 @@ export default function AdminLayout({ children }) {
                     <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginRight: "1rem" }}>
                         <LanguageSwitcher />
                         <span style={{ fontSize: "0.8rem", fontWeight: "600", color: "var(--text-muted)" }}>{userDisplayName || user?.email}</span>
-                        <button className="top-icon" onClick={handleLogout} title={translateText("Se déconnecter")} aria-label={translateText("Se déconnecter")}><Icon path="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></button>
+                        <button className="top-icon" onClick={handleLogout} title="Se déconnecter" aria-label="Se déconnecter"><Icon path="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></button>
                         <button 
                             className="top-icon" 
                             onClick={toggleNotifications} 
-                            title={translateText("Notifications")}
-                            aria-label={translateText("Notifications")}
+                            title="Notifications"
+                            aria-label="Notifications"
                             style={{ position: "relative" }}
                         >
                             <Icon path="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" />
@@ -552,7 +550,7 @@ export default function AdminLayout({ children }) {
 
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 <aside className="sidebar">
-                    <nav className="sidebar-nav" aria-label={translateText("Navigation principale")}>
+                    <nav className="sidebar-nav" aria-label="Navigation principale">
                         {displayedModules.map((module) => {
                             const isActive = activeModule.key === module.key;
 
@@ -562,13 +560,13 @@ export default function AdminLayout({ children }) {
                                     className={`sidebar-item ${isActive ? "active" : ""}`}
                                     onClick={() => handleModuleChange(module.key)}
                                     type="button"
-                                    data-tooltip={translateText(module.label)}
+                                    data-tooltip={module.label}
                                     data-tutorial-id={module.key}
                                 >
                                     <span className={`sidebar-icon ${isActive ? "active" : ""}`}>
                                         <Icon path={module.icon} />
                                     </span>
-                                    <span className="sidebar-label">{translateText(module.label)}</span>
+                                    <span className="sidebar-label">{module.label}</span>
                                 </button>
                             );
                         })}
@@ -582,13 +580,13 @@ export default function AdminLayout({ children }) {
                         <div style={{ padding: "2rem", maxWidth: "800px" }}>
                             <div className="panel" style={{ textAlign: "center", padding: "4rem 2rem" }}>
                                 <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🚧</div>
-                                <h2 style={{ marginBottom: "1rem" }}>{translateText("Espace en construction")}</h2>
+                                <h2 style={{ marginBottom: "1rem" }}>Espace en construction</h2>
                                 <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", lineHeight: 1.6 }}>
-                                    {translateText("Bienvenue")}, <strong>{user?.email}</strong>.<br />
-                                    {translateText("Votre espace pour accéder au module")} <strong>{translateText(activeModule.label)}</strong> {translateText("est actuellement en cours de développement.")}
+                                    Bienvenue, <strong data-i18n-user-content="true">{user?.email}</strong>.<br />
+                                    Votre espace pour accéder au module <strong>{activeModule.label}</strong> est actuellement en cours de développement.
                                 </p>
                                 <p style={{ color: "var(--text-muted)", marginTop: "1rem" }}>
-                                    {translateText("Utilisez la barre latérale pour accéder aux fonctionnalités disponibles.")}
+                                    Utilisez la barre latérale pour accéder aux fonctionnalités disponibles.
                                 </p>
                             </div>
                         </div>
@@ -801,7 +799,7 @@ export default function AdminLayout({ children }) {
                                                 gap: "4px"
                                             }}>
                                                 <span>{indicator}</span>
-                                                {n.title}
+                                                <span data-i18n-user-content="true">{n.title}</span>
                                             </span>
                                             <button
                                                 onClick={(e) => {
@@ -830,7 +828,7 @@ export default function AdminLayout({ children }) {
                                             lineHeight: 1.4,
                                             fontWeight: n.unread ? "500" : "400"
                                         }}>
-                                            {n.message}
+                                            <span data-i18n-user-content="true">{n.message}</span>
                                         </p>
                                         <span style={{
                                             fontSize: "0.72rem",

@@ -188,7 +188,6 @@ export default function SettingsSubPage({ params }) {
         app_rating_received: true,
         email_rating_received: true,
         displayMode: "light",
-        language: "fr",
         mapType: "plan",
         showPhonePublicly: false,
         showEmailPublicly: false,
@@ -513,22 +512,6 @@ export default function SettingsSubPage({ params }) {
                     </div>
 
                     <div style={styles.settingsList}>
-                        {/* Language */}
-                        <div style={styles.settingItem}>
-                            <div style={styles.settingText}>
-                                <div style={styles.settingLabel}>Langue de l'interface</div>
-                                <div style={styles.settingDesc}>Choisir la langue d'affichage des menus et formulaires de l'application.</div>
-                            </div>
-                            <select 
-                                value={settings.language} 
-                                onChange={(e) => saveSetting("language", e.target.value)}
-                                style={styles.select}
-                            >
-                                <option value="fr">Français (FR)</option>
-                                <option value="en">English (EN)</option>
-                            </select>
-                        </div>
-
                         {/* Display Mode */}
                         <div style={styles.settingItem}>
                             <div style={styles.settingText}>

@@ -223,7 +223,7 @@ function ProjetsActifsContent() {
                 {filtered.map((project) => (
                     <div key={project.id} style={styles.card} onClick={() => router.push(`/projets/moderation/${project.id}`)}>
                         {project.previewImage ? (
-                            <img src={project.previewImage} alt={project.title || "Projet"} style={styles.cardImage} />
+                            <img src={project.previewImage} alt={project.title || "Projet"} style={styles.cardImage} data-i18n-user-content="true" />
                         ) : (
                             <div style={styles.cardFallback}>UpcycleConnect</div>
                         )}
@@ -231,13 +231,15 @@ function ProjetsActifsContent() {
                         <div style={styles.statusBadge}>ACTIF</div>
 
                         <div style={styles.cardOverlay}>
-                            <h3 style={styles.cardTitle}>{project.title || `Projet #${project.id}`}</h3>
+                            <h3 style={styles.cardTitle}>
+                                {project.title ? <span data-i18n-user-content="true">{project.title}</span> : <>Projet #{project.id}</>}
+                            </h3>
                             <p style={styles.description}>
-                                {project.category || "Catégorie non définie"} · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
+                                {project.category ? <span data-i18n-user-content="true">{project.category}</span> : "Catégorie non définie"} · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
                             </p>
-                            <p style={styles.authorLine}>Par {project.proDisplayName || "Professionnel"}</p>
+                            <p style={styles.authorLine}>Par {project.proDisplayName ? <span data-i18n-user-content="true">{project.proDisplayName}</span> : "Professionnel"}</p>
                             <div style={styles.tagsRow}>
-                                {project.category ? <span style={styles.tag}>{project.category}</span> : null}
+                                {project.category ? <span style={styles.tag} data-i18n-user-content="true">{project.category}</span> : null}
                                 <span style={styles.tag}>{project.itemCount || 0} objet(s)</span>
                                 <span style={styles.tag}>{Number(project.upcyclingScore || 0).toFixed(1)} points UC</span>
                             </div>

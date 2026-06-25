@@ -56,7 +56,7 @@ function AdminConseilCard({ item, onDetail, onEdit, onValidate, onOpenReject, on
             )}
             <div className="conseil-card-head">
                 <div className="conseil-card-head__author">
-                    <span className="conseil-card-head__name">{item.authorName}</span>
+                    <span className="conseil-card-head__name" data-i18n-user-content="true">{item.authorName}</span>
                     <IcVerified />
                     <span style={{ color: "#71767B", fontSize: "0.84rem" }}>·</span>
                     <span className="conseil-card-head__date">{formatDateFR(item.createdAt)}</span>
@@ -71,13 +71,13 @@ function AdminConseilCard({ item, onDetail, onEdit, onValidate, onOpenReject, on
             />
             {item.imageUrl && (
                 <div style={{ marginTop: "0.85rem", borderRadius: "16px", overflow: "hidden", border: "1px solid #EFF3F4" }}>
-                    <img src={item.imageUrl} alt={item.title || "Image"} style={{ width: "100%", maxHeight: "260px", objectFit: "cover", display: "block" }} onError={(e) => { e.target.parentElement.style.display = "none"; }} />
+                    <img src={item.imageUrl} alt={item.title || "Image"} style={{ width: "100%", maxHeight: "260px", objectFit: "cover", display: "block" }} onError={(e) => { e.target.parentElement.style.display = "none"; }} data-i18n-user-content="true" />
                 </div>
             )}
             {item.rejectionComment && (
                 <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.85rem", borderRadius: "12px", background: "#FDE8E8", border: "1px solid #f5c6c6" }}>
                     <p style={{ fontSize: "0.78rem", fontWeight: 600, color: "#B24A4A", margin: "0 0 0.15rem 0" }}>Motif de refus</p>
-                    <p style={{ fontSize: "0.8rem", color: "#B24A4A", margin: 0 }}>{item.rejectionComment}</p>
+                    <p style={{ fontSize: "0.8rem", color: "#B24A4A", margin: 0 }} data-i18n-user-content="true">{item.rejectionComment}</p>
                 </div>
             )}
             <div style={{ borderTop: "1px solid #EFF3F4", marginTop: "0.85rem", paddingTop: "0.65rem", display: "flex", gap: "1rem", fontSize: "0.8rem", color: "#71767B", marginBottom: "0.5rem" }}>
@@ -180,8 +180,8 @@ export default function ConseilsAdminView({ items = [], loading, errorMessage, f
                     <div style={{ color: "#A56A2A", paddingTop: "2px", flexShrink: 0 }}><IconPin /></div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "#A56A2A", margin: "0 0 0.2rem 0", textTransform: "uppercase", letterSpacing: "0.04em" }}>Conseil épinglé du jour</p>
-                        <p style={{ fontSize: "0.9rem", fontWeight: 600, margin: "0 0 0.15rem 0" }}>{pinnedItem.title}</p>
-                        <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: 0 }}>par {pinnedItem.authorName}</p>
+                        <p style={{ fontSize: "0.9rem", fontWeight: 600, margin: "0 0 0.15rem 0" }} data-i18n-user-content="true">{pinnedItem.title}</p>
+                        <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: 0 }}>par <span data-i18n-user-content="true">{pinnedItem.authorName}</span></p>
                     </div>
                     <button type="button" className="action-cta" onClick={() => openDetail(pinnedItem)} style={{ flexShrink: 0, fontSize: "0.82rem", padding: "0.4rem 0.9rem" }}>Voir</button>
                 </div>

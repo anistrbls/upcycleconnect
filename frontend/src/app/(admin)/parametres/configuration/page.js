@@ -39,8 +39,8 @@ function getEmptyLanguageDraft() {
         nativeLabel: "",
         dir: "ltr",
         enabled: true,
-        phrases: {},
-        patterns: [],
+        phrasesText: "{\n  \"Connexion\": \"Login\"\n}",
+        patternsText: "[]",
     };
 }
 
@@ -51,10 +51,76 @@ function languageToDraft(language) {
         nativeLabel: language?.nativeLabel || "",
         dir: language?.dir === "rtl" ? "rtl" : "ltr",
         enabled: language?.enabled !== false,
-        phrases: language?.phrases || {},
-        patterns: Array.isArray(language?.patterns) ? language.patterns : [],
+        phrasesText: JSON.stringify(language?.phrases || {}, null, 2),
+        patternsText: JSON.stringify(Array.isArray(language?.patterns) ? language.patterns : [], null, 2),
     };
 }
+
+async function loadStaticLanguageCatalog(code) {
+    if (!code) return null;
+    try {
+        const res = await fetch(`/locales/${code}.json`, { cache: "no-store" });
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
+}
+
+function mergeLanguageCatalog(language, staticCatalog) {
+    const staticPhrases = staticCatalog?.phrases && typeof staticCatalog.phrases === "object" && !Array.isArray(staticCatalog.phrases)
+        ? staticCatalog.phrases
+        : {};
+    const languagePhrases = language?.phrases && typeof language.phrases === "object" && !Array.isArray(language.phrases)
+        ? language.phrases
+        : {};
+    const staticPatterns = Array.isArray(staticCatalog?.patterns) ? staticCatalog.patterns : [];
+    const languagePatterns = Array.isArray(language?.patterns) ? language.patterns : [];
+    const seenPatterns = new Set();
+    const patterns = [...staticPatterns, ...languagePatterns].filter((pattern) => {
+        if (!pattern?.match || !pattern?.replace) return false;
+        const key = `${pattern.match}|||${pattern.replace}`;
+        if (seenPatterns.has(key)) return false;
+        seenPatterns.add(key);
+        return true;
+    });
+
+    return {
+        ...language,
+        phrases: { ...staticPhrases, ...languagePhrases },
+        patterns,
+    };
+}
+
+function parseLanguageJSON(value, fallback, expectedType) {
+    const raw = String(value || "").trim();
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (expectedType === "object" && (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) {
+        throw new Error("Le catalogue doit être un objet JSON.");
+    }
+    if (expectedType === "array" && !Array.isArray(parsed)) {
+        throw new Error("Les règles dynamiques doivent être un tableau JSON.");
+    }
+    return parsed;
+}
+
+function sortInterfaceLanguages(items) {
+    const priority = { fr: 0, en: 1 };
+    return [...items].sort((a, b) => {
+        const first = priority[a.code] ?? 10;
+        const second = priority[b.code] ?? 10;
+        if (first !== second) return first - second;
+        return String(a.code || "").localeCompare(String(b.code || ""));
+    });
+}
+
+const PROTECTED_LANGUAGE_DELETE_MESSAGE = "Cette langue est protégée et ne peut pas être supprimée.";
+const isLanguageDeletable = (language) => {
+    if (!language) return false;
+    if (typeof language.canDelete === "boolean") return language.canDelete;
+    return !language.isBuiltin && language.code !== "fr";
+};
 
 // ── Row catégorie (avec emoji) ────────────────────────────────────────────────
 function CategoryRow({ cat, onSave, onDelete }) {
@@ -391,10 +457,10 @@ function MaterialRow({ material, onSave, onDelete }) {
     );
 }
 
-function LanguageRow({ language, onEdit, onToggle, onDelete, toggling }) {
+function LanguageRow({ language, onEdit, onDelete }) {
     const totalRules = Number(language.phraseCount || 0) + Number(language.patternCount || 0);
     const codeLabel = String(language.code || "").toUpperCase();
-    const cacheLabel = `${totalRules} texte${totalRules > 1 ? "s" : ""} en cache`;
+    const canDelete = isLanguageDeletable(language);
 
     return (
         <div style={{ ...rowStyle, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -417,7 +483,7 @@ function LanguageRow({ language, onEdit, onToggle, onDelete, toggling }) {
                     {language.nativeLabel}
                 </span>
                 <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {language.label} · {language.dir === "rtl" ? "RTL" : "LTR"}
+                    {language.label} · {language.dir === "rtl" ? "RTL" : "LTR"} · {language.enabled === false ? "inactive" : "active"}
                 </span>
             </div>
             <span style={{
@@ -428,34 +494,28 @@ function LanguageRow({ language, onEdit, onToggle, onDelete, toggling }) {
                 borderRadius: "10px",
                 whiteSpace: "nowrap",
             }}>
-                {language.isBuiltin ? `Intégrée · ${cacheLabel}` : cacheLabel}
+                {language.isBuiltin ? "Intégrée · " : ""}{totalRules} entrée{totalRules > 1 ? "s" : ""}
             </span>
-            <label style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                fontSize: "0.78rem",
-                color: language.isBuiltin ? "var(--text-muted)" : "var(--text-main)",
-                cursor: language.isBuiltin ? "not-allowed" : "pointer",
-                marginTop: "0.35rem",
-            }}>
-                <input
-                    type="checkbox"
-                    checked={language.enabled !== false}
-                    disabled={language.isBuiltin || toggling}
-                    onChange={(e) => onToggle(language, e.target.checked)}
-                    style={{ width: "15px", height: "15px", accentColor: "var(--forest-deep)" }}
-                />
-                Active
-            </label>
             <button type="button" title="Modifier" onClick={() => onEdit(language)} style={iconBtn}>
                 <Pencil size={14} />
             </button>
-            {!language.isBuiltin && (
-                <button type="button" title="Supprimer" onClick={() => onDelete(language)} style={{ ...iconBtn, color: "var(--state-critical)" }}>
-                    <Trash2 size={14} />
-                </button>
-            )}
+            <button
+                type="button"
+                title={canDelete ? "Supprimer la langue" : "Langue protégée non supprimable"}
+                aria-label={canDelete ? "Supprimer la langue" : "Langue protégée non supprimable"}
+                disabled={!canDelete}
+                onClick={() => {
+                    if (canDelete) onDelete(language);
+                }}
+                style={{
+                    ...iconBtn,
+                    color: canDelete ? "var(--state-critical)" : "var(--text-muted)",
+                    cursor: canDelete ? "pointer" : "not-allowed",
+                    opacity: canDelete ? 1 : 0.45,
+                }}
+            >
+                <Trash2 size={14} />
+            </button>
         </div>
     );
 }
@@ -677,17 +737,10 @@ export default function ConfigurationPage() {
     const [editingLanguage, setEditingLanguage] = useState(null);
     const [languageDraft, setLanguageDraft] = useState(getEmptyLanguageDraft);
     const [savingLanguage, setSavingLanguage] = useState(false);
-    const [togglingLanguageCode, setTogglingLanguageCode] = useState("");
 
     const [toast, setToast] = useState(null);
 
     const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
-
-    const notifyI18nRefresh = () => {
-        if (typeof window !== "undefined") {
-            window.dispatchEvent(new Event(I18N_REFRESH_EVENT));
-        }
-    };
 
     useEffect(() => {
         setDismissedMaterialSuggestions(loadDismissedConseilMaterialSuggestions());
@@ -802,7 +855,7 @@ export default function ConfigurationPage() {
             const res = await fetch(apiUrl("/admin/i18n/languages"), { headers: buildAuthHeaders() });
             if (!res.ok) throw new Error();
             const data = await res.json();
-            setInterfaceLanguages(data.items || []);
+            setInterfaceLanguages(sortInterfaceLanguages(data.items || []));
         } catch {
             showToast("Impossible de charger les langues.", "error");
         } finally {
@@ -1201,138 +1254,130 @@ export default function ConfigurationPage() {
         finally { setAddingReason(false); }
     };
 
-    // ── CRUD langues de l'interface
+    const refreshI18nRuntime = () => {
+        if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event(I18N_REFRESH_EVENT));
+        }
+    };
+
+    const closeLanguageModal = () => {
+        setLanguageModalOpen(false);
+        setEditingLanguage(null);
+        setLanguageDraft(getEmptyLanguageDraft());
+    };
+
     const openLanguageCreateModal = () => {
         setEditingLanguage(null);
         setLanguageDraft(getEmptyLanguageDraft());
         setLanguageModalOpen(true);
+        loadStaticLanguageCatalog("fr").then((catalog) => {
+            if (!catalog?.phrases) return;
+            setLanguageDraft((current) => ({
+                ...current,
+                phrasesText: JSON.stringify(catalog.phrases, null, 2),
+                patternsText: JSON.stringify(Array.isArray(catalog.patterns) ? catalog.patterns : [], null, 2),
+            }));
+        });
     };
 
     const openLanguageEditModal = (language) => {
         setEditingLanguage(language);
         setLanguageDraft(languageToDraft(language));
         setLanguageModalOpen(true);
-    };
-
-    const closeLanguageModal = () => {
-        if (savingLanguage) return;
-        setLanguageModalOpen(false);
-        setEditingLanguage(null);
-        setLanguageDraft(getEmptyLanguageDraft());
-    };
-
-    const languageErrorMessage = (message) => {
-        if (message === "language code already exists") return "Cette langue existe déjà.";
-        if (message === "invalid locale code") return "Code de langue invalide.";
-        if (message === "label and nativeLabel are required") return "Nom et nom natif sont obligatoires.";
-        if (message === "builtin language cannot be deleted") return "Cette langue intégrée ne peut pas être supprimée.";
-        return message || "Opération impossible.";
-    };
-
-    const saveLanguagePayload = async (language, method, path) => {
-        const res = await fetch(apiUrl(path), {
-            method,
-            headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify(language),
+        loadStaticLanguageCatalog(language.code).then((catalog) => {
+            if (!catalog) return;
+            setLanguageDraft(languageToDraft(mergeLanguageCatalog(language, catalog)));
         });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Opération impossible.");
-        return data;
+    };
+
+    const buildLanguagePayload = () => {
+        const phrases = parseLanguageJSON(languageDraft.phrasesText, {}, "object");
+        const patterns = parseLanguageJSON(languageDraft.patternsText, [], "array");
+        return {
+            code: languageDraft.code.trim().toLowerCase().replaceAll("_", "-"),
+            label: languageDraft.label.trim(),
+            nativeLabel: languageDraft.nativeLabel.trim(),
+            dir: languageDraft.dir === "rtl" ? "rtl" : "ltr",
+            enabled: Boolean(languageDraft.enabled),
+            phrases,
+            patterns,
+        };
     };
 
     const handleSaveLanguage = async () => {
-        const code = String(editingLanguage?.code || languageDraft.code || "").trim().toLowerCase().replaceAll("_", "-");
-        const label = languageDraft.label.trim();
-        const nativeLabel = languageDraft.nativeLabel.trim();
-        if (!code || !label || !nativeLabel) {
-            showToast("Code, nom et nom natif sont obligatoires.", "error");
-            return;
-        }
-
+        if (!languageDraft.code.trim() || !languageDraft.label.trim() || !languageDraft.nativeLabel.trim()) return;
         setSavingLanguage(true);
         try {
-            const payload = {
-                code,
-                label,
-                nativeLabel,
-                dir: languageDraft.dir === "rtl" ? "rtl" : "ltr",
-                enabled: Boolean(languageDraft.enabled),
-                phrases: languageDraft.phrases || {},
-                patterns: Array.isArray(languageDraft.patterns) ? languageDraft.patterns : [],
-            };
-            const isEditing = Boolean(editingLanguage);
-            const saved = await saveLanguagePayload(
-                payload,
-                isEditing ? "PUT" : "POST",
-                isEditing ? `/admin/i18n/languages/${encodeURIComponent(code)}` : "/admin/i18n/languages"
-            );
+            const payload = buildLanguagePayload();
+            const endpoint = editingLanguage
+                ? apiUrl(`/admin/i18n/languages/${editingLanguage.code}`)
+                : apiUrl("/admin/i18n/languages");
+            const res = await fetch(endpoint, {
+                method: editingLanguage ? "PUT" : "POST",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || "Impossible d'enregistrer la langue.");
+            }
 
             setInterfaceLanguages((prev) => {
-                const next = isEditing
-                    ? prev.map((language) => language.code === saved.code ? saved : language)
-                    : [...prev, saved];
-                return next.sort((a, b) => {
-                    const order = { fr: 0, en: 1, es: 2 };
-                    return (order[a.code] ?? 3) - (order[b.code] ?? 3) || a.code.localeCompare(b.code);
-                });
+                const withoutCurrent = prev.filter((language) => language.code !== data.code);
+                return sortInterfaceLanguages([...withoutCurrent, data]);
             });
-            notifyI18nRefresh();
-            setLanguageModalOpen(false);
-            setEditingLanguage(null);
-            setLanguageDraft(getEmptyLanguageDraft());
-            showToast(isEditing ? "Langue mise à jour." : "Langue ajoutée.");
+            refreshI18nRuntime();
+            closeLanguageModal();
+            showToast(editingLanguage ? "Langue mise à jour." : "Langue ajoutée.");
         } catch (e) {
-            showToast(languageErrorMessage(e.message), "error");
+            const message = String(e?.message || "").trim();
+            if (message === "language code already exists") {
+                showToast("Ce code langue existe déjà.", "error");
+            } else if (message === "invalid locale code") {
+                showToast("Code langue invalide. Exemple attendu : en, pt-br.", "error");
+            } else if (message === "patterns require match and replace") {
+                showToast("Chaque règle dynamique doit contenir match et replace.", "error");
+            } else if (message.startsWith("Unexpected") || message.includes("JSON")) {
+                showToast("Le JSON du catalogue est invalide.", "error");
+            } else {
+                showToast(message || "Impossible d'enregistrer la langue.", "error");
+            }
         } finally {
             setSavingLanguage(false);
         }
     };
 
-    const handleToggleLanguage = async (language, enabled) => {
-        if (language.isBuiltin) return;
-        setTogglingLanguageCode(language.code);
-        try {
-            const payload = {
-                code: language.code,
-                label: language.label,
-                nativeLabel: language.nativeLabel,
-                dir: language.dir === "rtl" ? "rtl" : "ltr",
-                enabled,
-                phrases: language.phrases || {},
-                patterns: Array.isArray(language.patterns) ? language.patterns : [],
-            };
-            const saved = await saveLanguagePayload(payload, "PUT", `/admin/i18n/languages/${encodeURIComponent(language.code)}`);
-            setInterfaceLanguages((prev) => prev.map((item) => item.code === saved.code ? saved : item));
-            notifyI18nRefresh();
-            showToast(enabled ? "Langue activée." : "Langue désactivée.");
-        } catch (e) {
-            showToast(languageErrorMessage(e.message), "error");
-        } finally {
-            setTogglingLanguageCode("");
-        }
-    };
-
     const handleDeleteLanguage = async (language) => {
-        if (language.isBuiltin) return;
+        if (!language) return;
+        if (!isLanguageDeletable(language)) {
+            showToast(PROTECTED_LANGUAGE_DELETE_MESSAGE, "error");
+            return;
+        }
         if (!window.confirm(`Supprimer la langue « ${language.nativeLabel || language.code} » ?`)) return;
+
         try {
-            const res = await fetch(apiUrl(`/admin/i18n/languages/${encodeURIComponent(language.code)}`), {
+            const res = await fetch(apiUrl(`/admin/i18n/languages/${language.code}`), {
                 method: "DELETE",
                 headers: buildAuthHeaders(),
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || "Suppression impossible.");
+            if (!res.ok) {
+                const apiMessage = String(data?.error || "");
+                if (apiMessage === "builtin language cannot be deleted") {
+                    throw new Error(PROTECTED_LANGUAGE_DELETE_MESSAGE);
+                }
+                if (apiMessage === "language not found") {
+                    throw new Error("Langue introuvable.");
+                }
+                throw new Error("Impossible de supprimer cette langue.");
+            }
             setInterfaceLanguages((prev) => prev.filter((item) => item.code !== language.code));
-            notifyI18nRefresh();
+            if (editingLanguage?.code === language.code) closeLanguageModal();
+            refreshI18nRuntime();
             showToast("Langue supprimée.");
         } catch (e) {
-            showToast(languageErrorMessage(e.message), "error");
+            showToast(e?.message || "Impossible de supprimer cette langue.", "error");
         }
-    };
-
-    const languageCacheStats = {
-        phrases: Object.keys(languageDraft.phrases || {}).length,
-        patterns: Array.isArray(languageDraft.patterns) ? languageDraft.patterns.length : 0,
     };
 
     return (
@@ -1355,7 +1400,7 @@ export default function ConfigurationPage() {
                     icon={Languages}
                     title="Langues de l'interface"
                     addLabel="Nouvelle langue"
-                    description="Ajoutez une langue, DeepL traduit automatiquement les pages via l'API et le cache est stocké en base."
+                    description="Catalogues internes administrables, sans service de traduction externe."
                     count={interfaceLanguages.length}
                     loading={languageLoading}
                     onAdd={openLanguageCreateModal}
@@ -1365,9 +1410,7 @@ export default function ConfigurationPage() {
                             key={language.code}
                             language={language}
                             onEdit={openLanguageEditModal}
-                            onToggle={handleToggleLanguage}
                             onDelete={handleDeleteLanguage}
-                            toggling={togglingLanguageCode === language.code}
                         />
                     ))}
                 </ConfigSection>
@@ -1623,137 +1666,108 @@ export default function ConfigurationPage() {
                 </div>
             </AdminModal>
 
-            {/* ── Modal langue d'interface ── */}
-            <AdminModal
-                open={languageModalOpen}
-                title={editingLanguage ? "Modifier la langue" : "Nouvelle langue"}
-                onClose={closeLanguageModal}
-            >
+            {/* ── Modal langue de l'interface ── */}
+            <AdminModal open={languageModalOpen} title={editingLanguage ? "Modifier la langue" : "Nouvelle langue"} onClose={closeLanguageModal}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "1rem", padding: "0.5rem 0" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "0.8fr 1fr 1fr", gap: "0.75rem" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: "0.75rem" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                             <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Code *</label>
                             <input
-                                autoFocus={!editingLanguage}
-                                disabled={Boolean(editingLanguage)}
-                                placeholder="it"
                                 value={languageDraft.code}
-                                onChange={e => setLanguageDraft(d => ({ ...d, code: e.target.value.toLowerCase().replaceAll("_", "-") }))}
-                                style={{
-                                    padding: "0.65rem 0.9rem",
-                                    borderRadius: "12px",
-                                    border: "1px solid var(--border)",
-                                    fontSize: "0.95rem",
-                                    outline: "none",
-                                    fontFamily: "inherit",
-                                    color: "var(--text-main)",
-                                    background: editingLanguage ? "var(--surface-hover)" : "#fff",
-                                }}
+                                disabled={Boolean(editingLanguage)}
+                                placeholder="pt-br"
+                                onChange={e => setLanguageDraft(d => ({ ...d, code: e.target.value.toLowerCase() }))}
+                                style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)", background: editingLanguage ? "var(--surface-hover)" : "white" }}
                             />
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom *</label>
+                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom en français *</label>
                             <input
-                                autoFocus={Boolean(editingLanguage)}
-                                placeholder="Italien"
                                 value={languageDraft.label}
+                                placeholder="Ex : Portugais"
                                 onChange={e => setLanguageDraft(d => ({ ...d, label: e.target.value }))}
-                                style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }}
-                            />
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom natif *</label>
-                            <input
-                                placeholder="Italiano"
-                                value={languageDraft.nativeLabel}
-                                onChange={e => setLanguageDraft(d => ({ ...d, nativeLabel: e.target.value }))}
                                 style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }}
                             />
                         </div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", alignItems: "end" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: "0.75rem" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Direction</label>
+                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Nom natif *</label>
+                            <input
+                                value={languageDraft.nativeLabel}
+                                placeholder="Ex : Português"
+                                onChange={e => setLanguageDraft(d => ({ ...d, nativeLabel: e.target.value }))}
+                                style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }}
+                            />
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                            <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Sens</label>
                             <select
                                 value={languageDraft.dir}
                                 onChange={e => setLanguageDraft(d => ({ ...d, dir: e.target.value }))}
-                                style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)" }}
+                                style={{ padding: "0.65rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.95rem", outline: "none", fontFamily: "inherit", color: "var(--text-main)", background: "white" }}
                             >
                                 <option value="ltr">LTR</option>
                                 <option value="rtl">RTL</option>
                             </select>
                         </div>
-                        <label style={{ display: "flex", alignItems: "center", gap: "0.55rem", padding: "0.65rem 0", fontSize: "0.88rem", fontWeight: "500", color: "var(--text-main)", cursor: editingLanguage?.isBuiltin ? "not-allowed" : "pointer" }}>
-                            <input
-                                type="checkbox"
-                                checked={languageDraft.enabled}
-                                disabled={Boolean(editingLanguage?.isBuiltin)}
-                                onChange={e => setLanguageDraft(d => ({ ...d, enabled: e.target.checked }))}
-                                style={{ width: "16px", height: "16px", accentColor: "var(--forest-deep)" }}
-                            />
-                            Langue active
-                        </label>
                     </div>
 
-                    <div style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "1rem",
-                        padding: "1rem",
-                        borderRadius: "16px",
-                        background: "rgba(229, 255, 188, 0.35)",
-                        border: "1px solid rgba(46, 125, 50, 0.18)",
-                    }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 0 }}>
-                            <span style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--text-main)" }}>
-                                Traduction automatique via DeepL
-                            </span>
-                            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
-                                Aucun catalogue à saisir. Dès qu'un utilisateur sélectionne cette langue, les textes visibles sont traduits par l'API puis enregistrés en cache.
-                            </span>
-                        </div>
-                        <span style={{
-                            fontSize: "0.74rem",
-                            color: "var(--text-muted)",
-                            background: "rgba(35,59,61,0.06)",
-                            padding: "0.35rem 0.65rem",
-                            borderRadius: "10px",
-                            whiteSpace: "nowrap",
-                        }}>
-                            {languageCacheStats.phrases} texte{languageCacheStats.phrases > 1 ? "s" : ""} en cache
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", cursor: editingLanguage?.isBuiltin ? "not-allowed" : "pointer", fontSize: "0.88rem", fontWeight: "500", color: "var(--text-main)" }}>
+                        <input
+                            type="checkbox"
+                            checked={languageDraft.enabled}
+                            disabled={Boolean(editingLanguage?.isBuiltin)}
+                            onChange={e => setLanguageDraft(d => ({ ...d, enabled: e.target.checked }))}
+                            style={{ width: "16px", height: "16px", accentColor: "var(--forest-deep)" }}
+                        />
+                        Langue active dans le sélecteur
+                    </label>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Catalogue des phrases *</label>
+                        <textarea
+                            value={languageDraft.phrasesText}
+                            onChange={e => setLanguageDraft(d => ({ ...d, phrasesText: e.target.value }))}
+                            rows={10}
+                            spellCheck={false}
+                            style={{ padding: "0.75rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.86rem", outline: "none", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", color: "var(--text-main)", resize: "vertical", lineHeight: 1.45 }}
+                        />
+                        <span style={{ fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+                            Objet JSON : chaque clé est le texte français présent sur le site, chaque valeur est sa traduction.
+                        </span>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <label style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: "500" }}>Règles dynamiques</label>
+                        <textarea
+                            value={languageDraft.patternsText}
+                            onChange={e => setLanguageDraft(d => ({ ...d, patternsText: e.target.value }))}
+                            rows={5}
+                            spellCheck={false}
+                            style={{ padding: "0.75rem 0.9rem", borderRadius: "12px", border: "1px solid var(--border)", fontSize: "0.86rem", outline: "none", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", color: "var(--text-main)", resize: "vertical", lineHeight: 1.45 }}
+                        />
+                        <span style={{ fontSize: "0.76rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+                            Tableau JSON facultatif, par exemple {"[{\"match\":\"{{count}} éléments\",\"replace\":\"{{count}} items\"}]"}.
                         </span>
                     </div>
 
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", paddingTop: "0.5rem" }}>
                         <button
+                            type="button"
                             onClick={closeLanguageModal}
-                            disabled={savingLanguage}
-                            style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: savingLanguage ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}
+                            style={{ border: "none", background: "var(--surface-hover)", borderRadius: "12px", padding: "0.6rem 1.2rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem" }}
                         >
                             Annuler
                         </button>
                         <button
+                            type="button"
                             onClick={handleSaveLanguage}
                             disabled={!languageDraft.code.trim() || !languageDraft.label.trim() || !languageDraft.nativeLabel.trim() || savingLanguage}
-                            style={{
-                                border: "none",
-                                background: languageDraft.code.trim() && languageDraft.label.trim() && languageDraft.nativeLabel.trim() ? "var(--black)" : "var(--border)",
-                                color: languageDraft.code.trim() && languageDraft.label.trim() && languageDraft.nativeLabel.trim() ? "white" : "var(--text-muted)",
-                                borderRadius: "12px",
-                                padding: "0.6rem 1.4rem",
-                                cursor: languageDraft.code.trim() && languageDraft.label.trim() && languageDraft.nativeLabel.trim() && !savingLanguage ? "pointer" : "not-allowed",
-                                fontFamily: "inherit",
-                                fontSize: "0.85rem",
-                                fontWeight: "600",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0.4rem",
-                            }}
+                            style={{ border: "none", background: languageDraft.code.trim() && languageDraft.label.trim() && languageDraft.nativeLabel.trim() ? "var(--black)" : "var(--border)", color: languageDraft.code.trim() && languageDraft.label.trim() && languageDraft.nativeLabel.trim() ? "white" : "var(--text-muted)", borderRadius: "12px", padding: "0.6rem 1.4rem", cursor: languageDraft.code.trim() && languageDraft.label.trim() && languageDraft.nativeLabel.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "0.4rem" }}
                         >
-                            {savingLanguage ? <Loader2 size={14} style={spinStyle} /> : <Check size={14} />}
-                            {editingLanguage ? "Enregistrer" : "Ajouter"}
+                            {savingLanguage ? <Loader2 size={14} style={spinStyle} /> : <Check size={14} />} Enregistrer
                         </button>
                     </div>
                 </div>

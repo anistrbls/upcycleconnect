@@ -105,8 +105,8 @@ export default function OverviewStats({ data, loading, error, onReload }) {
                             {d.recentBookings.map((b) => (
                                 <div key={b.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
                                     <div>
-                                        <div style={{ fontWeight: 500, fontSize: "0.88rem" }}>{b.userName}</div>
-                                        <div style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{b.serviceName}</div>
+                                        <div style={{ fontWeight: 500, fontSize: "0.88rem" }} data-i18n-user-content="true">{b.userName}</div>
+                                        <div style={{ color: "var(--text-muted)", fontSize: "0.78rem" }} data-i18n-user-content="true">{b.serviceName}</div>
                                     </div>
                                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.2rem" }}>
                                         <StatusBadge status={b.status} />
@@ -132,8 +132,8 @@ export default function OverviewStats({ data, loading, error, onReload }) {
                             {d.recentServices.map((s) => (
                                 <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
                                     <div>
-                                        <div style={{ fontWeight: 500, fontSize: "0.88rem" }}>{s.name}</div>
-                                        <div style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{s.categoryName || "-"}</div>
+                                        <div style={{ fontWeight: 500, fontSize: "0.88rem" }} data-i18n-user-content="true">{s.name}</div>
+                                        <div style={{ color: "var(--text-muted)", fontSize: "0.78rem" }} data-i18n-user-content="true">{s.categoryName || "-"}</div>
                                     </div>
                                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.2rem" }}>
                                         <StatusBadge status={s.status} />

@@ -375,6 +375,10 @@ body {
     grid-area: right;
   }
 
+  .language-switcher__label {
+    display: none;
+  }
+
   .action-btn {
     font-size: 0.78rem;
     padding: 0.55rem 0.8rem;
@@ -392,9 +396,6 @@ body {
     gap: 0.5rem;
   }
 
-  .language-switcher__label {
-    display: none;
-  }
 }
 
 

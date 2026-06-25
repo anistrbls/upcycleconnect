@@ -1165,6 +1165,7 @@ function AnnonceDetailContent() {
                                     <img
                                         src={photos[activePhoto]}
                                         alt={annonce.title}
+                                        data-i18n-user-content="true"
                                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
                                     />
                                 )}
@@ -1241,7 +1242,7 @@ function AnnonceDetailContent() {
                         <div style={{ background: "#F7F8F7", borderRadius: "24px", padding: "1.15rem", border: "none", display: "flex", flexDirection: "column", justifyContent: "space-between", minHeight: 0 }}>
                             <div>
                             <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>{isAdmin ? "Vue administrateur" : "Votre annonce"}</div>
-                            <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: "1.12", letterSpacing: "-0.03em" }}>{annonce.title}</h1>
+                            <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: "1.12", letterSpacing: "-0.03em" }} data-i18n-user-content="true">{annonce.title}</h1>
                             {isDon ? (
                                 <div style={{ fontSize: "1.5rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>Gratuit</div>
                             ) : saleModeAdded && feeCents > 0 ? (
@@ -1260,7 +1261,7 @@ function AnnonceDetailContent() {
                             )}
 
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", color: "var(--text-muted)", fontSize: "0.84rem", marginBottom: "1rem" }}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}><MapPin size={12} /> {annonce.city}{annonce.zip ? ` · ${annonce.zip}` : ""}</span>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }} data-i18n-user-content="true"><MapPin size={12} /> {annonce.city}{annonce.zip ? ` · ${annonce.zip}` : ""}</span>
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}><Calendar size={12} /> {annonce.date}</span>
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}><Tag size={12} /> {isDon ? "Don" : "Vente"}</span>
                             </div>
@@ -1398,6 +1399,7 @@ function AnnonceDetailContent() {
                                         <img
                                             src={authorProfile.avatar}
                                             alt={authorName}
+                                            data-i18n-user-content="true"
                                             style={{ width: "46px", height: "46px", borderRadius: "50%", objectFit: "cover", border: "none" }}
                                         />
                                     ) : (
@@ -1407,7 +1409,7 @@ function AnnonceDetailContent() {
                                     )}
 
                                     <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontSize: "0.98rem", fontWeight: "700", color: "var(--text-main)", lineHeight: "1.2", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                        <div style={{ fontSize: "0.98rem", fontWeight: "700", color: "var(--text-main)", lineHeight: "1.2", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} data-i18n-user-content="true">
                                             {authorProfile.name}
                                         </div>
                                         <div style={{ display: "flex", alignItems: "center", gap: "0.32rem", marginTop: "0.24rem" }}>
@@ -1488,7 +1490,7 @@ function AnnonceDetailContent() {
                                     <div style={{ fontSize: "0.68rem", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.38rem" }}>{label}</div>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.94rem", fontWeight: "600", color: "var(--text-main)", lineHeight: "1.45" }}>
                                         <span style={{ color: "var(--forest-deep)", display: "flex", flexShrink: 0 }}>{icon}</span>
-                                        <span>{val}</span>
+                                        <span data-i18n-user-content="true">{val}</span>
                                     </div>
                                 </div>
                             ))}

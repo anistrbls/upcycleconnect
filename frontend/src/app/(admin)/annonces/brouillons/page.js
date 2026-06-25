@@ -418,6 +418,7 @@ function BrouillonsContent() {
                             <img
                                 src={annonce.image}
                                 alt={annonce.title}
+                                data-i18n-user-content="true"
                                 style={styles.cardImage}
                             />
                             <div style={styles.blurLayer} />
@@ -427,17 +428,17 @@ function BrouillonsContent() {
                             </div>
                             <div style={styles.cardOverlay}>
                                 <div style={styles.titlePriceRow}>
-                                    <h3 style={styles.cardTitle}>{annonce.title}</h3>
+                                    <h3 style={styles.cardTitle} data-i18n-user-content="true">{annonce.title}</h3>
                                     <div style={styles.pricePill}>
                                         {annonce.type === "don" ? "GRATUIT" : formatBuyerCardPrice(annonce)}
                                     </div>
                                 </div>
-                                <p style={styles.description}>
+                                <p style={styles.description} data-i18n-user-content="true">
                                     {annonce.city || "Ville non définie"} · Créé le {annonce.date}
                                 </p>
                                 {annonce.category && (
                                     <div style={styles.tagsRow}>
-                                        <span style={styles.tag}>{annonce.category}</span>
+                                        <span style={styles.tag} data-i18n-user-content="true">{annonce.category}</span>
                                         <span style={styles.tag}>{annonce.type === "don" ? "Don" : "Vente"}</span>
                                     </div>
                                 )}

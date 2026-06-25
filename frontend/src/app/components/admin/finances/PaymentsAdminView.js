@@ -132,19 +132,19 @@ export default function PaymentsAdminView() {
                                     return (
                                     <tr key={`${p.source}-${p.sourceId}-${i}`} className="table-row-hover" style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.2s" }}>
                                         <td style={{ padding: "1.2rem 1.5rem" }}>
-                                            <div style={{ fontWeight: "700", color: "var(--text-main)", marginBottom: "0.2rem" }}>{p.entityName}</div>
+                                            <div style={{ fontWeight: "700", color: "var(--text-main)", marginBottom: "0.2rem" }} data-i18n-user-content="true">{p.entityName}</div>
                                             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                                 <span>{formatDate(p.date)}</span>
                                                 {p.transactionRef && (
                                                     <>
                                                         <span style={{ opacity: 0.3 }}>•</span>
-                                                        <span style={{ fontFamily: "monospace", opacity: 0.8 }} title={p.transactionRef}>Ref. Stripe: {p.transactionRef}</span>
+                                                        <span style={{ fontFamily: "monospace", opacity: 0.8 }} title="Référence Stripe">Ref. Stripe: <span data-i18n-user-content="true">{p.transactionRef}</span></span>
                                                     </>
                                                 )}
                                             </div>
                                         </td>
                                         <td style={{ padding: "1.2rem 1.5rem" }}>
-                                            <div style={{ fontWeight: "600" }}>{p.userName}</div>
+                                            <div style={{ fontWeight: "600" }} data-i18n-user-content="true">{p.userName}</div>
                                             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>ID #USR-{p.userId}</div>
                                         </td>
                                         <td style={{ padding: "1.2rem 1.5rem" }}>

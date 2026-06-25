@@ -452,15 +452,15 @@ export default function SubscriptionsAdminView() {
                                         <tr key={user.id} className="table-row-hover" style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.2s" }}>
                                             <td style={{ padding: "1.2rem 1.5rem" }}>
                                                 <div style={{ fontWeight: "700", color: "var(--text-main)", marginBottom: "0.2rem" }}>
-                                                    {user.companyName || "—"}
+                                                    <span data-i18n-user-content="true">{user.companyName || "—"}</span>
                                                 </div>
                                                 <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                                                    SIRET : {user.siret || "—"}
+                                                    SIRET : <span data-i18n-user-content="true">{user.siret || "—"}</span>
                                                 </div>
                                             </td>
                                             <td style={{ padding: "1.2rem 1.5rem" }}>
-                                                <div style={{ fontWeight: "600" }}>{user.firstname} {user.lastname}</div>
-                                                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{user.email}</div>
+                                                <div style={{ fontWeight: "600" }} data-i18n-user-content="true">{user.firstname} {user.lastname}</div>
+                                                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }} data-i18n-user-content="true">{user.email}</div>
                                             </td>
                                             <td style={{ padding: "1.2rem 1.5rem" }}>
                                                 {isPremiumAtelier ? (
@@ -590,7 +590,7 @@ export default function SubscriptionsAdminView() {
                                         {/* Card Header */}
                                         <div style={{ padding: "2rem 1.5rem", background: bgHeader, borderBottom: "1px solid var(--border-color)" }}>
                                             <h3 style={{ fontSize: "1.25rem", fontWeight: "700", color: color, marginBottom: "0.5rem" }}>
-                                                {p.name}
+                                                <span data-i18n-user-content="true">{p.name}</span>
                                             </h3>
                                             <div style={{ display: "flex", alignItems: "baseline" }}>
                                                 <span style={{ fontSize: "2.25rem", fontWeight: "800", color: "var(--text-main)" }}>
@@ -608,7 +608,7 @@ export default function SubscriptionsAdminView() {
                                                 {(p.features || []).map((f, i) => (
                                                     <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", fontSize: "0.88rem", color: "var(--text-main)" }}>
                                                         <Check size={16} color={color} style={{ marginTop: "0.15rem", flexShrink: 0 }} />
-                                                        <span>{f}</span>
+                                                        <span data-i18n-user-content="true">{f}</span>
                                                     </li>
                                                 ))}
                                                 {(!p.features || p.features.length === 0) && (
@@ -657,15 +657,15 @@ export default function SubscriptionsAdminView() {
             {/* Modal "Gérer l'abonnement" */}
             <AdminModal
                 open={modalOpen}
-                title={`Modifier l'abonnement : ${selectedUser?.companyName || selectedUser?.firstname}`}
+                title={<>Modifier l'abonnement : <span data-i18n-user-content="true">{selectedUser?.companyName || selectedUser?.firstname || ""}</span></>}
                 onClose={() => setModalOpen(false)}
             >
                 <form onSubmit={handleSaveSubscription} style={{ display: "grid", gap: "1.25rem", marginTop: "1rem" }}>
                     
                     <div style={{ background: "#f8fafb", padding: "1rem", borderRadius: "16px", border: "1px solid #e2eaea", fontSize: "0.85rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                        <div><strong style={{ color: "var(--text-main)" }}>Professionnel :</strong> {selectedUser?.firstname} {selectedUser?.lastname}</div>
-                        <div><strong style={{ color: "var(--text-main)" }}>Email :</strong> {selectedUser?.email}</div>
-                        <div><strong style={{ color: "var(--text-main)" }}>SIRET :</strong> {selectedUser?.siret}</div>
+                        <div><strong style={{ color: "var(--text-main)" }}>Professionnel :</strong> <span data-i18n-user-content="true">{selectedUser?.firstname} {selectedUser?.lastname}</span></div>
+                        <div><strong style={{ color: "var(--text-main)" }}>Email :</strong> <span data-i18n-user-content="true">{selectedUser?.email}</span></div>
+                        <div><strong style={{ color: "var(--text-main)" }}>SIRET :</strong> <span data-i18n-user-content="true">{selectedUser?.siret}</span></div>
                     </div>
 
                     <label style={labelStyle}>
@@ -735,7 +735,7 @@ export default function SubscriptionsAdminView() {
             {/* Modal "Modifier l'offre d'abonnement" */}
             <AdminModal
                 open={editModalOpen}
-                title={`Configurer l'offre : ${editFormData.name}`}
+                title={<>Configurer l'offre : <span data-i18n-user-content="true">{editFormData.name}</span></>}
                 onClose={() => setEditModalOpen(false)}
             >
                 <form onSubmit={handleSavePlan} style={{ display: "grid", gap: "1.25rem", marginTop: "1rem" }}>

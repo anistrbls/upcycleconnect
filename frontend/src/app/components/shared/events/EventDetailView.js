@@ -403,7 +403,9 @@ export default function EventDetailView({ eventId, onBack }) {
                                 </div>
                                 <div style={{ fontSize: "0.9rem", lineHeight: 1.58, color: "var(--text-muted)", maxWidth: "72ch" }}>
                                     <span style={{ color: "var(--text-main)", fontWeight: 700 }}>Motif du refus :</span>{" "}
-                                    {event.rejectionComment || event.moderationComment || event.moderationNote || "Aucun motif n'a ete renseigne."}
+                                    {event.rejectionComment || event.moderationComment || event.moderationNote ? (
+                                        <span data-i18n-user-content="true">{event.rejectionComment || event.moderationComment || event.moderationNote}</span>
+                                    ) : "Aucun motif n'a ete renseigne."}
                                 </div>
                             </div>
                         </div>
@@ -413,7 +415,7 @@ export default function EventDetailView({ eventId, onBack }) {
                 {event.status === "annule" && (
                     <div style={{ background: "rgba(214, 78, 40, 0.08)", border: "1px solid rgba(214, 78, 40, 0.16)", borderRadius: "18px", padding: "0.95rem 1rem", color: "#A43B21", fontSize: "0.9rem", lineHeight: 1.5 }}>
                         <strong>Evenement annule.</strong>
-                        {event.rejectionComment ? ` ${event.rejectionComment}` : " L'organisateur a annule cet evenement."}
+                        {event.rejectionComment ? <> <span data-i18n-user-content="true">{event.rejectionComment}</span></> : " L'organisateur a annule cet evenement."}
                     </div>
                 )}
 
@@ -428,6 +430,7 @@ export default function EventDetailView({ eventId, onBack }) {
                                         src={photos[activePhoto]}
                                         alt={event.name}
                                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1 }}
+                                        data-i18n-user-content="true"
                                     />
                                 ) : (
                                     <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#2d3738" }}>
@@ -450,13 +453,13 @@ export default function EventDetailView({ eventId, onBack }) {
                         <div style={{ background: "#F7F8F7", borderRadius: "24px", padding: "1.5rem", border: "none", display: "flex", flexDirection: "column", justifyContent: "space-between", minHeight: 0 }}>
                             <div>
                                 <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>Détails de l'événement</div>
-                                <h1 style={{ fontSize: "1.84rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.5rem", lineHeight: "1.1", letterSpacing: "-0.03em" }}>{event.name}</h1>
+                                <h1 style={{ fontSize: "1.84rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.5rem", lineHeight: "1.1", letterSpacing: "-0.03em" }} data-i18n-user-content="true">{event.name}</h1>
                                 <div style={{ fontSize: "1.62rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.8rem" }}>
                                     {event.pricingType === "payant" ? `${event.price} €` : "Gratuit"}
                                 </div>
 
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.8rem", color: "var(--text-muted)", fontSize: "0.86rem", marginBottom: "1.2rem" }}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><MapPin size={14} /> {event.lieu || "Lieu non précisé"}</span>
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><MapPin size={14} /> {event.lieu ? <span data-i18n-user-content="true">{event.lieu}</span> : "Lieu non précisé"}</span>
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><Calendar size={14} /> {day}</span>
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><Clock size={14} /> {startTime} - {endTime}</span>
                                 </div>
@@ -564,7 +567,7 @@ export default function EventDetailView({ eventId, onBack }) {
                                                     <div style={{ marginBottom: "0.2rem" }}>
                                                         <div style={{ fontSize: "0.65rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>Référence de paiement</div>
                                                         <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem", color: "var(--text-main)", fontWeight: "600", fontFamily: "monospace" }}>
-                                                            <CreditCard size={13} style={{ color: "#2563eb" }} /> {event.transactionRef}
+                                                            <CreditCard size={13} style={{ color: "#2563eb" }} /> <span data-i18n-user-content="true">{event.transactionRef}</span>
                                                         </div>
                                                     </div>
                                                 )}
@@ -592,7 +595,7 @@ export default function EventDetailView({ eventId, onBack }) {
                                                     <div style={{ marginBottom: "0.2rem" }}>
                                                         <div style={{ fontSize: "0.65rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>Référence de paiement</div>
                                                         <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem", color: "var(--text-main)", fontWeight: "600", fontFamily: "monospace" }}>
-                                                            <CreditCard size={13} style={{ color: "#2563eb" }} /> {event.transactionRef}
+                                                            <CreditCard size={13} style={{ color: "#2563eb" }} /> <span data-i18n-user-content="true">{event.transactionRef}</span>
                                                         </div>
                                                     </div>
                                                 )}
@@ -641,7 +644,7 @@ export default function EventDetailView({ eventId, onBack }) {
                             <Info size={20} color="black" /> À propos de cet événement
                         </h2>
                         <div style={{ fontSize: "1.02rem", color: "var(--text-main)", lineHeight: "1.75", whiteSpace: "pre-wrap" }}>
-                            {event.description || "Aucune description fournie pour cet événement."}
+                            {event.description ? <span data-i18n-user-content="true">{event.description}</span> : "Aucune description fournie pour cet événement."}
                         </div>
                     </div>
 
@@ -654,7 +657,9 @@ export default function EventDetailView({ eventId, onBack }) {
                             </div>
                             <div style={{ padding: "1rem", background: "white", borderRadius: "16px", border: "1px solid rgba(0,0,0,0.03)" }}>
                                 <div style={{ fontSize: "0.7rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: "0.3rem" }}>Organisé par</div>
-                                <div style={{ fontWeight: "600", fontSize: "0.92rem" }}>{event.intervenantName || "UpcycleConnect Team"}</div>
+                                <div style={{ fontWeight: "600", fontSize: "0.92rem" }}>
+                                    {event.intervenantName ? <span data-i18n-user-content="true">{event.intervenantName}</span> : "UpcycleConnect Team"}
+                                </div>
                             </div>
                             <div style={{ padding: "1.2rem", background: "var(--accent-light)", borderRadius: "16px", color: "var(--accent-dark)" }}>
                                 <div style={{ fontSize: "0.85rem", fontWeight: "700", marginBottom: "0.4rem" }}>Besoin d'aide ?</div>

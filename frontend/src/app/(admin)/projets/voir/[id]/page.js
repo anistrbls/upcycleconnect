@@ -203,10 +203,10 @@ function ProjectDetailInner() {
         <div style={styles.container}>
             <div style={styles.headerRow}>
                 <div>
-                    <h1 style={styles.title}>{project.title}</h1>
+                    <h1 style={styles.title} data-i18n-user-content="true">{project.title}</h1>
                     <div style={styles.meta}>
                         <Tag size={14} style={{ display: "inline", marginRight: "0.4rem", verticalAlign: "middle" }} />
-                        {project.category} · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
+                        <span data-i18n-user-content="true">{project.category}</span> · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
                     </div>
                 </div>
             </div>
@@ -234,7 +234,9 @@ function ProjectDetailInner() {
                     {/* Description */}
                     <div style={styles.card}>
                         <h2 style={styles.sectionTitle}><Leaf size={18} /> Histoire du projet</h2>
-                        <p style={styles.description}>{project.description || "Pas de description pour ce projet."}</p>
+                        <p style={styles.description}>
+                            {project.description ? <span data-i18n-user-content="true">{project.description}</span> : "Pas de description pour ce projet."}
+                        </p>
                     </div>
 
                     {normalizedSteps.length > 0 && (
@@ -245,7 +247,7 @@ function ProjectDetailInner() {
                                     <div key={`step-${idx}`} style={styles.stepRow}>
                                         <div style={styles.stepBullet}>{idx + 1}</div>
                                         <div>
-                                            <p style={styles.stepText}>{step.text}</p>
+                                            <p style={styles.stepText} data-i18n-user-content="true">{step.text}</p>
                                             {step.imageUrl ? (
                                                 <img src={step.imageUrl} alt={`Étape ${idx + 1}`} style={styles.stepImage} />
                                             ) : null}
@@ -263,10 +265,10 @@ function ProjectDetailInner() {
                             <div style={{ display: "grid", gap: "0.5rem" }}>
                                 {items.map(it => (
                                     <div key={it.id} style={styles.itemRow}>
-                                        {it.itemImage ? <img src={it.itemImage} alt={it.itemTitle} style={styles.itemThumb} /> : <div style={{ ...styles.itemThumb, background: "#eee", display: "flex", alignItems: "center", justifyContent: "center" }}><Box size={20} color="#ccc" /></div>}
+                                        {it.itemImage ? <img src={it.itemImage} alt={it.itemTitle} style={styles.itemThumb} data-i18n-user-content="true" /> : <div style={{ ...styles.itemThumb, background: "#eee", display: "flex", alignItems: "center", justifyContent: "center" }}><Box size={20} color="#ccc" /></div>}
                                         <div style={{ flex: 1 }}>
-                                            <p style={{ margin: 0, fontWeight: "700", fontSize: "0.95rem" }}>{it.itemTitle}</p>
-                                            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>{it.material} · {it.weightGrams >= 1000 ? (it.weightGrams/1000).toFixed(2) + " kg" : it.weightGrams + " g"}</p>
+                                            <p style={{ margin: 0, fontWeight: "700", fontSize: "0.95rem" }} data-i18n-user-content="true">{it.itemTitle}</p>
+                                            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}><span data-i18n-user-content="true">{it.material}</span> · {it.weightGrams >= 1000 ? (it.weightGrams/1000).toFixed(2) + " kg" : it.weightGrams + " g"}</p>
                                         </div>
                                     </div>
                                 ))}
@@ -321,13 +323,13 @@ function ProjectDetailInner() {
                             <div style={styles.proAvatar}>{proInitials}</div>
                             <div style={styles.proInfo}>
                                 <span style={styles.proTag}>Réalisé par</span>
-                                <p style={styles.proName}>{author?.fullName}</p>
+                                <p style={styles.proName} data-i18n-user-content="true">{author?.fullName}</p>
                                 {author?.companyName && author.companyName !== "N/A" && (
                                     <p style={{ fontSize: "0.85rem", opacity: 0.7, margin: "0.15rem 0 0 0", fontStyle: "italic" }}>
-                                        {author.companyName}
+                                        <span data-i18n-user-content="true">{author.companyName}</span>
                                     </p>
                                 )}
-                                {project.lieu && <span style={{ fontSize: "0.8rem", opacity: 0.6, display: "flex", alignItems: "center", gap: "4px", marginTop: "0.4rem" }}><MapPin size={12} /> {project.lieu}</span>}
+                                {project.lieu && <span style={{ fontSize: "0.8rem", opacity: 0.6, display: "flex", alignItems: "center", gap: "4px", marginTop: "0.4rem" }} data-i18n-user-content="true"><MapPin size={12} /> {project.lieu}</span>}
                             </div>
                         </div>
                         <div style={styles.proStats}>

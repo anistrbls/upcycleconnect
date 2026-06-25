@@ -163,7 +163,7 @@ function ConseilPhotosField({ photos, coverIndex, onPhotosChange, onCoverIndexCh
         <div style={S.card} className="conseil-form-photos">
             <h2 style={S.sectionTitle}>Photos du conseil</h2>
             <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 1rem 0" }}>
-                Ajoutez jusqu&apos;à {MAX_CONSEIL_PHOTOS} images. Cliquez sur une vignette pour la définir comme image principale.
+                {`Ajoutez jusqu'à ${MAX_CONSEIL_PHOTOS} images. Cliquez sur une vignette pour la définir comme image principale.`}
             </p>
 
             {list.length > 0 && (

@@ -445,21 +445,21 @@ function ModerationContent() {
                             }
                         }}
                     >
-                        <img src={annonce.image} alt={annonce.title} style={styles.cardImage} />
+                        <img src={annonce.image} alt={annonce.title} style={styles.cardImage} data-i18n-user-content="true" />
                         <div style={styles.blurLayer} />
                         <div style={styles.gradientLayer} />
                         <div style={styles.statusBadge(normalizeStatus(annonce.status))}>{String(annonce.status).toUpperCase()}</div>
                         <div style={styles.cardOverlay}>
                             <div style={styles.titlePriceRow}>
-                                <h3 style={styles.cardTitle}>{annonce.title}</h3>
+                                <h3 style={styles.cardTitle} data-i18n-user-content="true">{annonce.title}</h3>
                                 <div style={styles.pricePill}>
                                     {annonce.type === "don" ? "GRATUIT" : formatBuyerCardPrice(annonce)}
                                 </div>
                             </div>
-                            <p style={styles.description}>{annonce.city || "Ville non définie"} · Publiée le {annonce.date || "date inconnue"}</p>
-                            <p style={styles.authorLine}>Par {getAnnonceAuthor(annonce)}</p>
+                            <p style={styles.description} data-i18n-user-content="true">{annonce.city || "Ville non définie"} · Publiée le {annonce.date || "date inconnue"}</p>
+                            <p style={styles.authorLine} data-i18n-user-content="true">Par {getAnnonceAuthor(annonce)}</p>
                             <div style={styles.tagsRow}>
-                                {annonce.category && <span style={styles.tag}>{annonce.category}</span>}
+                                {annonce.category && <span style={styles.tag} data-i18n-user-content="true">{annonce.category}</span>}
                                 <span style={styles.tag}>{annonce.type === "don" ? "Don" : "Vente"}</span>
                             </div>
                             
