@@ -9,20 +9,28 @@ export function normalizeDepositCodeForQr(code) {
 }
 
 function codeToSvgHtml(value, pixelSize, purpose) {
-    const qr = createQr(0, "M");
-    qr.addData(value);
-    qr.make();
-    const n = qr.getModuleCount();
-    const margin = 2;
-    const inner = Math.max(48, pixelSize - margin * 2 - 4);
-    const cellSize = Math.max(2, Math.floor(inner / n));
-    const altLabel = purpose === "pickup" ? "Code récupération" : "Code dépôt";
-    return qr.createSvgTag({
-        cellSize,
-        margin,
-        scalable: true,
-        alt: { text: `${altLabel} ${value}` },
-    });
+    try {
+        const qr = createQr(0, "M");
+        qr.addData(value, "Byte");
+        qr.make();
+        const n = qr.getModuleCount();
+        const margin = 2;
+        const inner = Math.max(48, pixelSize - margin * 2 - 4);
+        const cellSize = Math.max(2, Math.floor(inner / n));
+        const altLabel = purpose === "pickup" ? "Code récupération" : "Code dépôt";
+        const svg = qr.createSvgTag({
+            cellSize,
+            margin,
+            scalable: true,
+            alt: { text: `${altLabel} ${value}` },
+        });
+        // Force the SVG to fill its container — without explicit dimensions the
+        // scalable SVG collapses to 0px height inside a flex/inline-flex parent.
+        return svg.replace("<svg ", `<svg style="width:100%;height:auto;display:block;" `);
+    } catch (e) {
+        console.warn("[DepositCodeQrPanel] QR generation failed:", e);
+        return "";
+    }
 }
 
 /**

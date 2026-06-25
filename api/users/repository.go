@@ -74,6 +74,9 @@ func (r *Repository) EnsureSchema() error {
 		// Nouveaux champs Admin
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_role TEXT NOT NULL DEFAULT ''`,
 
+		// Tutoriel
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_completed BOOLEAN NOT NULL DEFAULT false`,
+
 		// Index
 		`CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role)`,
@@ -104,6 +107,7 @@ func (r *Repository) List(f ListFilters) ([]User, error) {
 		       activity_type, intervention_zone, subscription_type, subscription_start,
 		       employment_status, job_function, employee_role, site_location, skills,
 		       admin_role, admin_note,
+		       tutorial_completed,
 		       created_at, updated_at, last_login_at, sessions_invalid_before
 		FROM users
 		WHERE ($1 = '' OR firstname ILIKE '%' || $1 || '%'
@@ -141,6 +145,7 @@ func (r *Repository) GetByID(id int64) (User, error) {
 		       activity_type, intervention_zone, subscription_type, subscription_start,
 		       employment_status, job_function, employee_role, site_location, skills,
 		       admin_role, admin_note,
+		       tutorial_completed,
 		       created_at, updated_at, last_login_at, sessions_invalid_before
 		FROM users
 		WHERE id = $1
@@ -193,6 +198,7 @@ func (r *Repository) Create(p CreatePayload, passwordHash string) (User, error) 
 		          activity_type, intervention_zone, subscription_type, subscription_start,
 		          employment_status, job_function, employee_role, site_location, skills,
 		          admin_role, admin_note,
+		          tutorial_completed,
 		          created_at, updated_at, last_login_at, sessions_invalid_before
 	`,
 		strings.TrimSpace(p.Firstname),
@@ -269,6 +275,7 @@ func (r *Repository) Update(id int64, p UpdatePayload) (User, error) {
 		          activity_type, intervention_zone, subscription_type, subscription_start,
 		          employment_status, job_function, employee_role, site_location, skills,
 		          admin_role, admin_note,
+		          tutorial_completed,
 		          created_at, updated_at, last_login_at, sessions_invalid_before
 	`,
 		strings.TrimSpace(p.Firstname),
@@ -321,6 +328,7 @@ func (r *Repository) SetStatus(id int64, status string) (User, error) {
 		          activity_type, intervention_zone, subscription_type, subscription_start,
 		          employment_status, job_function, employee_role, site_location, skills,
 		          admin_role, admin_note,
+		          tutorial_completed,
 		          created_at, updated_at, last_login_at, sessions_invalid_before
 	`, status, id)
 	return scanRow(row)
@@ -365,6 +373,7 @@ func (r *Repository) UpdateProfile(id int64, p UpdateProfilePayload) (User, erro
 		          activity_type, intervention_zone, subscription_type, subscription_start,
 		          employment_status, job_function, employee_role, site_location, skills,
 		          admin_role, admin_note,
+		          tutorial_completed,
 		          created_at, updated_at, last_login_at, sessions_invalid_before
 	`,
 		strings.TrimSpace(p.Firstname),
@@ -399,6 +408,7 @@ func scanRows(rows *sql.Rows) (User, error) {
 		&u.ActivityType, &u.InterventionZone, &u.SubscriptionType, &subscriptionStart,
 		&u.EmploymentStatus, &u.JobFunction, &u.EmployeeRole, &u.SiteLocation, &u.Skills,
 		&u.AdminRole, &u.AdminNote,
+		&u.TutorialCompleted,
 		&u.CreatedAt, &u.UpdatedAt, &lastLogin, &sessionsInvalidBefore,
 	)
 	if err != nil {
@@ -442,6 +452,24 @@ func (r *Repository) GetSellerRatingAggregate(sellerUserID int64) (avg *float64,
 	return nil, count, nil
 }
 
+// GetProRatingAggregate retourne la moyenne et le nombre d'avis dans seller_pro_ratings pour ce professionnel (pro_user_id).
+func (r *Repository) GetProRatingAggregate(proUserID int64) (avg *float64, count int64, err error) {
+	var avgNull sql.NullFloat64
+	err = r.db.QueryRow(`
+		SELECT AVG(stars)::float8, COUNT(*)::bigint
+		FROM seller_pro_ratings
+		WHERE pro_user_id = $1
+	`, proUserID).Scan(&avgNull, &count)
+	if err != nil {
+		return nil, 0, err
+	}
+	if count > 0 && avgNull.Valid {
+		v := avgNull.Float64
+		return &v, count, nil
+	}
+	return nil, count, nil
+}
+
 func scanRow(row *sql.Row) (User, error) {
 	var u User
 	var lastLogin sql.NullTime
@@ -455,6 +483,7 @@ func scanRow(row *sql.Row) (User, error) {
 		&u.ActivityType, &u.InterventionZone, &u.SubscriptionType, &subscriptionStart,
 		&u.EmploymentStatus, &u.JobFunction, &u.EmployeeRole, &u.SiteLocation, &u.Skills,
 		&u.AdminRole, &u.AdminNote,
+		&u.TutorialCompleted,
 		&u.CreatedAt, &u.UpdatedAt, &lastLogin, &sessionsInvalidBefore,
 	)
 	if err != nil {

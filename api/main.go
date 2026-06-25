@@ -139,6 +139,7 @@ func main() {
 	mux.HandleFunc("GET /api/i18n/languages", i18nLanguagesPublicHandler)
 	mux.HandleFunc("GET /api/i18n/messages/{locale}", i18nMessagesPublicHandler)
 	mux.Handle("/api/auth/me", authMiddleware(http.HandlerFunc(meHandler)))
+	mux.Handle("/api/auth/tutorial/complete", authMiddleware(http.HandlerFunc(completeTutorialHandler)))
 	mux.Handle("/api/admin/i18n/languages", authMiddleware(http.HandlerFunc(i18nLanguagesAdminHandler)))
 	mux.Handle("/api/admin/i18n/languages/", authMiddleware(http.HandlerFunc(i18nLanguageByCodeAdminHandler)))
 	mux.Handle("/api/admin/service-categories", authMiddleware(http.HandlerFunc(serviceCategoriesHandler)))
@@ -253,6 +254,7 @@ func main() {
 
 	// === Dashboard Stats (Admin) ===
 	mux.Handle("/api/admin/dashboard/stats", authMiddleware(http.HandlerFunc(dashboardStatsHandler)))
+	mux.Handle("/api/user/dashboard/stats", authMiddleware(http.HandlerFunc(userDashboardStatsHandler)))
 
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
 	users.RegisterRoutes(mux, db, authMiddleware)
@@ -3225,8 +3227,9 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 	var firstname, lastname string
 	var subscriptionType, companyName, siret sql.NullString
 	var subscriptionStart sql.NullTime
-	err := db.QueryRow("SELECT firstname, lastname, subscription_type, subscription_start, company_name, siret FROM users WHERE id = $1", id).Scan(
-		&firstname, &lastname, &subscriptionType, &subscriptionStart, &companyName, &siret,
+	var tutorialCompleted bool
+	err := db.QueryRow("SELECT firstname, lastname, subscription_type, subscription_start, company_name, siret, tutorial_completed FROM users WHERE id = $1", id).Scan(
+		&firstname, &lastname, &subscriptionType, &subscriptionStart, &companyName, &siret, &tutorialCompleted,
 	)
 	if err != nil {
 		firstname = ""
@@ -3235,11 +3238,12 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 
 	role, _ := claims["role"].(string)
 	userPayload := map[string]any{
-		"id":        id,
-		"email":     claims["email"],
-		"role":      role,
-		"firstname": firstname,
-		"lastname":  lastname,
+		"id":                id,
+		"email":             claims["email"],
+		"role":              role,
+		"firstname":         firstname,
+		"lastname":          lastname,
+		"tutorialCompleted": tutorialCompleted,
 	}
 	if subscriptionType.Valid {
 		userPayload["subscriptionType"] = subscriptionType.String
@@ -3270,6 +3274,51 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"user":          userPayload,
 	})
+}
+
+func completeTutorialHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	claimsValue := r.Context().Value(authClaimsKey)
+	claims, ok := claimsValue.(jwt.MapClaims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "invalid auth context")
+		return
+	}
+
+	var idVal any
+	idVal = claims["userId"]
+	if idVal == nil {
+		email, _ := claims["sub"].(string)
+		var dbID int64
+		err := db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&dbID)
+		if err == nil {
+			idVal = dbID
+		}
+	}
+
+	var id int64
+	if v, ok := idVal.(float64); ok {
+		id = int64(v)
+	} else if v, ok := idVal.(int64); ok {
+		id = v
+	}
+
+	if id == 0 {
+		writeError(w, http.StatusUnauthorized, "user not found")
+		return
+	}
+
+	_, err := db.Exec("UPDATE users SET tutorial_completed = true, updated_at = NOW() WHERE id = $1", id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update tutorial status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tutorialCompleted": true})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
@@ -6892,7 +6941,7 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'particulier'").Scan(&particuliers)
 
 	var pros int
-	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'pro'").Scan(&pros)
+	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE role IN ('professionnel', 'pro')").Scan(&pros)
 
 	var salaries int
 	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'salarie'").Scan(&salaries)
@@ -6912,6 +6961,63 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 	var upcyclingProjects int
 	_ = db.QueryRow("SELECT COUNT(*) FROM upcycling_projects").Scan(&upcyclingProjects)
 
+	// Opérations du jour
+	var annoncesDeposees, annoncesValidees, depotsConteneurs, objetsRecuperes, inscriptionsFormations, paiementsConfirmes, nouveauxAbonnements, notificationsPush int
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE DATE(created_at) = CURRENT_DATE").Scan(&annoncesDeposees)
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE status = 'actif' AND DATE(updated_at) = CURRENT_DATE").Scan(&annoncesValidees)
+	_ = db.QueryRow("SELECT COUNT(*) FROM item_logistics WHERE workflow_status IN ('deposited', 'available') AND DATE(deposited_at) = CURRENT_DATE").Scan(&depotsConteneurs)
+	_ = db.QueryRow("SELECT COUNT(*) FROM item_logistics WHERE workflow_status = 'picked_up' AND DATE(picked_up_at) = CURRENT_DATE").Scan(&objetsRecuperes)
+	_ = db.QueryRow("SELECT COUNT(*) FROM service_bookings WHERE DATE(created_at) = CURRENT_DATE").Scan(&inscriptionsFormations)
+	_ = db.QueryRow("SELECT COUNT(*) FROM stripe_webhook_events WHERE event_type = 'payment_intent.succeeded' AND DATE(processed_at) = CURRENT_DATE").Scan(&paiementsConfirmes)
+	_ = db.QueryRow("SELECT COUNT(*) FROM users WHERE subscription_start IS NOT NULL AND DATE(subscription_start) = CURRENT_DATE").Scan(&nouveauxAbonnements)
+	_ = db.QueryRow("SELECT COUNT(*) FROM notifications WHERE DATE(created_at) = CURRENT_DATE").Scan(&notificationsPush)
+
+	operationsToday := map[string]int{
+		"annoncesDeposees": annoncesDeposees,
+		"annoncesValidees": annoncesValidees,
+		"depotsConteneurs": depotsConteneurs,
+		"objetsRecuperes": objetsRecuperes,
+		"inscriptionsFormations": inscriptionsFormations,
+		"paiementsConfirmes": paiementsConfirmes,
+		"nouveauxAbonnements": nouveauxAbonnements,
+		"notificationsPush": notificationsPush,
+	}
+
+	// Alertes
+	var alertesOperationnelles, moderationCommunautaire, alertesAdministratives int
+	_ = db.QueryRow("SELECT COUNT(*) FROM containers WHERE maintenance_start IS NOT NULL AND maintenance_end IS NULL").Scan(&alertesOperationnelles)
+	_ = db.QueryRow("SELECT COUNT(*) FROM forum_reports WHERE status = 'pending'").Scan(&moderationCommunautaire)
+
+	alerts := map[string]int{
+		"alertesOperationnelles": alertesOperationnelles,
+		"moderationCommunautaire": moderationCommunautaire,
+		"alertesAdministratives": alertesAdministratives,
+	}
+
+	// Flux d'activité en direct
+	type Activity struct {
+		ID          string    `json:"id"`
+		Type        string    `json:"type"`
+		Description string    `json:"description"`
+		Timestamp   time.Time `json:"timestamp"`
+	}
+	var realtimeActivity []Activity
+	rows, err := db.Query(`
+		(SELECT id::text, 'item_created' as type, title as description, created_at as ts FROM items ORDER BY created_at DESC LIMIT 3)
+		UNION ALL
+		(SELECT id::text, 'user_registered' as type, email as description, created_at as ts FROM users ORDER BY created_at DESC LIMIT 3)
+		ORDER BY ts DESC
+		LIMIT 5
+	`)
+	if err == nil {
+		for rows.Next() {
+			var a Activity
+			_ = rows.Scan(&a.ID, &a.Type, &a.Description, &a.Timestamp)
+			realtimeActivity = append(realtimeActivity, a)
+		}
+		rows.Close()
+	}
+
 	stats := map[string]interface{}{
 		"totalUsers": totalUsers,
 		"particuliers": particuliers,
@@ -6922,6 +7028,196 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 		"donItems": donItems,
 		"venteItems": venteItems,
 		"upcyclingProjects": upcyclingProjects,
+		"operationsToday": operationsToday,
+		"alerts": alerts,
+		"realtimeActivity": realtimeActivity,
+	}
+
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	claimsValue := r.Context().Value(authClaimsKey)
+	claims, ok := claimsValue.(jwt.MapClaims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "invalid auth context")
+		return
+	}
+
+	var idVal any = claims["userId"]
+	if idVal == nil {
+		email, _ := claims["sub"].(string)
+		var dbID int64
+		_ = db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&dbID)
+		idVal = dbID
+	}
+
+	var id int64
+	if v, ok := idVal.(float64); ok {
+		id = int64(v)
+	} else if v, ok := idVal.(int64); ok {
+		id = v
+	}
+
+	role, _ := claims["role"].(string)
+
+	stats := make(map[string]interface{})
+
+	// Champs communs à tous : note vendeur et score
+	urepo := users.NewRepository(db)
+	
+	if role == "professionnel" || role == "pro" {
+		avg, cnt, err := urepo.GetProRatingAggregate(id)
+		if err == nil {
+			if avg != nil {
+				stats["sellerRatingAvg"] = *avg
+			}
+			stats["sellerRatingCount"] = cnt
+		}
+	} else {
+		avg, cnt, err := urepo.GetSellerRatingAggregate(id)
+		if err == nil {
+			if avg != nil {
+				stats["sellerRatingAvg"] = *avg
+			}
+			stats["sellerRatingCount"] = cnt
+		}
+	}
+
+	if role == "professionnel" || role == "pro" {
+		prepo := projects.NewRepository(db)
+		score, err := prepo.GetProUCConnectScore(id)
+		if err == nil {
+			stats["userScore"] = score
+		}
+	}
+
+	var subscriptionType string
+	_ = db.QueryRow("SELECT COALESCE(subscription_type, '') FROM users WHERE id = $1", id).Scan(&subscriptionType)
+	if role == "professionnel" || role == "pro" {
+		if subscriptionType != "pro_essentiel" && subscriptionType != "premium_atelier" {
+			subscriptionType = "decouverte"
+		}
+	}
+	stats["subscriptionType"] = subscriptionType
+
+	if role == "particulier" {
+		var annoncesDeposees, annoncesActives, reservationsEnCours, objetsDonnes int
+		_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE user_id = $1 AND deleted_by_user = false", id).Scan(&annoncesDeposees)
+		_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE user_id = $1 AND status = 'actif' AND deleted_by_user = false", id).Scan(&annoncesActives)
+
+		var eventBookings, serviceBookings int
+		_ = db.QueryRow("SELECT COUNT(*) FROM event_registrations WHERE user_id = $1 AND status != 'cancelled'", id).Scan(&eventBookings)
+		_ = db.QueryRow("SELECT COUNT(*) FROM service_bookings WHERE user_id = $1 AND booking_status IN ('pending', 'confirmed')", id).Scan(&serviceBookings)
+		reservationsEnCours = eventBookings + serviceBookings
+
+		_ = db.QueryRow("SELECT COUNT(*) FROM items i JOIN item_logistics l ON i.id = l.item_id WHERE i.user_id = $1 AND i.type = 'don' AND l.workflow_status = 'picked_up'", id).Scan(&objetsDonnes)
+
+		// Dépenses du particulier (ce mois)
+		var depensesAteliers, depensesEvenements float64
+		_ = db.QueryRow(`
+			SELECT COALESCE(SUM(sb.amount), 0)
+			FROM service_bookings sb
+			WHERE sb.user_id = $1
+			  AND sb.booking_status = 'confirmed'
+			  AND DATE_TRUNC('month', sb.created_at) = DATE_TRUNC('month', NOW())
+		`, id).Scan(&depensesAteliers)
+		_ = db.QueryRow(`
+			SELECT COALESCE(SUM(e.price), 0)
+			FROM event_registrations er
+			JOIN events e ON e.id = er.event_id
+			WHERE er.user_id = $1
+			  AND er.payment_status = 'paid'
+			  AND er.status != 'cancelled'
+			  AND DATE_TRUNC('month', er.created_at) = DATE_TRUNC('month', NOW())
+		`, id).Scan(&depensesEvenements)
+
+		// Dépenses du particulier (ce mois) — achat d'objets (paiements Stripe associés à la logistique)
+		var depensesObjets float64
+		_ = db.QueryRow(`
+			SELECT COALESCE(SUM(COALESCE(il.stripe_amount_cents, 0))::double precision / 100.0, 0)
+			FROM item_logistics il
+			WHERE il.reserved_by_user_id = $1
+			  AND il.workflow_status = 'picked_up'
+			  AND DATE_TRUNC('month', il.picked_up_at) = DATE_TRUNC('month', NOW())
+		`, id).Scan(&depensesObjets)
+
+		// Revenus du particulier — ventes d'items ce mois
+		var revenusVentes float64
+		_ = db.QueryRow(`
+			SELECT COALESCE(SUM(COALESCE(il.stripe_amount_cents, 0))::double precision / 100.0, 0)
+			FROM item_logistics il
+			JOIN items i ON i.id = il.item_id
+			WHERE i.user_id = $1
+			  AND i.type = 'vente'
+			  AND il.workflow_status = 'picked_up'
+			  AND DATE_TRUNC('month', il.picked_up_at) = DATE_TRUNC('month', NOW())
+		`, id).Scan(&revenusVentes)
+
+		stats["annoncesDeposees"] = annoncesDeposees
+		stats["annoncesActives"] = annoncesActives
+		stats["reservationsEnCours"] = reservationsEnCours
+		stats["objetsDonnes"] = objetsDonnes
+		stats["depenses"] = map[string]interface{}{
+			"ateliers":   depensesAteliers,
+			"evenements": depensesEvenements,
+			"objets":     depensesObjets,
+			"total":      depensesAteliers + depensesEvenements + depensesObjets,
+		}
+		stats["revenus"] = map[string]interface{}{
+			"ventes": revenusVentes,
+			"total":  revenusVentes,
+		}
+	} else if role == "professionnel" || role == "pro" {
+		var objetsTraites, reservationsGerees, totalAbonnements int
+		_ = db.QueryRow("SELECT COUNT(*) FROM item_logistics WHERE reserved_by_user_id = $1 AND workflow_status = 'picked_up'", id).Scan(&objetsTraites)
+		_ = db.QueryRow("SELECT COUNT(*) FROM item_logistics WHERE reserved_by_user_id = $1 AND workflow_status NOT IN ('available', 'cancelled')", id).Scan(&reservationsGerees)
+
+		abonnementActif := subscriptionType != "" && subscriptionType != "none"
+		if abonnementActif {
+			totalAbonnements = 1
+		}
+
+		// Dépenses du pro (ce mois) — abonnement + ateliers/événements auxquels il s'est inscrit
+		var depensesAteliersPro, depensesEvenementsPro float64
+		_ = db.QueryRow(`
+			SELECT COALESCE(SUM(sb.amount), 0)
+			FROM service_bookings sb
+			WHERE sb.user_id = $1
+			  AND sb.booking_status = 'confirmed'
+			  AND DATE_TRUNC('month', sb.created_at) = DATE_TRUNC('month', NOW())
+		`, id).Scan(&depensesAteliersPro)
+		_ = db.QueryRow(`
+			SELECT COALESCE(SUM(e.price), 0)
+			FROM event_registrations er
+			JOIN events e ON e.id = er.event_id
+			WHERE er.user_id = $1
+			  AND er.payment_status = 'paid'
+			  AND er.status != 'cancelled'
+			  AND DATE_TRUNC('month', er.created_at) = DATE_TRUNC('month', NOW())
+		`, id).Scan(&depensesEvenementsPro)
+
+		abonnementMontant := 0.0
+		if subscriptionType == "pro_essentiel" {
+			abonnementMontant = 15.0
+		} else if subscriptionType == "pro_premium" || subscriptionType == "pro" {
+			abonnementMontant = 30.0
+		}
+
+		stats["objetsTraites"] = objetsTraites
+		stats["reservationsGerees"] = reservationsGerees
+		stats["totalAbonnements"] = totalAbonnements
+		stats["depenses"] = map[string]interface{}{
+			"abonnement": abonnementMontant,
+			"ateliers":   depensesAteliersPro,
+			"evenements": depensesEvenementsPro,
+			"total":      abonnementMontant + depensesAteliersPro + depensesEvenementsPro,
+		}
 	}
 
 	writeJSON(w, http.StatusOK, stats)

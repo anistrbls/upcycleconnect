@@ -124,7 +124,6 @@ export const NAV_MODULES = [
             { key: "abonnements", label: "Abonnements", shortLabel: "Abonnements" },
             { key: "commissions", label: "Commissions", shortLabel: "Commissions" },
             { key: "paiements", label: "Paiements", shortLabel: "Paiements" },
-            { key: "factures", label: "Factures", shortLabel: "Factures" },
         ],
     },
     {

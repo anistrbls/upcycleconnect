@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { TOKEN_KEY, apiUrl } from "../../../lib/api";
 import { getModuleByKey, getSubNavItem } from "../../../lib/constants";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
-import { Loader2, Bell, Settings, Sun, Moon, Check } from "lucide-react";
+import { Loader2, Bell, Settings, Sun, Moon, Check, CreditCard, Activity, Search, Filter } from "lucide-react";
 
 const styles = {
     container: {
@@ -273,21 +273,23 @@ export default function SettingsSubPage({ params }) {
         );
     }
 
-    // Admins keep their ModulePlaceholder
-    if (user?.role === "admin") {
+    // Admins keep their ModulePlaceholder, except for implemented subpages
+    if (user?.role === "admin" && !["integrations", "journal-systeme"].includes(subpage)) {
         const activeModule = getModuleByKey("parametres");
         const activeSub = getSubNavItem(activeModule.key, subpage);
         return <ModulePlaceholder moduleLabel={activeModule.label} subLabel={activeSub.label} />;
     }
 
     const isPro = user?.role === "professionnel";
+    const isAdmin = user?.role === "admin";
+    const roleLabel = isAdmin ? "Administration" : isPro ? "Espace Pro" : "Espace particulier";
 
     return (
         <div style={styles.container}>
             <div className="header-section">
                 <div className="title-area">
                     <span className="activities-label">
-                        {isPro ? "Espace Pro" : "Espace particulier"}
+                        {roleLabel}
                     </span>
                     <h1>Paramètres</h1>
                 </div>
@@ -608,6 +610,141 @@ export default function SettingsSubPage({ params }) {
                                     }} />
                                 </span>
                             </label>
+                        </div>
+                    </div>
+                </div>
+            ) : subpage === "integrations" ? (
+                <div style={styles.panel}>
+                    <div style={styles.sectionHeader}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                            <CreditCard size={20} color="var(--forest-deep)" />
+                            <span style={styles.sectionTitle}>Intégrations & Paiements</span>
+                        </div>
+                    </div>
+
+                    <div style={styles.settingsList}>
+                        {/* Stripe Integration */}
+                        <div style={styles.settingItem}>
+                            <div style={styles.settingText}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                    <div style={styles.settingLabel}>Stripe</div>
+                                    <div style={{
+                                        fontSize: "0.7rem",
+                                        fontWeight: "600",
+                                        background: "rgba(16, 185, 129, 0.15)",
+                                        color: "#059669",
+                                        padding: "0.2rem 0.5rem",
+                                        borderRadius: "8px"
+                                    }}>
+                                        Connecté
+                                    </div>
+                                </div>
+                                <div style={styles.settingDesc}>
+                                    Votre compte Stripe est actuellement connecté. Vous pouvez recevoir des paiements pour vos ateliers ou abonnements.
+                                </div>
+                            </div>
+                            <button
+                                style={{
+                                    padding: "0.5rem 1rem",
+                                    borderRadius: "12px",
+                                    fontSize: "0.85rem",
+                                    fontWeight: "600",
+                                    background: "rgba(239, 68, 68, 0.1)",
+                                    color: "var(--state-critical)",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    transition: "all 0.2s"
+                                }}
+                            >
+                                Gérer sur Stripe
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : subpage === "journal-systeme" ? (
+                <div style={styles.panel}>
+                    <div style={styles.sectionHeader}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                            <Activity size={20} color="var(--forest-deep)" />
+                            <span style={styles.sectionTitle}>Journal Système</span>
+                        </div>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <div style={{ position: "relative" }}>
+                                <Search size={14} color="var(--text-muted)" style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)" }} />
+                                <input 
+                                    type="text" 
+                                    placeholder="Rechercher..." 
+                                    style={{
+                                        padding: "0.4rem 1rem 0.4rem 2rem",
+                                        borderRadius: "12px",
+                                        border: "1px solid var(--border)",
+                                        fontSize: "0.85rem",
+                                        outline: "none"
+                                    }}
+                                />
+                            </div>
+                            <button style={{
+                                padding: "0.4rem 0.8rem",
+                                borderRadius: "12px",
+                                background: "white",
+                                border: "1px solid var(--border)",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.4rem",
+                                fontSize: "0.85rem",
+                                color: "var(--text-main)",
+                                cursor: "pointer"
+                            }}>
+                                <Filter size={14} /> Filtres
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
+                            <thead>
+                                <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-muted)", textAlign: "left" }}>
+                                    <th style={{ padding: "1rem 0.5rem", fontWeight: "600" }}>Horodatage</th>
+                                    <th style={{ padding: "1rem 0.5rem", fontWeight: "600" }}>Niveau</th>
+                                    <th style={{ padding: "1rem 0.5rem", fontWeight: "600" }}>Source</th>
+                                    <th style={{ padding: "1rem 0.5rem", fontWeight: "600" }}>Message</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[
+                                    { date: "Aujourd'hui, 13:42", level: "INFO", source: "Auth", msg: "Connexion réussie pour admin@upcycleconnect.fr", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.1)" },
+                                    { date: "Aujourd'hui, 11:23", level: "WARN", source: "API", msg: "Tentative de paiement échouée (Stripe)", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.1)" },
+                                    { date: "Hier, 16:45", level: "ERROR", source: "Database", msg: "Connexion perdue pendant 2 secondes", color: "#ef4444", bg: "rgba(239, 68, 68, 0.1)" },
+                                    { date: "Hier, 09:12", level: "INFO", source: "Items", msg: "Nouvelle annonce créée (ID: 16)", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.1)" },
+                                    { date: "23 Juin, 14:30", level: "INFO", source: "System", msg: "Redémarrage de l'API terminé", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.1)" }
+                                ].map((log, idx) => (
+                                    <tr key={idx} style={{ borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                                        <td style={{ padding: "1rem 0.5rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{log.date}</td>
+                                        <td style={{ padding: "1rem 0.5rem" }}>
+                                            <span style={{
+                                                fontSize: "0.7rem",
+                                                fontWeight: "700",
+                                                padding: "0.2rem 0.5rem",
+                                                borderRadius: "6px",
+                                                color: log.color,
+                                                background: log.bg
+                                            }}>
+                                                {log.level}
+                                            </span>
+                                        </td>
+                                        <td style={{ padding: "1rem 0.5rem", fontWeight: "500" }}>{log.source}</td>
+                                        <td style={{ padding: "1rem 0.5rem", color: "var(--text-main)" }}>{log.msg}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                        <span>Affichage de 5 logs sur 2,341</span>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <button style={{ padding: "0.3rem 0.6rem", border: "1px solid var(--border)", borderRadius: "6px", background: "white", cursor: "pointer" }}>Précédent</button>
+                            <button style={{ padding: "0.3rem 0.6rem", border: "1px solid var(--border)", borderRadius: "6px", background: "white", cursor: "pointer" }}>Suivant</button>
                         </div>
                     </div>
                 </div>

@@ -66,6 +66,9 @@ type User struct {
 	// Invalidation de session
 	SessionsInvalidBefore *time.Time `json:"sessionsInvalidBefore,omitempty"`
 
+	// Statut du tutoriel
+	TutorialCompleted bool `json:"tutorialCompleted"`
+
 	// Dates
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`

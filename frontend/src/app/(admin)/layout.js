@@ -491,7 +491,7 @@ export default function AdminLayout({ children }) {
 
     return (
         <div className="app-wrapper">
-            {isParticulier && <TutorialOverlay userId={user?.id} userEmail={user?.email} />}
+            {isParticulier && !user?.tutorialCompleted && <TutorialOverlay userId={user?.id} userEmail={user?.email} />}
             <header className="topbar">
                 <div className="topbar-left">
                     <div className="brand-dot">

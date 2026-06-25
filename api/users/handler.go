@@ -364,11 +364,20 @@ func (h *Handler) GetProfileHandler(w http.ResponseWriter, userID int64) {
 			u.UpcycleConnectScore = &score
 		}
 	}
-	if u.Role == RoleParticulier || u.Role == RoleProfessionnel {
+	if u.Role == RoleParticulier {
 		avg, cnt, err := h.repo.GetSellerRatingAggregate(userID)
 		if err != nil {
 			log.Printf("GetSellerRatingAggregate: %v", err)
 		} else {
+			u.SellerRatingAvg = avg
+			u.SellerRatingCount = cnt
+		}
+	} else if u.Role == RoleProfessionnel {
+		avg, cnt, err := h.repo.GetProRatingAggregate(userID)
+		if err != nil {
+			log.Printf("GetProRatingAggregate: %v", err)
+		} else {
+			// On utilise toujours SellerRatingAvg côté modèle/frontend pour la "note principale" affichée dans le profil
 			u.SellerRatingAvg = avg
 			u.SellerRatingCount = cnt
 		}

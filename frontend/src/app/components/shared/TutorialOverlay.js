@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { TOKEN_KEY, apiUrl, fetchWithTimeout } from "../../lib/api";
 
 // targetType: "sidebar" → carte à droite de la sidebar
 //             "topbar"  → carte sous le bouton du topbar
@@ -362,6 +363,17 @@ export default function TutorialOverlay({ userId, userEmail }) {
 
     const finish = () => {
         if (storageKey) localStorage.setItem(storageKey, "1");
+
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (token) {
+            fetchWithTimeout(apiUrl("/auth/tutorial/complete"), {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            }, 5000).catch((err) => console.error("Failed to save tutorial status in db", err));
+        }
+
         setVisible(false);
     };
 
