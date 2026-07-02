@@ -17,6 +17,7 @@ import {
     Star,
     FileDown,
 } from "lucide-react";
+const DISABLE_RATING = true; // Rating updates disabled per request
 
 const styles = {
     wrapper: {
@@ -923,12 +924,24 @@ export default function MyRecoveriesPage() {
                     </div>
 
                     {item.workflowStatus === "picked_up" ? (
-                        <SellerRatingBlock
-                            item={item}
-                            busy={sellerRatingBusyId === item.id}
-                            onSubmit={(stars) => submitSellerRating(item.id, stars)}
-                        />
-                    ) : null}
+    DISABLE_RATING ? (
+        <div style={{ padding: "0.8rem", background: "rgba(255,255,255,0.85)", borderRadius: "12px", border: "1px solid rgba(35,59,61,0.08)" }}>
+            <div style={{ fontSize: "0.68rem", fontWeight: 800, textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>Note au professionnel</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.2rem", flexWrap: "wrap", marginBottom: "0.85rem" }}>
+                {[1,2,3,4,5].map((n) => (
+                    <Star key={n} size={26} aria-hidden fill={item.mySellerRating >= n ? "#ca8a04" : "none"} color={item.mySellerRating >= n ? "#ca8a04" : "rgba(35,59,61,0.28)"} strokeWidth={item.mySellerRating >= n ? 0 : 1.65} />
+                ))}
+            </div>
+            <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                Vous avez attribué {item.mySellerRating ?? "aucune"} étoile{item.mySellerRating === 1 ? "" : "s"}.
+            </p>
+        </div>
+    ) : (
+        <SellerRatingBlock item={item} busy={sellerRatingBusyId === item.id} onSubmit={(stars) => submitSellerRating(item.id, stars)} />
+    )
+    ) : null}
+
+
 
                     {isDeposited && item.workflowStatus !== "picked_up" && (
                         <div style={styles.detailCard}>

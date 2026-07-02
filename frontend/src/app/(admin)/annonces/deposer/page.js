@@ -433,7 +433,7 @@ export default function DeposerAnnoncePage() {
 
             const normalizedStatus = normalizeStatus(annonceToEdit.status);
             const workflowStatus = String(annonceToEdit.workflowStatus || "").toLowerCase();
-            const isAfterDeposit = LOCKED_WORKFLOW_STATES.includes(workflowStatus);
+            const isAfterDeposit = Boolean(annonceToEdit.afterDeposit);
             const isValidatedBeforeDeposit = normalizedStatus === "actif" && Boolean(workflowStatus) && !isAfterDeposit;
 
             setEditPolicy({

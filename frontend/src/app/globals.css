@@ -2445,6 +2445,11 @@ body {
   width: 100%;
 }
 
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
 .password-toggle {
   position: absolute;
   right: 1.35rem;

@@ -383,10 +383,12 @@ func main() {
 		if err := publishDueScheduledConseils(); err != nil {
 			log.Printf("[conseil] publication programmée: %v", err)
 		}
+		sendUpcomingEventReminders()
 		for range ticker.C {
 			if err := publishDueScheduledConseils(); err != nil {
 				log.Printf("[conseil] publication programmée: %v", err)
 			}
+			sendUpcomingEventReminders()
 		}
 	}()
 
@@ -649,6 +651,336 @@ type eventPayload struct {
 
 type eventRejectPayload struct {
 	Comment string `json:"comment"`
+}
+
+type eventNotificationSnapshot struct {
+	ID               int64
+	Name             string
+	DateDebut        time.Time
+	DateFin          time.Time
+	Lieu             string
+	Status           string
+	ValidationStatus string
+	PricingType      string
+	Price            float64
+	Intervenant      string
+	IntervenantID    sql.NullInt64
+}
+
+type eventRegistrationNotificationTarget struct {
+	UserID        int64
+	PaymentStatus string
+	RefundStatus  string
+}
+
+func formatEventNotificationDate(at time.Time) string {
+	loc, err := time.LoadLocation("Europe/Paris")
+	if err != nil {
+		loc = time.Local
+	}
+	return at.In(loc).Format("02/01/2006 à 15:04")
+}
+
+func formatEventNotificationPrice(pricingType string, price float64) string {
+	if strings.TrimSpace(pricingType) == "payant" && price > 0 {
+		return fmt.Sprintf("%.2f EUR", price)
+	}
+	return "gratuit"
+}
+
+func eventNotificationContextLine(evt eventNotificationSnapshot) string {
+	parts := []string{formatEventNotificationDate(evt.DateDebut)}
+	if lieu := strings.TrimSpace(evt.Lieu); lieu != "" {
+		parts = append(parts, lieu)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func createEventNotification(userID int64, title, message, notifType string) {
+	if userID <= 0 {
+		return
+	}
+	_ = items.CreateNotification(context.Background(), db, userID, title, message, notifType)
+}
+
+func createConseilNotification(userID int64, title, message, notifType string) {
+	if userID <= 0 {
+		return
+	}
+	_ = items.CreateNotification(context.Background(), db, userID, title, message, notifType)
+}
+
+func notifyConseilValidation(userID int64, title string) {
+	var enabled bool
+	err := db.QueryRow(`SELECT app_conseil_moderation FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&enabled)
+	if err == nil && !enabled {
+		return
+	}
+	createConseilNotification(userID, "Validation de conseil", fmt.Sprintf("Votre conseil %q a été validé par l'administration et est maintenant en ligne !", title), "conseil_moderation")
+}
+
+func notifyConseilRejection(userID int64, title, reason string) {
+	var enabled bool
+	err := db.QueryRow(`SELECT app_conseil_moderation FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&enabled)
+	if err == nil && !enabled {
+		return
+	}
+	createConseilNotification(userID, "Refus de conseil", fmt.Sprintf("Votre conseil %q requiert des modifications. Motif : %s", title, reason), "conseil_moderation")
+}
+
+func notifyAdminsNewConseil(title string, authorName string) {
+	rows, err := db.Query(`
+		SELECT u.id 
+		FROM users u 
+		LEFT JOIN user_notification_settings s ON s.user_id = u.id 
+		WHERE u.role = 'admin' AND COALESCE(s.app_admin_new_conseil, true) = true
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	var adminIDs []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			adminIDs = append(adminIDs, id)
+		}
+	}
+	msg := fmt.Sprintf("Le salarié %s a soumis un nouveau conseil %q en attente de relecture.", authorName, title)
+	for _, adminID := range adminIDs {
+		createConseilNotification(adminID, "Nouveau conseil à modérer", msg, "admin_new_conseil")
+	}
+}
+
+func notifyConseilEngagement(userID int64, title, engagerName, engType string) {
+	var enabled bool
+	err := db.QueryRow(`SELECT app_conseil_engagement FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&enabled)
+	if err == nil && !enabled {
+		return
+	}
+	var action string
+	if engType == "like" {
+		action = "aimé"
+	} else {
+		action = "ajouté aux favoris"
+	}
+	createConseilNotification(userID, "Interaction sur votre conseil", fmt.Sprintf("%s a %s votre conseil %q.", engagerName, action, title), "conseil_engagement")
+}
+
+func notifyCommunityNewConseil(title string) {
+	go func() {
+		ctx := context.Background()
+		rows, err := db.QueryContext(ctx, `
+			SELECT user_id FROM user_notification_settings WHERE app_new_conseil = true
+		`)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		msg := fmt.Sprintf("Nouveau guide pratique disponible : Découvrez comment %q dès aujourd'hui !", title)
+		for rows.Next() {
+			var uID int64
+			if rows.Scan(&uID) == nil {
+				_ = items.CreateNotification(ctx, db, uID, "Nouveau conseil disponible", msg, "new_conseil")
+			}
+		}
+	}()
+}
+
+func loadEventNotificationSnapshot(eventID int64) (eventNotificationSnapshot, error) {
+	var evt eventNotificationSnapshot
+	err := db.QueryRow(`
+		SELECT id, name, date_debut, date_fin, lieu, status, validation_status, pricing_type, price, intervenant, intervenant_id
+		FROM events
+		WHERE id = $1
+	`, eventID).Scan(
+		&evt.ID,
+		&evt.Name,
+		&evt.DateDebut,
+		&evt.DateFin,
+		&evt.Lieu,
+		&evt.Status,
+		&evt.ValidationStatus,
+		&evt.PricingType,
+		&evt.Price,
+		&evt.Intervenant,
+		&evt.IntervenantID,
+	)
+	return evt, err
+}
+
+func loadActiveEventRegistrationTargets(eventID int64) ([]eventRegistrationNotificationTarget, error) {
+	rows, err := db.Query(`
+		SELECT user_id, payment_status, refund_status
+		FROM event_registrations
+		WHERE event_id = $1 AND status = 'active' AND payment_status <> 'pending'
+	`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]eventRegistrationNotificationTarget, 0)
+	for rows.Next() {
+		var target eventRegistrationNotificationTarget
+		if err := rows.Scan(&target.UserID, &target.PaymentStatus, &target.RefundStatus); err != nil {
+			return nil, err
+		}
+		result = append(result, target)
+	}
+	return result, nil
+}
+
+func resetEventReminderFlags(eventID int64) {
+	_, _ = db.Exec(`UPDATE event_registrations SET event_reminder_sent = FALSE WHERE event_id = $1`, eventID)
+	_, _ = db.Exec(`UPDATE events SET intervenant_reminder_sent = FALSE WHERE id = $1`, eventID)
+}
+
+func buildEventUpdateChanges(before, after eventNotificationSnapshot) []string {
+	changes := make([]string, 0, 5)
+	if !before.DateDebut.Equal(after.DateDebut) {
+		changes = append(changes, "nouvelle date: "+formatEventNotificationDate(after.DateDebut))
+	}
+	if strings.TrimSpace(before.Lieu) != strings.TrimSpace(after.Lieu) {
+		if strings.TrimSpace(after.Lieu) == "" {
+			changes = append(changes, "lieu retire")
+		} else {
+			changes = append(changes, "nouveau lieu: "+strings.TrimSpace(after.Lieu))
+		}
+	}
+	if before.PricingType != after.PricingType || math.Abs(before.Price-after.Price) > 0.001 {
+		changes = append(changes, "nouveau tarif: "+formatEventNotificationPrice(after.PricingType, after.Price))
+	}
+	if before.IntervenantID.Valid != after.IntervenantID.Valid || before.IntervenantID.Int64 != after.IntervenantID.Int64 {
+		switch {
+		case !after.IntervenantID.Valid:
+			changes = append(changes, "intervenant retire")
+		case strings.TrimSpace(after.Intervenant) != "":
+			changes = append(changes, "nouvel intervenant: "+strings.TrimSpace(after.Intervenant))
+		default:
+			changes = append(changes, "intervenant mis a jour")
+		}
+	}
+	return changes
+}
+
+func notifyEventAssignmentChange(before, after eventNotificationSnapshot, actorUserID int64) {
+	if before.IntervenantID.Valid && (!after.IntervenantID.Valid || before.IntervenantID.Int64 != after.IntervenantID.Int64) && before.IntervenantID.Int64 != actorUserID {
+		msg := fmt.Sprintf(
+			"Vous n'etes plus affecte a l'evenement \"%s\" prevu le %s.",
+			after.Name,
+			formatEventNotificationDate(after.DateDebut),
+		)
+		createEventNotification(before.IntervenantID.Int64, "Affectation retiree", msg, "event_assignment")
+	}
+
+	if after.IntervenantID.Valid && (!before.IntervenantID.Valid || before.IntervenantID.Int64 != after.IntervenantID.Int64) && after.IntervenantID.Int64 != actorUserID {
+		msg := fmt.Sprintf(
+			"Vous etes affecte a l'evenement \"%s\". Details: %s.",
+			after.Name,
+			eventNotificationContextLine(after),
+		)
+		createEventNotification(after.IntervenantID.Int64, "Nouvelle affectation evenement", msg, "event_assignment")
+	}
+}
+
+func notifyEventUpdated(before, after eventNotificationSnapshot, includePendingReview bool) {
+	changes := buildEventUpdateChanges(before, after)
+	if len(changes) == 0 {
+		return
+	}
+
+	baseMessage := fmt.Sprintf(
+		"L'evenement \"%s\" a ete mis a jour (%s).",
+		after.Name,
+		strings.Join(changes, ", "),
+	)
+	if includePendingReview {
+		baseMessage += " Les nouveaux details sont en cours de revalidation."
+	}
+
+	registrations, err := loadActiveEventRegistrationTargets(after.ID)
+	if err == nil {
+		for _, registration := range registrations {
+			createEventNotification(registration.UserID, "Evenement mis a jour", baseMessage, "event_update")
+		}
+	}
+
+	if after.IntervenantID.Valid && before.IntervenantID.Valid && before.IntervenantID.Int64 == after.IntervenantID.Int64 {
+		msg := fmt.Sprintf("Votre evenement \"%s\" a ete mis a jour (%s).", after.Name, strings.Join(changes, ", "))
+		if includePendingReview {
+			msg += " La mise a jour repasse en validation."
+		}
+		createEventNotification(after.IntervenantID.Int64, "Planning evenement mis a jour", msg, "event_update")
+	}
+}
+
+func sendUpcomingEventReminders() {
+	ctx := context.Background()
+
+	registrationRows, err := db.QueryContext(ctx, `
+		SELECT er.id, er.user_id, e.name, e.date_debut, e.lieu
+		FROM event_registrations er
+		JOIN events e ON e.id = er.event_id
+		WHERE er.status = 'active'
+		  AND er.payment_status <> 'pending'
+		  AND er.event_reminder_sent = FALSE
+		  AND e.validation_status = 'approved'
+		  AND e.status <> 'annule'
+		  AND e.date_debut > NOW()
+		  AND e.date_debut <= NOW() + INTERVAL '24 hours'
+	`)
+	if err == nil {
+		defer registrationRows.Close()
+		for registrationRows.Next() {
+			var regID int64
+			var userID int64
+			var eventName, lieu string
+			var startAt time.Time
+			if err := registrationRows.Scan(&regID, &userID, &eventName, &startAt, &lieu); err != nil {
+				continue
+			}
+			msg := fmt.Sprintf("Rappel: l'evenement \"%s\" commence le %s", eventName, formatEventNotificationDate(startAt))
+			if strings.TrimSpace(lieu) != "" {
+				msg += " a " + strings.TrimSpace(lieu)
+			}
+			msg += "."
+			createEventNotification(userID, "Rappel d'evenement", msg, "event_reminder")
+			_, _ = db.ExecContext(ctx, `UPDATE event_registrations SET event_reminder_sent = TRUE WHERE id = $1`, regID)
+		}
+	}
+
+	eventRows, err := db.QueryContext(ctx, `
+		SELECT id, name, date_debut, lieu, intervenant_id
+		FROM events
+		WHERE intervenant_id IS NOT NULL
+		  AND intervenant_reminder_sent = FALSE
+		  AND validation_status = 'approved'
+		  AND status <> 'annule'
+		  AND date_debut > NOW()
+		  AND date_debut <= NOW() + INTERVAL '24 hours'
+	`)
+	if err != nil {
+		return
+	}
+	defer eventRows.Close()
+
+	for eventRows.Next() {
+		var eventID int64
+		var userID int64
+		var eventName, lieu string
+		var startAt time.Time
+		if err := eventRows.Scan(&eventID, &eventName, &startAt, &lieu, &userID); err != nil {
+			continue
+		}
+		msg := fmt.Sprintf("Rappel: vous intervenez sur l'evenement \"%s\" le %s", eventName, formatEventNotificationDate(startAt))
+		if strings.TrimSpace(lieu) != "" {
+			msg += " a " + strings.TrimSpace(lieu)
+		}
+		msg += "."
+		createEventNotification(userID, "Rappel d'intervention", msg, "event_reminder")
+		_, _ = db.ExecContext(ctx, `UPDATE events SET intervenant_reminder_sent = TRUE WHERE id = $1`, eventID)
+	}
 }
 
 func ensureOffersSchema() error {
@@ -1704,6 +2036,8 @@ func ensureEventsSchema() error {
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS cancelled_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS refund_request_reason TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS event_reminder_sent BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS intervenant_reminder_sent BOOLEAN NOT NULL DEFAULT FALSE`,
 		`DO $$ BEGIN
 			IF NOT EXISTS (
 				SELECT 1 FROM pg_constraint WHERE conname = 'events_validation_status_check'
@@ -1839,6 +2173,10 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 
 		callerClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
 		callerRole, _ := callerClaims["role"].(string)
+		var callerUserID int64
+		if val, ok := callerClaims["userId"].(float64); ok {
+			callerUserID = int64(val)
+		}
 		postValidationStatus := "approved"
 		if callerRole == "salarie" {
 			postValidationStatus = "pending"
@@ -1878,6 +2216,21 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 
 		payload.Intervenant = intervenantName
 		payload.ValidationStatus = postValidationStatus
+		if intervenantID.Valid {
+			notifyEventAssignmentChange(eventNotificationSnapshot{}, eventNotificationSnapshot{
+				ID:               id,
+				Name:             strings.TrimSpace(payload.Name),
+				DateDebut:        startAt,
+				DateFin:          endAt,
+				Lieu:             strings.TrimSpace(payload.Lieu),
+				Status:           normalizeEventStatus(payload.Status),
+				ValidationStatus: postValidationStatus,
+				PricingType:      payload.PricingType,
+				Price:            payload.Price,
+				Intervenant:      intervenantName,
+				IntervenantID:    intervenantID,
+			}, callerUserID)
+		}
 		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
 
 	default:
@@ -1974,6 +2327,16 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, item)
 
 	case http.MethodPut:
+		before, err := loadEventNotificationSnapshot(id)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "event not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "could not load event")
+			return
+		}
+
 		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -2004,6 +2367,10 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 		putCallerClaims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
 		putCallerRole, _ := putCallerClaims["role"].(string)
+		var putCallerUserID int64
+		if val, ok := putCallerClaims["userId"].(float64); ok {
+			putCallerUserID = int64(val)
+		}
 
 		var createdAt, updatedAt time.Time
 		var capacity sql.NullInt64
@@ -2062,6 +2429,26 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		payload.Intervenant = intervenantName
 		payload.ValidationStatus = retValidationStatus
 		payload.RejectionComment = retRejectionComment
+		after := eventNotificationSnapshot{
+			ID:               id,
+			Name:             strings.TrimSpace(payload.Name),
+			DateDebut:        startAt,
+			DateFin:          endAt,
+			Lieu:             strings.TrimSpace(payload.Lieu),
+			Status:           normalizeEventStatus(payload.Status),
+			ValidationStatus: retValidationStatus,
+			PricingType:      payload.PricingType,
+			Price:            payload.Price,
+			Intervenant:      intervenantName,
+			IntervenantID:    intervenantID,
+		}
+		if !before.DateDebut.Equal(after.DateDebut) {
+			resetEventReminderFlags(id)
+		}
+		notifyEventAssignmentChange(before, after, putCallerUserID)
+		if retValidationStatus == "approved" {
+			notifyEventUpdated(before, after, false)
+		}
 		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
 
 	case http.MethodDelete:
@@ -2453,10 +2840,25 @@ func adminEventCancelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ePrice float64
-	var eName string
+	var eventDetails eventNotificationSnapshot
 	err = db.QueryRow(`
-		UPDATE events SET status = 'annule', validation_status = 'rejected', updated_at = NOW() WHERE id = $1 RETURNING price, name
-	`, id).Scan(&ePrice, &eName)
+		UPDATE events
+		SET status = 'annule', validation_status = 'rejected', updated_at = NOW()
+		WHERE id = $1
+		RETURNING id, name, date_debut, date_fin, lieu, status, validation_status, pricing_type, price, intervenant, intervenant_id
+	`, id).Scan(
+		&eventDetails.ID,
+		&eventDetails.Name,
+		&eventDetails.DateDebut,
+		&eventDetails.DateFin,
+		&eventDetails.Lieu,
+		&eventDetails.Status,
+		&eventDetails.ValidationStatus,
+		&eventDetails.PricingType,
+		&ePrice,
+		&eventDetails.Intervenant,
+		&eventDetails.IntervenantID,
+	)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeError(w, http.StatusNotFound, "event not found")
@@ -2495,6 +2897,7 @@ func adminEventCancelHandler(w http.ResponseWriter, r *http.Request) {
 	refundsCount := 0
 	for _, reg := range regs {
 		db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'admin' WHERE event_id = $1 AND user_id = $2`, id, reg.UserID)
+		message := fmt.Sprintf("L'evenement \"%s\" prevu le %s est annule.", eventDetails.Name, formatEventNotificationDate(eventDetails.DateDebut))
 
 		if reg.PStatus == "paid" && reg.SessionID != "" && cfg != nil {
 			pi, err := items.GetStripePaymentIntentFromSessionPublic(cfg, reg.SessionID)
@@ -2504,20 +2907,31 @@ func adminEventCancelHandler(w http.ResponseWriter, r *http.Request) {
 				if refundErr == nil {
 					db.Exec(`UPDATE event_registrations SET refund_status = 'refunded', stripe_refund_id = $1, refund_amount = $2 WHERE event_id = $3 AND user_id = $4`, refundID, recordEUR, id, reg.UserID)
 					refundsCount++
+					message += fmt.Sprintf(" Votre remboursement de %.2f EUR a ete traite.", recordEUR)
 				} else {
 					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, refundErr.Error(), id, reg.UserID)
+					message += " Le remboursement automatique a echoue et sera repris manuellement."
 				}
 			} else {
 				if err != nil {
 					db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, err.Error(), id, reg.UserID)
+					message += " Le remboursement automatique n'a pas pu etre finalise immediatement."
 				}
 			}
 		} else if reg.PStatus == "paid" {
 			db.Exec(`UPDATE event_registrations SET refund_status = 'failed', refund_error = 'missing stripe configuration or session id' WHERE event_id = $1 AND user_id = $2`, id, reg.UserID)
+			message += " Le remboursement automatique n'a pas pu etre initialise immediatement."
+		} else {
+			message += " Votre inscription a bien ete annulee."
 		}
+		createEventNotification(reg.UserID, "Evenement annule", message, "event_cancellation")
 	}
 
 	db.Exec(`UPDATE events SET participant_count = 0 WHERE id = $1`, id)
+	if eventDetails.IntervenantID.Valid {
+		msg := fmt.Sprintf("L'evenement \"%s\" auquel vous etiez affecte a ete annule.", eventDetails.Name)
+		createEventNotification(eventDetails.IntervenantID.Int64, "Intervention annulee", msg, "event_cancellation")
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"cancelled": true, "refundsCount": refundsCount})
 }
@@ -2610,7 +3024,7 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 2. Register
-		_, err = db.Exec(`
+		res, err := db.Exec(`
 			INSERT INTO event_registrations (event_id, user_id, payment_status)
 			VALUES ($1, $2, 'gratuit')
 			ON CONFLICT (event_id, user_id) DO NOTHING
@@ -2622,20 +3036,31 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 		// 3. Update participant count
 		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+		if rowsAffected, _ := res.RowsAffected(); rowsAffected > 0 {
+			var eventName, lieu string
+			if err := db.QueryRow(`SELECT name, lieu FROM events WHERE id = $1`, id).Scan(&eventName, &lieu); err == nil {
+				msg := fmt.Sprintf(
+					"Votre inscription a l'evenement \"%s\" est confirmee. %s.",
+					eventName,
+					eventNotificationContextLine(eventNotificationSnapshot{Name: eventName, DateDebut: eventDate, Lieu: lieu}),
+				)
+				createEventNotification(userID, "Inscription confirmee", msg, "event_registration")
+			}
+		}
 
 		writeJSON(w, http.StatusOK, map[string]bool{"registered": true})
 
 	case http.MethodDelete:
-		var paymentStatus, sessionID, currentStatus, refundStatus string
+		var paymentStatus, sessionID, currentStatus, refundStatus, eventName string
 		var eventStart time.Time
 		var eventEnd sql.NullTime
 		var eventPrice float64
 		err = db.QueryRow(`
-			SELECT er.payment_status, er.stripe_session_id, er.status, er.refund_status, e.date_debut, e.date_fin, e.price
+			SELECT er.payment_status, er.stripe_session_id, er.status, er.refund_status, e.date_debut, e.date_fin, e.price, e.name
 			FROM event_registrations er
 			JOIN events e ON e.id = er.event_id
 			WHERE er.event_id = $1 AND er.user_id = $2
-		`, id, userID).Scan(&paymentStatus, &sessionID, &currentStatus, &refundStatus, &eventStart, &eventEnd, &eventPrice)
+		`, id, userID).Scan(&paymentStatus, &sessionID, &currentStatus, &refundStatus, &eventStart, &eventEnd, &eventPrice, &eventName)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "registration not found")
 			return
@@ -2669,6 +3094,8 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		if paymentStatus == "gratuit" || paymentStatus == "pending" {
 			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user' WHERE event_id = $1 AND user_id = $2`, id, userID)
 			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			msg := fmt.Sprintf("Votre desinscription a l'evenement \"%s\" du %s est confirmee.", eventName, formatEventNotificationDate(eventStart))
+			createEventNotification(userID, "Desinscription confirmee", msg, "event_cancellation")
 			writeJSON(w, http.StatusOK, map[string]bool{"unregistered": true})
 			return
 		}
@@ -2716,6 +3143,8 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			msg := fmt.Sprintf("Votre demande de remboursement pour l'evenement \"%s\" a bien ete transmise a l'equipe.", eventName)
+			createEventNotification(userID, "Demande de remboursement recue", msg, "event_refund")
 			writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refundRequested": true})
 			return
 		}
@@ -2731,6 +3160,8 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		if diff.Hours() < 24 {
 			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'non_refundable' WHERE event_id = $1 AND user_id = $2`, id, userID)
 			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			msg := fmt.Sprintf("Votre desinscription a l'evenement \"%s\" est enregistree. Aucun remboursement n'est possible a moins de 24h du debut.", eventName)
+			createEventNotification(userID, "Desinscription enregistree", msg, "event_cancellation")
 			writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refunded": false, "reason": "less than 24h before event"})
 			return
 		}
@@ -2755,6 +3186,8 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			db.Exec(`UPDATE event_registrations SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'failed', refund_error = $1 WHERE event_id = $2 AND user_id = $3`, err.Error(), id, userID)
 			db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+			msg := fmt.Sprintf("Votre desinscription a l'evenement \"%s\" est enregistree, mais le remboursement a echoue. L'equipe reprendra le dossier.", eventName)
+			createEventNotification(userID, "Remboursement en echec", msg, "event_refund")
 			writeError(w, http.StatusInternalServerError, "refund failed: "+err.Error())
 			return
 		}
@@ -2765,6 +3198,8 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 			WHERE event_id = $3 AND user_id = $4`, refundID, recordEUR, id, userID)
 
 		db.Exec(`UPDATE events SET participant_count = (SELECT COUNT(*) FROM event_registrations WHERE event_id = $1 AND status = 'active') WHERE id = $1`, id)
+		msg := fmt.Sprintf("Votre desinscription a l'evenement \"%s\" est confirmee. Le remboursement de %.2f EUR a ete effectue.", eventName, recordEUR)
+		createEventNotification(userID, "Remboursement effectue", msg, "event_refund")
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{"unregistered": true, "refunded": true, "refundAmount": recordEUR})
 
@@ -2941,6 +3376,14 @@ func eventConfirmPaymentHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not update registration status")
 			return
 		}
+		if evt, loadErr := loadEventNotificationSnapshot(eventID); loadErr == nil {
+			msg := fmt.Sprintf(
+				"Le paiement de votre billet pour l'evenement \"%s\" est confirme. %s.",
+				evt.Name,
+				eventNotificationContextLine(evt),
+			)
+			createEventNotification(userID, "Paiement confirme", msg, "event_registration")
+		}
 	}
 
 	_, _ = db.Exec(`
@@ -2965,12 +3408,13 @@ func eventValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var updatedAt time.Time
+	var evt eventNotificationSnapshot
 	err = db.QueryRow(`
 		UPDATE events
 		SET validation_status = 'approved', rejection_comment = '', status = 'planifie', updated_at = NOW()
 		WHERE id = $1 AND status != 'annule'
-		RETURNING updated_at
-	`, id).Scan(&updatedAt)
+		RETURNING id, name, date_debut, date_fin, lieu, status, validation_status, pricing_type, price, intervenant, intervenant_id, updated_at
+	`, id).Scan(&evt.ID, &evt.Name, &evt.DateDebut, &evt.DateFin, &evt.Lieu, &evt.Status, &evt.ValidationStatus, &evt.PricingType, &evt.Price, &evt.Intervenant, &evt.IntervenantID, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeError(w, http.StatusNotFound, "event not found")
@@ -2978,6 +3422,14 @@ func eventValidateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "could not validate event")
 		return
+	}
+	if evt.IntervenantID.Valid {
+		msg := fmt.Sprintf(
+			"Votre evenement \"%s\" a ete valide. Il est desormais planifie pour le %s.",
+			evt.Name,
+			formatEventNotificationDate(evt.DateDebut),
+		)
+		createEventNotification(evt.IntervenantID.Int64, "Evenement valide", msg, "event_moderation")
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -3010,12 +3462,13 @@ func eventRejectHandler(w http.ResponseWriter, r *http.Request) {
 
 	comment := strings.TrimSpace(rejectPayload.Comment)
 	var updatedAt time.Time
+	var evt eventNotificationSnapshot
 	err = db.QueryRow(`
 		UPDATE events
 		SET validation_status = 'rejected', rejection_comment = $1, updated_at = NOW()
 		WHERE id = $2 AND status != 'annule'
-		RETURNING updated_at
-	`, comment, id).Scan(&updatedAt)
+		RETURNING id, name, date_debut, date_fin, lieu, status, validation_status, pricing_type, price, intervenant, intervenant_id, updated_at
+	`, comment, id).Scan(&evt.ID, &evt.Name, &evt.DateDebut, &evt.DateFin, &evt.Lieu, &evt.Status, &evt.ValidationStatus, &evt.PricingType, &evt.Price, &evt.Intervenant, &evt.IntervenantID, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeError(w, http.StatusNotFound, "event not found")
@@ -3023,6 +3476,13 @@ func eventRejectHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "could not reject event")
 		return
+	}
+	if evt.IntervenantID.Valid {
+		msg := fmt.Sprintf("Votre evenement \"%s\" a ete refuse.", evt.Name)
+		if comment != "" {
+			msg += " Motif: " + comment
+		}
+		createEventNotification(evt.IntervenantID.Int64, "Evenement refuse", msg, "event_moderation")
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -3661,6 +4121,17 @@ func salarieContentLikeHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not like")
 			return
 		}
+		go func() {
+			var authorID int64
+			var title string
+			err := db.QueryRow(`SELECT user_id, title FROM salarie_contents WHERE id = $1 AND type = 'conseil'`, id).Scan(&authorID, &title)
+			if err == nil && authorID != callerID {
+				var fname, lname string
+				_ = db.QueryRow(`SELECT firstname, lastname FROM users WHERE id = $1`, callerID).Scan(&fname, &lname)
+				engagerName := strings.TrimSpace(fname + " " + lname)
+				notifyConseilEngagement(authorID, title, engagerName, "like")
+			}
+		}()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"liked": true})
 	case http.MethodDelete:
 		_, err = db.Exec(`DELETE FROM conseil_likes WHERE user_id = $1 AND content_id = $2`, callerID, id)
@@ -3694,6 +4165,17 @@ func salarieContentFavoriteHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not favorite")
 			return
 		}
+		go func() {
+			var authorID int64
+			var title string
+			err := db.QueryRow(`SELECT user_id, title FROM salarie_contents WHERE id = $1 AND type = 'conseil'`, id).Scan(&authorID, &title)
+			if err == nil && authorID != callerID {
+				var fname, lname string
+				_ = db.QueryRow(`SELECT firstname, lastname FROM users WHERE id = $1`, callerID).Scan(&fname, &lname)
+				engagerName := strings.TrimSpace(fname + " " + lname)
+				notifyConseilEngagement(authorID, title, engagerName, "favorite")
+			}
+		}()
 		writeJSON(w, http.StatusOK, map[string]interface{}{"favorited": true})
 	case http.MethodDelete:
 		_, err = db.Exec(`DELETE FROM conseil_favorites WHERE user_id = $1 AND content_id = $2`, callerID, id)
@@ -3854,6 +4336,12 @@ func salarieContentByIDHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			writeError(w, http.StatusInternalServerError, "could not update content")
 			return
+		}
+		if payload.Status == "en_attente" {
+			var uID int64
+			var fname, lname string
+			_ = db.QueryRow(`SELECT u.id, u.firstname, u.lastname FROM users u WHERE u.email = $1`, putClaims["sub"]).Scan(&uID, &fname, &lname)
+			notifyAdminsNewConseil(strings.TrimSpace(payload.Title), strings.TrimSpace(fname+" "+lname))
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "status": payload.Status, "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
 
@@ -4180,10 +4668,12 @@ func adminSalarieContentValidateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var updatedAt time.Time
+	var contentType, title string
+	var userID int64
 	err = db.QueryRow(`
 		UPDATE salarie_contents SET status = 'publie', rejection_comment = '', updated_at = NOW()
-		WHERE id = $1 RETURNING updated_at
-	`, id).Scan(&updatedAt)
+		WHERE id = $1 RETURNING updated_at, type, title, user_id
+	`, id).Scan(&updatedAt, &contentType, &title, &userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeError(w, http.StatusNotFound, "content not found")
@@ -4192,6 +4682,12 @@ func adminSalarieContentValidateHandler(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "could not validate content")
 		return
 	}
+
+	if contentType == "conseil" {
+		notifyConseilValidation(userID, title)
+		notifyCommunityNewConseil(title)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "status": "publie", "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
 }
 
@@ -4213,10 +4709,12 @@ func adminSalarieContentRejectHandler(w http.ResponseWriter, r *http.Request) {
 
 	comment := strings.TrimSpace(body.Comment)
 	var updatedAt time.Time
+	var contentType, title string
+	var userID int64
 	err = db.QueryRow(`
 		UPDATE salarie_contents SET status = 'brouillon', rejection_comment = $1, updated_at = NOW()
-		WHERE id = $2 RETURNING updated_at
-	`, comment, id).Scan(&updatedAt)
+		WHERE id = $2 RETURNING updated_at, type, title, user_id
+	`, comment, id).Scan(&updatedAt, &contentType, &title, &userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeError(w, http.StatusNotFound, "content not found")
@@ -4225,6 +4723,11 @@ func adminSalarieContentRejectHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not reject content")
 		return
 	}
+
+	if contentType == "conseil" {
+		notifyConseilRejection(userID, title, comment)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "status": "brouillon", "rejectionComment": comment, "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
 }
 
@@ -5654,6 +6157,12 @@ func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, item)
 
 	case http.MethodPut:
+		before, err := loadEventNotificationSnapshot(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load event")
+			return
+		}
+
 		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -5678,6 +6187,23 @@ func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not update event")
 			return
 		}
+		after := eventNotificationSnapshot{
+			ID:               id,
+			Name:             strings.TrimSpace(payload.Name),
+			DateDebut:        startAt,
+			DateFin:          endAt,
+			Lieu:             strings.TrimSpace(payload.Lieu),
+			Status:           normalizeEventStatus(payload.Status),
+			ValidationStatus: "pending",
+			PricingType:      payload.PricingType,
+			Price:            payload.Price,
+			Intervenant:      before.Intervenant,
+			IntervenantID:    before.IntervenantID,
+		}
+		if !before.DateDebut.Equal(after.DateDebut) {
+			resetEventReminderFlags(id)
+		}
+		notifyEventUpdated(before, after, true)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "updatedAt": updatedAt.UTC().Format(time.RFC3339)})
 
 	case http.MethodDelete:
@@ -5741,6 +6267,15 @@ func adminEventRegistrationRefundDecisionHandler(w http.ResponseWriter, r *http.
 	}
 
 	if decision == "reject" {
+		var eventID, userID int64
+		if err := db.QueryRow(`SELECT event_id, user_id FROM event_registrations WHERE id = $1`, registrationID).Scan(&eventID, &userID); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "inscription introuvable")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
 		note := strings.TrimSpace(body.Note)
 		if len(note) > 2000 {
 			note = note[:2000]
@@ -5762,6 +6297,13 @@ func adminEventRegistrationRefundDecisionHandler(w http.ResponseWriter, r *http.
 		if naff == 0 {
 			writeError(w, http.StatusConflict, "demande introuvable ou déjà traitée")
 			return
+		}
+		if evt, loadErr := loadEventNotificationSnapshot(eventID); loadErr == nil {
+			notifMsg := fmt.Sprintf("Votre demande de remboursement pour l'evenement \"%s\" a ete refusee.", evt.Name)
+			if note != "" {
+				notifMsg += " Motif: " + note
+			}
+			createEventNotification(userID, "Remboursement refuse", notifMsg, "event_refund")
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "rejected": true})
 		return
@@ -5860,6 +6402,10 @@ func adminEventRegistrationRefundDecisionHandler(w http.ResponseWriter, r *http.
 	if n, _ := res.RowsAffected(); n == 0 {
 		writeError(w, http.StatusConflict, "impossible de mettre à jour l'inscription (état changé)")
 		return
+	}
+	if evt, loadErr := loadEventNotificationSnapshot(eventID); loadErr == nil {
+		msg := fmt.Sprintf("Votre remboursement pour l'evenement \"%s\" a ete valide pour %.2f EUR.", evt.Name, recordEUR)
+		createEventNotification(userID, "Remboursement valide", msg, "event_refund")
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":             true,
@@ -6003,13 +6549,13 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		           ELSE COALESCE(NULLIF(il.stripe_payment_status, ''), 'pending')
 		       END AS status, 
 		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref,
-		       0::double precision AS refund_amount,
-		       '' AS stripe_refund_id,
-		       '' AS refund_error
+		       COALESCE(il.refund_amount, 0)::double precision AS refund_amount,
+		       COALESCE(il.stripe_refund_id, '') AS stripe_refund_id,
+		       COALESCE(il.refund_error, '') AS refund_error
 		FROM items i
 		LEFT JOIN item_logistics il ON il.item_id = i.id
 		LEFT JOIN users u ON il.reserved_by_user_id = u.id
-		WHERE (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded'))
+		WHERE (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded', 'refunded'))
 		
 		UNION ALL
 		
@@ -6127,15 +6673,15 @@ func myFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		           ELSE COALESCE(NULLIF(il.stripe_payment_status, ''), 'pending')
 		       END AS status,
 		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref,
-		       0::double precision AS refund_amount,
-		       '' AS stripe_refund_id,
-		       '' AS refund_error
+		       COALESCE(il.refund_amount, 0)::double precision AS refund_amount,
+		       COALESCE(il.stripe_refund_id, '') AS stripe_refund_id,
+		       COALESCE(il.refund_error, '') AS refund_error
 		FROM items i
 		JOIN item_logistics il ON il.item_id = i.id
 		LEFT JOIN users u ON u.id = il.reserved_by_user_id
 		JOIN users sel ON sel.id = i.user_id
 		WHERE il.reserved_by_user_id = $1
-		  AND (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded', 'pending', 'processing'))
+		  AND (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded', 'pending', 'processing', 'refunded'))
 
 		UNION ALL
 
@@ -6150,16 +6696,16 @@ func myFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 		           ELSE COALESCE(NULLIF(il.stripe_payment_status, ''), 'pending')
 		       END AS status,
 		       COALESCE(il.stripe_payment_intent_id, il.stripe_checkout_session_id, '') AS transaction_ref,
-		       0::double precision AS refund_amount,
-		       '' AS stripe_refund_id,
-		       '' AS refund_error
+		       COALESCE(il.refund_amount, 0)::double precision AS refund_amount,
+		       COALESCE(il.stripe_refund_id, '') AS stripe_refund_id,
+		       COALESCE(il.refund_error, '') AS refund_error
 		FROM items i
 		JOIN item_logistics il ON il.item_id = i.id
 		LEFT JOIN users buy ON buy.id = il.reserved_by_user_id
 		WHERE i.user_id = $1
 		  AND il.reserved_by_user_id IS NOT NULL
 		  AND il.reserved_by_user_id <> i.user_id
-		  AND (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded', 'pending', 'processing'))
+		  AND (i.status IN ('vendu', 'vendue') OR COALESCE(il.stripe_payment_status, '') IN ('paid', 'succeeded', 'pending', 'processing', 'refunded'))
 
 		UNION ALL
 

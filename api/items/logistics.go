@@ -192,6 +192,10 @@ func (r *Repository) EnsureLogisticsSchema() error {
 			updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_seller_pro_ratings_pro ON seller_pro_ratings(pro_user_id)`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS deposit_reminder_sent BOOLEAN NOT NULL DEFAULT false`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS stripe_refund_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS refund_amount NUMERIC(10,2) NOT NULL DEFAULT 0.0`,
+		`ALTER TABLE item_logistics ADD COLUMN IF NOT EXISTS refund_error TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range statements {
 		if _, err := r.db.Exec(stmt); err != nil {
@@ -337,28 +341,70 @@ func addFrenchBusinessDays(date time.Time, days int) time.Time {
 }
 
 func (r *Repository) releaseExpiredReservations(ctx context.Context) {
-	r.db.ExecContext(ctx,
-		`UPDATE item_logistics
-		 SET workflow_status = 'available',
-		     reserved_by_name = '',
-		     reserved_by_user_id = NULL,
-		     transaction_ref = '',
-		     reserved_at = NULL,
-		     reservation_expires_at = NULL,
-		     payment_validated_at = NULL,
-		     pickup_code = '',
-		     pickup_code_expires_at = NULL,
-		     stripe_checkout_session_id = '',
-		     stripe_payment_intent_id = '',
-		     stripe_payment_status = '',
-		     stripe_amount_cents = 0,
-		     stripe_platform_fee_cents = 0,
-		     sale_commission_mode = '',
-		     stripe_last_error = '',
-		     updated_at = NOW()
-		 WHERE workflow_status IN ('reserved', 'pending_payment')
-		   AND reservation_expires_at IS NOT NULL
-		   AND reservation_expires_at < NOW()`)
+	// Query expired reservations before releasing them
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT l.item_id, i.user_id, COALESCE(l.reserved_by_user_id, 0), i.title
+		FROM item_logistics l
+		JOIN items i ON i.id = l.item_id
+		WHERE l.workflow_status IN ('reserved', 'pending_payment')
+		  AND l.reservation_expires_at IS NOT NULL
+		  AND l.reservation_expires_at < NOW()
+	`)
+	if err == nil {
+		type expiredNotif struct {
+			itemID    int64
+			ownerID   int64
+			proUserID int64
+			title     string
+		}
+		var expired []expiredNotif
+		for rows.Next() {
+			var e expiredNotif
+			if err := rows.Scan(&e.itemID, &e.ownerID, &e.proUserID, &e.title); err == nil {
+				expired = append(expired, e)
+			}
+		}
+		rows.Close()
+
+		if len(expired) > 0 {
+			// Perform the release
+			_, _ = r.db.ExecContext(ctx,
+				`UPDATE item_logistics
+				 SET workflow_status = 'available',
+				     reserved_by_name = '',
+				     reserved_by_user_id = NULL,
+				     transaction_ref = '',
+				     reserved_at = NULL,
+				     reservation_expires_at = NULL,
+				     payment_validated_at = NULL,
+				     pickup_code = '',
+				     pickup_code_expires_at = NULL,
+				     stripe_checkout_session_id = '',
+				     stripe_payment_intent_id = '',
+				     stripe_payment_status = '',
+				     stripe_amount_cents = 0,
+				     stripe_platform_fee_cents = 0,
+				     sale_commission_mode = '',
+				     stripe_last_error = '',
+				     updated_at = NOW()
+				 WHERE workflow_status IN ('reserved', 'pending_payment')
+				   AND reservation_expires_at IS NOT NULL
+				   AND reservation_expires_at < NOW()`)
+
+			// Send notifications
+			for _, e := range expired {
+				// Notify owner (particulier)
+				msgOwner := fmt.Sprintf("La réservation de votre annonce '%s' a expiré. Votre objet est à nouveau disponible pour d'autres acheteurs.", e.title)
+				_ = CreateNotification(ctx, r.db, e.ownerID, "Réservation expirée", msgOwner, "booking_expired")
+
+				// Notify pro
+				if e.proUserID > 0 {
+					msgPro := fmt.Sprintf("Votre réservation pour l'annonce '%s' a expiré.", e.title)
+					_ = CreateNotification(ctx, r.db, e.proUserID, "Réservation expirée", msgPro, "booking_expired")
+				}
+			}
+		}
+	}
 }
 
 // releaseExpiredDepositCodes aligne la BDD avec l’expiration des codes dépôt (comme GetLogisticsByItemID).
@@ -370,6 +416,48 @@ func (r *Repository) releaseExpiredDepositCodes(ctx context.Context) {
 		 WHERE workflow_status = 'deposit_code_sent'
 		   AND deposit_code_expires_at IS NOT NULL
 		   AND deposit_code_expires_at < NOW()`)
+	r.sendUpcomingDepositReminders(ctx)
+}
+
+func (r *Repository) sendUpcomingDepositReminders(ctx context.Context) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT l.item_id, i.user_id, i.title
+		FROM item_logistics l
+		JOIN items i ON i.id = l.item_id
+		WHERE l.workflow_status = 'deposit_code_sent'
+		  AND l.deposit_code_expires_at IS NOT NULL
+		  AND l.deposit_code_expires_at > NOW()
+		  AND l.deposit_code_expires_at < NOW() + INTERVAL '24 hours'
+		  AND l.deposit_reminder_sent = false
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type reminder struct {
+		itemID  int64
+		ownerID int64
+		title   string
+	}
+	var reminders []reminder
+	for rows.Next() {
+		var rem reminder
+		if err := rows.Scan(&rem.itemID, &rem.ownerID, &rem.title); err == nil {
+			reminders = append(reminders, rem)
+		}
+	}
+
+	for _, rem := range reminders {
+		msg := fmt.Sprintf("Rappel : Vous avez jusqu'à demain pour déposer votre objet '%s' au point de dépôt.", rem.title)
+		_ = CreateNotification(ctx, r.db, rem.ownerID, "Rappel de dépôt", msg, "deposit_reminder")
+
+		_, _ = r.db.ExecContext(ctx, `
+			UPDATE item_logistics
+			SET deposit_reminder_sent = true
+			WHERE item_id = $1
+		`, rem.itemID)
+	}
 }
 
 type ProfessionalItem struct {
@@ -780,13 +868,14 @@ func (r *Repository) UpsertSellerProfessionalRating(ctx context.Context, itemID,
 	}
 	var ownerID int64
 	var proUserID sql.NullInt64
+	var title string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT i.user_id, l.reserved_by_user_id
+		`SELECT i.user_id, l.reserved_by_user_id, i.title
 		 FROM items i
 		 INNER JOIN item_logistics l ON l.item_id = i.id
 		 WHERE i.id = $1 AND l.workflow_status = 'picked_up'`,
 		itemID,
-	).Scan(&ownerID, &proUserID)
+	).Scan(&ownerID, &proUserID, &title)
 	if err != nil {
 		return err
 	}
@@ -808,7 +897,15 @@ func (r *Repository) UpsertSellerProfessionalRating(ctx context.Context, itemID,
 		   updated_at = NOW()`,
 		itemID, sellerUserID, proUserID.Int64, stars,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Notify professional
+	msgPro := fmt.Sprintf("Vous avez reçu une évaluation de %d étoiles de la part du particulier pour l'annonce '%s'.", stars, title)
+	_ = CreateNotification(ctx, r.db, proUserID.Int64, "Nouvelle évaluation", msgPro, "rating_received")
+
+	return nil
 }
 
 // GetSellerProfessionalRating retourne la note laissée par le vendeur sur le pro (si existe).
@@ -1992,4 +2089,76 @@ func (r *Repository) GetLogisticsStats(ctx context.Context) (*LogisticsStats, er
 		}
 	}
 	return &s, nil
+}
+
+// RefundItemLogisticsIfPaid triggers a Stripe refund for the professional if they paid for the item.
+func (r *Repository) RefundItemLogisticsIfPaid(ctx context.Context, itemID int64) error {
+	var status string
+	var paymentStatus string
+	var paymentIntentID string
+	var amountCents int64
+	var reservedByUserID sql.NullInt64
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT workflow_status, stripe_payment_status, stripe_payment_intent_id, stripe_amount_cents, reserved_by_user_id
+		FROM item_logistics
+		WHERE item_id = $1
+	`, itemID).Scan(&status, &paymentStatus, &paymentIntentID, &amountCents, &reservedByUserID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// No logistics entry, nothing to refund
+			return nil
+		}
+		return fmt.Errorf("could not query logistics: %w", err)
+	}
+
+	paymentStatus = strings.ToLower(strings.TrimSpace(paymentStatus))
+	pi := strings.TrimSpace(paymentIntentID)
+
+	// We only refund if payment intent is not empty, payment status is 'paid', and there is a reserved user.
+	if pi == "" || paymentStatus != "paid" || amountCents <= 0 || !reservedByUserID.Valid || reservedByUserID.Int64 <= 0 {
+		return nil
+	}
+
+	cfg, err := getStripeConfig()
+	if err != nil {
+		errMsg := "stripe not configured: " + err.Error()
+		_, _ = r.db.ExecContext(ctx, `
+			UPDATE item_logistics
+			SET refund_error = $1,
+			    updated_at = NOW()
+			WHERE item_id = $2
+		`, errMsg, itemID)
+		return fmt.Errorf("stripe not configured: %w", err)
+	}
+
+	amountEUR := float64(amountCents) / 100.0
+	refundOpts, recordEUR := NewItemRefundStripeParams("cancel", itemID, reservedByUserID.Int64, pi, amountEUR, &amountCents)
+
+	refundID, refundErr := RefundStripePaymentIntentPublic(ctx, cfg, pi, refundOpts)
+	if refundErr != nil {
+		msg := refundErr.Error()
+		_, _ = r.db.ExecContext(ctx, `
+			UPDATE item_logistics
+			SET refund_error = $1,
+			    updated_at = NOW()
+			WHERE item_id = $2
+		`, "refund failed: "+msg, itemID)
+		return fmt.Errorf("refund failed: %w", refundErr)
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE item_logistics
+		SET stripe_payment_status = 'refunded',
+		    stripe_refund_id = $1,
+		    refund_amount = $2,
+		    refund_error = '',
+		    updated_at = NOW()
+		WHERE item_id = $3
+	`, refundID, recordEUR, itemID)
+	if err != nil {
+		return fmt.Errorf("could not update logistics status: %w", err)
+	}
+
+	return nil
 }

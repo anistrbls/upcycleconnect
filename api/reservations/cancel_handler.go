@@ -3,6 +3,7 @@ package reservations
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -90,6 +91,7 @@ func (h *Handler) CancelHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not cancel booking")
 			return
 		}
+		h.notifyCancellationToProviderAndAdmins(r, id)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"cancelled": true, "refunded": false})
 		return
 	}
@@ -136,6 +138,7 @@ func (h *Handler) CancelHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "booking is already cancelled")
 			return
 		}
+		h.notifyCancellationToProviderAndAdmins(r, id)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"cancelled": true, "refundRequested": true})
 		return
 	}
@@ -153,6 +156,7 @@ func (h *Handler) CancelHandler(w http.ResponseWriter, r *http.Request) {
 			SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'user', refund_status = 'non_refundable'
 			WHERE id = $1 AND user_id = $2
 		`, id, userID)
+		h.notifyCancellationToProviderAndAdmins(r, id)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"cancelled": true,
 			"refunded":  false,
@@ -214,9 +218,32 @@ func (h *Handler) CancelHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE id = $3 AND user_id = $4
 	`, refundID, recordEUR, id, userID)
 
+	h.notifyCancellationToProviderAndAdmins(r, id)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"cancelled":    true,
 		"refunded":     true,
 		"refundAmount": recordEUR,
 	})
+}
+
+func (h *Handler) notifyCancellationToProviderAndAdmins(r *http.Request, id int64) {
+	booking, err := h.repo.GetByID(id)
+	if err != nil {
+		return
+	}
+	ctx := r.Context()
+	dateStr := booking.BookingDate.Format("02/01/2006 à 15h04")
+	msg := fmt.Sprintf("La réservation de %s pour \"%s\" le %s a été annulée.", booking.UserName, booking.ServiceName, dateStr)
+
+	if booking.EmployeeID != nil && *booking.EmployeeID > 0 {
+		_ = items.CreateNotification(ctx, h.db, *booking.EmployeeID, "Réservation annulée", msg, "booking_cancelled")
+	}
+
+	if admins, errAdmins := h.repo.GetAdminIDs(ctx); errAdmins == nil {
+		for _, adminID := range admins {
+			if booking.EmployeeID == nil || adminID != *booking.EmployeeID {
+				_ = items.CreateNotification(ctx, h.db, adminID, "Réservation annulée", msg, "booking_cancelled")
+			}
+		}
+	}
 }

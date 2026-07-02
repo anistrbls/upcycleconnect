@@ -609,6 +609,34 @@ func NewBookingRefundStripeParams(operation string, bookingID, userID int64, pay
 	return &RefundPaymentIntentParams{AmountCents: ac, IdempotencyKey: key}, recordEUR
 }
 
+// NewItemRefundStripeParams construit remboursement + idempotence pour un remboursement d'item.
+func NewItemRefundStripeParams(operation string, itemID, userID int64, paymentIntentID string, amountEUR float64, partialAmountCents *int64) (*RefundPaymentIntentParams, float64) {
+	pi := strings.TrimSpace(paymentIntentID)
+	var cents int64
+	if partialAmountCents != nil && *partialAmountCents > 0 {
+		cents = *partialAmountCents
+	} else {
+		cents = RefundEURToAmountCents(amountEUR)
+	}
+	var ac *int64
+	if cents > 0 {
+		ac = &cents
+	}
+	op := strings.TrimSpace(operation)
+	if op == "" {
+		op = "item"
+	}
+	key := fmt.Sprintf("item-refund-%s-%d-%d-%s-%d", op, itemID, userID, pi, cents)
+	if len(key) > 255 {
+		key = key[:255]
+	}
+	recordEUR := amountEUR
+	if cents > 0 {
+		recordEUR = float64(cents) / 100.0
+	}
+	return &RefundPaymentIntentParams{AmountCents: ac, IdempotencyKey: key}, recordEUR
+}
+
 // RefundStripePaymentIntentPublic crée un remboursement Stripe pour le PaymentIntent donné (SDK officiel).
 func RefundStripePaymentIntentPublic(ctx context.Context, cfg *StripeConfig, paymentIntentID string, opts *RefundPaymentIntentParams) (string, error) {
 	if ctx == nil {

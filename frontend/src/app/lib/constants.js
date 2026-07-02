@@ -62,13 +62,13 @@ export const NAV_MODULES = [
         ],
     },
     {
-        key: "utilisateurs",
-        label: "Utilisateurs",
-        shortLabel: "Users",
-        icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+        key: "projets",
+        label: "Projets upcycle",
+        shortLabel: "Projets",
+        icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
         subNav: [
-            { key: "tous-utilisateurs", label: "Tous les utilisateurs", shortLabel: "Tous" },
-            { key: "planning-equipe", label: "Planning Équipe", shortLabel: "Planning" },
+            { key: "actifs", label: "Projets actifs", shortLabel: "Actifs" },
+            { key: "moderation", label: "Modération", shortLabel: "Modération" },
         ],
     },
     {
@@ -127,6 +127,16 @@ export const NAV_MODULES = [
         ],
     },
     {
+        key: "utilisateurs",
+        label: "Utilisateurs",
+        shortLabel: "Users",
+        icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+        subNav: [
+            { key: "tous-utilisateurs", label: "Tous les utilisateurs", shortLabel: "Tous" },
+            { key: "planning-equipe", label: "Planning Équipe", shortLabel: "Planning" },
+        ],
+    },
+    {
         key: "operations",
         label: "Opérations",
         shortLabel: "Ops",
@@ -135,16 +145,6 @@ export const NAV_MODULES = [
             { key: "conteneurs", label: "Conteneurs", shortLabel: "Conteneurs" },
             { key: "validations", label: "Validation", shortLabel: "Validation" },
             { key: "documents", label: "Documents", shortLabel: "Docs" },
-        ],
-    },
-    {
-        key: "projets",
-        label: "Projets upcycle",
-        shortLabel: "Projets",
-        icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
-        subNav: [
-            { key: "actifs", label: "Projets actifs", shortLabel: "Actifs" },
-            { key: "moderation", label: "Modération", shortLabel: "Modération" },
         ],
     },
     {
@@ -226,6 +226,16 @@ export const PRO_MODULES = [
         ],
     },
     {
+        key: "conseils",
+        label: "Conseils",
+        shortLabel: "Conseils",
+        icon: "M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z",
+        subNav: [
+            { key: "tous-conseils", label: "Tous les conseils", shortLabel: "Conseils" },
+            { key: "favoris", label: "Mes favoris", shortLabel: "Favoris" },
+        ],
+    },
+    {
         key: "forum",
         label: "Forum",
         shortLabel: "Forum",
@@ -278,6 +288,15 @@ export const SALARIE_MODULES = [
         ],
     },
     {
+        key: "prestations",
+        label: "Prestations",
+        shortLabel: "Prestations",
+        icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z",
+        subNav: [
+            { key: "catalogue", label: "Catalogue", shortLabel: "Catalogue" },
+        ],
+    },
+    {
         key: "salarie-formations",
         label: "Formations & événements",
         shortLabel: "Formations",
@@ -298,15 +317,6 @@ export const SALARIE_MODULES = [
         ],
     },
     {
-        key: "prestations",
-        label: "Prestations",
-        shortLabel: "Prestations",
-        icon: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z",
-        subNav: [
-            { key: "catalogue", label: "Catalogue", shortLabel: "Catalogue" },
-        ],
-    },
-    {
         key: "salarie-contenu",
         label: "Contenu",
         shortLabel: "Contenu",
@@ -314,6 +324,16 @@ export const SALARIE_MODULES = [
         subNav: [
             { key: "conseils", label: "Conseils", shortLabel: "Conseils" },
             { key: "brouillons", label: "Brouillons", shortLabel: "Brouillons" },
+        ],
+    },
+    {
+        key: "forum",
+        label: "Forum",
+        shortLabel: "Forum",
+        icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        subNav: [
+            { key: "sujets", label: "Tous les sujets", shortLabel: "Sujets" },
+            { key: "moderation", label: "Signalements", shortLabel: "Signalements" },
         ],
     },
     {
@@ -326,13 +346,13 @@ export const SALARIE_MODULES = [
         ],
     },
     {
-        key: "forum",
-        label: "Forum",
-        shortLabel: "Forum",
-        icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+        key: "parametres",
+        label: "Paramètres",
+        shortLabel: "Paramètres",
+        icon: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
         subNav: [
-            { key: "sujets", label: "Tous les sujets", shortLabel: "Sujets" },
-            { key: "moderation", label: "Signalements", shortLabel: "Signalements" },
+            { key: "notifications", label: "Notifications", shortLabel: "Notifs" },
+            { key: "preferences", label: "Préférences", shortLabel: "Pref" },
         ],
     },
     {
@@ -368,6 +388,17 @@ export const PARTICULIER_MODULES = [
         ],
     },
     {
+        key: "projets",
+        label: "Projets upcycle",
+        shortLabel: "Projets",
+        icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+        subNav: [
+            { key: "postes", label: "Projets postés", shortLabel: "Postés" },
+            { key: "participes", label: "My Upcycle", shortLabel: "Participés" },
+            { key: "favoris", label: "Projets favoris", shortLabel: "Favoris" },
+        ],
+    },
+    {
         key: "prestations",
         label: "Prestations",
         shortLabel: "Prestations",
@@ -396,17 +427,6 @@ export const PARTICULIER_MODULES = [
         subNav: [
             { key: "tous-conseils", label: "Tous les conseils", shortLabel: "Conseils" },
             { key: "favoris", label: "Mes favoris", shortLabel: "Favoris" },
-        ],
-    },
-    {
-        key: "projets",
-        label: "Projets upcycle",
-        shortLabel: "Projets",
-        icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
-        subNav: [
-            { key: "postes", label: "Projets postés", shortLabel: "Postés" },
-            { key: "participes", label: "My Upcycle", shortLabel: "Participés" },
-            { key: "favoris", label: "Projets favoris", shortLabel: "Favoris" },
         ],
     },
     {
@@ -446,7 +466,7 @@ export const PARTICULIER_MODULES = [
     },
 ];
 
-export const ALL_MODULES = [...NAV_MODULES, ...SALARIE_MODULES, ...PARTICULIER_MODULES];
+export const ALL_MODULES = [...NAV_MODULES, ...SALARIE_MODULES, ...PARTICULIER_MODULES, ...PRO_MODULES];
 
 export const getModuleByKey = (moduleKey) => ALL_MODULES.find((module) => module.key === moduleKey) || NAV_MODULES[0];
 

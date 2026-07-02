@@ -669,7 +669,7 @@ function MesAnnoncesContent() {
                 filteredAnnonces.map((annonce) => {
                     const statusKey = normalizeStatus(annonce.status);
                     const workflowKey = String(annonce.workflowStatus || "").toLowerCase();
-                    const isAfterDeposit = ["deposited", "available", "pending_payment", "reserved", "picked_up"].includes(workflowKey);
+                    const isAfterDeposit = Boolean(annonce.afterDeposit);
                     const isCancelled = workflowKey === "cancelled";
                     const canEdit = !isAdmin && !isCancelled && statusKey !== "vendu" && !isAfterDeposit;
                     const canDelete = !isAdmin && ["brouillon", "refusee", "desactivee", "desactive"].includes(statusKey) && !isCancelled;

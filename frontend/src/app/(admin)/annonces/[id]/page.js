@@ -28,6 +28,8 @@ import {
     Trash2,
 } from "lucide-react";
 
+const DISABLE_RATING = true;
+
 const STATUS_LABELS = { actif: "Actif", vendu: "Vendu", "en attente": "En attente", brouillon: "Brouillon", refusee: "Refusée", desactivee: "Désactivée" };
 const STATUS_COLORS = {
     actif:        { bg: "rgba(62,104,108,0.12)", color: "var(--forest-deep)" },
@@ -427,7 +429,7 @@ function AnnonceDetailContent() {
     }, []);
 
     useEffect(() => {
-        if (!annonce?.id || isAdmin) return;
+        if (!annonce?.id || isAdmin || DISABLE_RATING) return;
         if (String(annonce.workflowStatus || "").toLowerCase() !== "picked_up") return;
         const token = typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
         if (!token) return;
@@ -798,7 +800,7 @@ function AnnonceDetailContent() {
     const workflowKey = String(annonce.workflowStatus || "").toLowerCase();
     const isDraftAnnonce = statusKey === "brouillon";
     const isRefusedAnnonce = ["refusee", "desactivee", "desactive"].includes(statusKey);
-    const isAfterDeposit = ["deposited", "available", "pending_payment", "reserved", "picked_up"].includes(workflowKey);
+    const isAfterDeposit = Boolean(annonce.afterDeposit);
     const isValidatedBeforeDeposit = statusKey === "actif" && !isAfterDeposit;
     const isPendingAnnonce = statusKey === "en attente";
     const statusLabel = STATUS_LABELS[statusKey] || statusKey;
@@ -871,6 +873,7 @@ function AnnonceDetailContent() {
         const ownerSeesProRating =
             wf === "picked_up" &&
             !isAdmin &&
+            !DISABLE_RATING &&
             currentUserID != null &&
             ownerId != null &&
             String(currentUserID) === String(ownerId);
@@ -985,97 +988,26 @@ function AnnonceDetailContent() {
                 </div>
 
                 {ownerSeesProRating && (
-                    <div
-                        style={{
-                            position: "relative",
-                            zIndex: 1,
-                            padding: "1rem 1.05rem",
-                            borderRadius: "18px",
-                            background: "rgba(255,255,255,0.85)",
-                            border: "1px solid rgba(35,59,61,0.08)",
-                        }}
-                    >
-                        <div style={{ fontSize: "0.68rem", fontWeight: "800", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>
-                            Note au professionnel
+                    DISABLE_RATING ? (
+                        <div style={{ padding: "1rem 1.05rem", borderRadius: "18px", background: "rgba(255,255,255,0.85)", border: "1px solid rgba(35,59,61,0.08)" }}>
+                            <div style={{ fontSize: "0.68rem", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>Note au professionnel</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.2rem", flexWrap: "wrap", marginBottom: "0.85rem" }}>
+                                {[1,2,3,4,5].map((n) => (
+                                    <Star key={n} size={26} aria-hidden fill={proRatingExisting >= n ? "#ca8a04" : "none"} color={proRatingExisting >= n ? "#ca8a04" : "rgba(35,59,61,0.28)"} strokeWidth={proRatingExisting >= n ? 0 : 1.65} />
+                                ))}
+                            </div>
+                            <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                                Vous avez attribué {proRatingExisting ?? "aucune"} étoile{proRatingExisting === 1 ? "" : "s"}.
+                            </p>
                         </div>
-                        <p style={{ margin: "0 0 0.85rem", fontSize: "0.84rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
-                            Évaluez le professionnel qui a récupéré votre objet.
-                        </p>
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.2rem", flexWrap: "wrap", marginBottom: "0.85rem" }}>
-                            {[1, 2, 3, 4, 5].map((n) => (
-                                <button
-                                    key={n}
-                                    type="button"
-                                    disabled={proRatingBusy}
-                                    onClick={() => setProRatingDraft(n)}
-                                    aria-label={`${n} étoiles`}
-                                    aria-pressed={proRatingDraft === n}
-                                    style={{
-                                        background: "none",
-                                        border: "none",
-                                        padding: "0.2rem",
-                                        cursor: proRatingBusy ? "wait" : "pointer",
-                                        lineHeight: 0,
-                                        opacity: proRatingBusy ? 0.6 : 1,
-                                    }}
-                                >
-                                    <Star
-                                        size={26}
-                                        aria-hidden
-                                        fill={proRatingDraft >= n ? "#ca8a04" : "none"}
-                                        color={proRatingDraft >= n ? "#ca8a04" : "rgba(35,59,61,0.28)"}
-                                        strokeWidth={proRatingDraft >= n ? 0 : 1.65}
-                                    />
-                                </button>
-                            ))}
-                        </div>
-                        <button
-                            type="button"
-                            disabled={
-                                proRatingBusy ||
-                                proRatingDraft < 1 ||
-                                (proRatingExisting != null && proRatingDraft === proRatingExisting)
-                            }
-                            onClick={async () => {
-                                if (proRatingDraft < 1) return;
-                                setProRatingBusy(true);
-                                try {
-                                    const res = await fetch(apiUrl(`/items/${annonce.id}/rate-professional`), {
-                                        method: "POST",
-                                        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-                                        body: JSON.stringify({ stars: proRatingDraft }),
-                                    });
-                                    const data = await res.json().catch(() => ({}));
-                                    if (!res.ok) throw new Error(data.error || "Enregistrement impossible");
-                                    setProRatingExisting(proRatingDraft);
-                                } catch (e) {
-                                    window.alert(e.message || "Erreur");
-                                } finally {
-                                    setProRatingBusy(false);
-                                }
-                            }}
-                            style={{
-                                padding: "0.58rem 1.1rem",
-                                borderRadius: "999px",
-                                border: "none",
-                                fontWeight: "700",
-                                fontFamily: "inherit",
-                                fontSize: "0.86rem",
-                                cursor: proRatingBusy ? "wait" : "pointer",
-                                background: "var(--forest-deep)",
-                                color: "#fff",
-                                opacity:
-                                    proRatingBusy ||
-                                    proRatingDraft < 1 ||
-                                    (proRatingExisting != null && proRatingDraft === proRatingExisting)
-                                        ? 0.55
-                                        : 1,
-                            }}
-                        >
-                            {proRatingBusy ? "Envoi…" : proRatingExisting != null ? "Mettre à jour la note" : "Envoyer la note"}
-                        </button>
-                    </div>
+                    ) : (
+                        <SellerRatingBlock item={annonce} busy={proRatingBusy} onSubmit={(stars) => submitProRating(annonce.id, stars)} />
+                    )
                 )}
+
+
+
+
             </div>
         );
     };
@@ -1295,7 +1227,11 @@ function AnnonceDetailContent() {
                             <div style={{ display: "grid", gap: "0.55rem" }}>
                                 {isAdmin ? (
                                     <>
-                                        {statusKey === "actif" ? (
+                                        {statusKey === "vendu" || statusKey === "vendue" ? (
+                                            <div style={{ fontSize: "0.86rem", color: "var(--text-muted)", lineHeight: "1.5", marginBottom: "0.5rem" }}>
+                                                Cette annonce a été vendue.
+                                            </div>
+                                        ) : statusKey === "actif" ? (
                                             <button className="action-button action-button-danger" onClick={() => handleOpenModerationModal("desactivation")} style={actionBtn("danger")}>
                                                 Desactiver l'annonce
                                             </button>

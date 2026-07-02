@@ -5,7 +5,7 @@ import { labelStyle } from "../../lib/styles";
 
 function isRefundablePaymentSource(source) {
     const src = String(source || "").toLowerCase();
-    return src.includes("événement") || src.includes("réservation service") || src.includes("reservation service");
+    return src.includes("événement") || src.includes("réservation service") || src.includes("reservation service") || src.includes("annonce");
 }
 
 /** Événement ou réservation prestation : afficher le détail remboursement / demande / refus. */
@@ -84,6 +84,8 @@ export default function RefundPaymentDetailModal({ open, onClose, payment }) {
                     label={
                         isRefundablePaymentSource(payment.source) && String(payment.source || "").toLowerCase().includes("réservation")
                             ? "Montant de la réservation (paiement initial)"
+                            : String(payment.source || "").toLowerCase().includes("annonce")
+                            ? "Montant de l'annonce (paiement initial)"
                             : "Montant du billet (paiement initial)"
                     }
                 >

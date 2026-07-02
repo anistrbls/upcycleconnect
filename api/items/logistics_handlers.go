@@ -2,6 +2,7 @@ package items
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -167,6 +168,11 @@ func RegisterLogisticsRoutes(mux *http.ServeMux, repo *Repository, authMiddlewar
 		if err := repo.CancelLogistics(r.Context(), itemID, p.Reason, p.RevertToStatus); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		if p.RevertToStatus == "" {
+			if refundErr := repo.RefundItemLogisticsIfPaid(r.Context(), itemID); refundErr != nil {
+				log.Printf("Warning: refund failed after logistics cancellation for item %d: %v", itemID, refundErr)
+			}
 		}
 		l, _ := repo.GetLogisticsByItemID(r.Context(), itemID)
 		writeJSON(w, http.StatusOK, l)

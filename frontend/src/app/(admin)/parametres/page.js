@@ -28,7 +28,7 @@ export default function ParametresModuleIndexPage() {
                     const role = data.user?.role;
                     if (role === "admin") {
                         router.replace("/parametres/configuration");
-                    } else if (role === "professionnel" || role === "particulier") {
+                    } else if (role === "professionnel" || role === "particulier" || role === "salarie") {
                         router.replace("/parametres/notifications");
                     } else {
                         router.replace("/vue-globale/vue-generale");

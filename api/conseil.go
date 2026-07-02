@@ -414,15 +414,28 @@ func parseScheduledPublishAt(raw string) (sql.NullTime, error) {
 
 // publishDueScheduledConseils passe en « publie » les conseils dont la date programmée est atteinte.
 func publishDueScheduledConseils() error {
-	_, err := db.Exec(`
+	rows, err := db.Query(`
 		UPDATE salarie_contents
 		SET status = 'publie', rejection_comment = '', updated_at = NOW()
 		WHERE type = 'conseil'
 		  AND scheduled_publish_at IS NOT NULL
 		  AND scheduled_publish_at <= NOW()
 		  AND status = 'brouillon'
+		RETURNING title, user_id
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title string
+		var userID int64
+		if err := rows.Scan(&title, &userID); err == nil {
+			notifyConseilValidation(userID, title)
+			notifyCommunityNewConseil(title)
+		}
+	}
+	return nil
 }
 
 // resolveConseilStatusForSave : publication future → brouillon en base jusqu'à la date, puis promotion auto.

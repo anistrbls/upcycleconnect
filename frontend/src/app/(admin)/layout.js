@@ -47,6 +47,16 @@ export default function AdminLayout({ children }) {
                 let appMaterialDeposited = true;
                 let appMaterialRecovered = true;
                 let appRatingReceived = true;
+                let appBookingCancelled = true;
+                let appBookingExpired = true;
+                let appDepositReminder = true;
+                let appEventModeration = true;
+                let appEventRegistration = true;
+                let appEventCancellation = true;
+                let appEventAssignment = true;
+                let appEventUpdate = true;
+                let appEventReminder = true;
+                let appEventRefund = true;
 
                 if (user?.id) {
                     const savedSettings = window.localStorage.getItem(`upcycle_settings_${user.id}`);
@@ -60,6 +70,16 @@ export default function AdminLayout({ children }) {
                             if (parsed.app_material_deposited !== undefined) appMaterialDeposited = parsed.app_material_deposited;
                             if (parsed.app_material_recovered !== undefined) appMaterialRecovered = parsed.app_material_recovered;
                             if (parsed.app_rating_received !== undefined) appRatingReceived = parsed.app_rating_received;
+                            if (parsed.app_booking_cancelled !== undefined) appBookingCancelled = parsed.app_booking_cancelled;
+                            if (parsed.app_booking_expired !== undefined) appBookingExpired = parsed.app_booking_expired;
+                            if (parsed.app_deposit_reminder !== undefined) appDepositReminder = parsed.app_deposit_reminder;
+                            if (parsed.app_event_moderation !== undefined) appEventModeration = parsed.app_event_moderation;
+                            if (parsed.app_event_registration !== undefined) appEventRegistration = parsed.app_event_registration;
+                            if (parsed.app_event_cancellation !== undefined) appEventCancellation = parsed.app_event_cancellation;
+                            if (parsed.app_event_assignment !== undefined) appEventAssignment = parsed.app_event_assignment;
+                            if (parsed.app_event_update !== undefined) appEventUpdate = parsed.app_event_update;
+                            if (parsed.app_event_reminder !== undefined) appEventReminder = parsed.app_event_reminder;
+                            if (parsed.app_event_refund !== undefined) appEventRefund = parsed.app_event_refund;
                         } catch (e) {
                             console.error("Failed to parse settings in layout", e);
                         }
@@ -88,6 +108,26 @@ export default function AdminLayout({ children }) {
                                 isDisabled = !appMaterialRecovered;
                             } else if (n.type === "rating_received") {
                                 isDisabled = !appRatingReceived;
+                            } else if (n.type === "booking_cancelled") {
+                                isDisabled = !appBookingCancelled;
+                            } else if (n.type === "booking_expired") {
+                                isDisabled = !appBookingExpired;
+                            } else if (n.type === "deposit_reminder") {
+                                isDisabled = !appDepositReminder;
+                            } else if (n.type === "event_moderation") {
+                                isDisabled = !appEventModeration;
+                            } else if (n.type === "event_registration") {
+                                isDisabled = !appEventRegistration;
+                            } else if (n.type === "event_cancellation") {
+                                isDisabled = !appEventCancellation;
+                            } else if (n.type === "event_assignment") {
+                                isDisabled = !appEventAssignment;
+                            } else if (n.type === "event_update") {
+                                isDisabled = !appEventUpdate;
+                            } else if (n.type === "event_reminder") {
+                                isDisabled = !appEventReminder;
+                            } else if (n.type === "event_refund") {
+                                isDisabled = !appEventRefund;
                             }
                         }
                         if (isDisabled) {
@@ -140,6 +180,36 @@ export default function AdminLayout({ children }) {
                         }
                         if (n.type === "rating_received") {
                             return appRatingReceived;
+                        }
+                        if (n.type === "booking_cancelled") {
+                            return appBookingCancelled;
+                        }
+                        if (n.type === "booking_expired") {
+                            return appBookingExpired;
+                        }
+                        if (n.type === "deposit_reminder") {
+                            return appDepositReminder;
+                        }
+                        if (n.type === "event_moderation") {
+                            return appEventModeration;
+                        }
+                        if (n.type === "event_registration") {
+                            return appEventRegistration;
+                        }
+                        if (n.type === "event_cancellation") {
+                            return appEventCancellation;
+                        }
+                        if (n.type === "event_assignment") {
+                            return appEventAssignment;
+                        }
+                        if (n.type === "event_update") {
+                            return appEventUpdate;
+                        }
+                        if (n.type === "event_reminder") {
+                            return appEventReminder;
+                        }
+                        if (n.type === "event_refund") {
+                            return appEventRefund;
                         }
                         return true;
                     });
@@ -757,6 +827,46 @@ export default function AdminLayout({ children }) {
                                     typeBg = "rgba(234, 179, 8, 0.15)";
                                     typeColor = "#a16207";
                                     indicator = "⭐";
+                                } else if (n.type === "booking_cancelled") {
+                                    typeBg = "rgba(239, 68, 68, 0.15)";
+                                    typeColor = "#b91c1c";
+                                    indicator = "❌";
+                                } else if (n.type === "booking_expired") {
+                                    typeBg = "rgba(249, 115, 22, 0.15)";
+                                    typeColor = "#c2410c";
+                                    indicator = "⏳";
+                                } else if (n.type === "deposit_reminder") {
+                                    typeBg = "rgba(14, 165, 233, 0.15)";
+                                    typeColor = "#0369a1";
+                                    indicator = "⏰";
+                                } else if (n.type === "event_moderation") {
+                                    typeBg = "rgba(250, 204, 21, 0.16)";
+                                    typeColor = "#a16207";
+                                    indicator = "🛡️";
+                                } else if (n.type === "event_registration") {
+                                    typeBg = "rgba(34, 197, 94, 0.15)";
+                                    typeColor = "#15803d";
+                                    indicator = "🎟️";
+                                } else if (n.type === "event_cancellation") {
+                                    typeBg = "rgba(239, 68, 68, 0.15)";
+                                    typeColor = "#b91c1c";
+                                    indicator = "📅";
+                                } else if (n.type === "event_assignment") {
+                                    typeBg = "rgba(59, 130, 246, 0.15)";
+                                    typeColor = "#1d4ed8";
+                                    indicator = "👤";
+                                } else if (n.type === "event_update") {
+                                    typeBg = "rgba(124, 58, 237, 0.15)";
+                                    typeColor = "#6d28d9";
+                                    indicator = "📝";
+                                } else if (n.type === "event_reminder") {
+                                    typeBg = "rgba(14, 165, 233, 0.15)";
+                                    typeColor = "#0369a1";
+                                    indicator = "⏰";
+                                } else if (n.type === "event_refund") {
+                                    typeBg = "rgba(20, 184, 166, 0.15)";
+                                    typeColor = "#0f766e";
+                                    indicator = "💶";
                                 } else if (n.type === "tip") {
                                     typeBg = "rgba(202, 214, 216, 0.3)";
                                     typeColor = "#4F6163";

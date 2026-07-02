@@ -148,7 +148,8 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		COALESCE(l.deposit_code, ''),
 		COALESCE(l.pickup_code, ''),
 		i.moderation_note,
-		i.moderation_details
+		i.moderation_details,
+		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit
 		FROM items i
 		JOIN users u ON u.id = i.user_id
 		LEFT JOIN item_logistics l ON l.item_id = i.id
@@ -174,6 +175,7 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 			&it.UserID, &it.CreatedAt, &it.UpdatedAt, &it.UserName, &userRegistrationTS,
 			&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
 			&it.ModerationNote, &it.ModerationDetails,
+			&it.AfterDeposit,
 		)
 		if err != nil {
 			return nil, err
@@ -205,7 +207,8 @@ func (r *Repository) ListByUser(userID int64) ([]Item, error) {
 	q := `SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
 		COALESCE(l.workflow_status, ''),
 		COALESCE(l.deposit_code, ''),
-		COALESCE(l.pickup_code, '')
+		COALESCE(l.pickup_code, ''),
+		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit
 		FROM items i
 		LEFT JOIN item_logistics l ON l.item_id = i.id
 		WHERE i.user_id = $1 AND i.deleted_by_user = false
@@ -226,6 +229,7 @@ func (r *Repository) ListByUser(userID int64) ([]Item, error) {
 			&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.Views, &it.Saves, &it.Interested,
 			&it.UserID, &it.CreatedAt, &it.UpdatedAt,
 			&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
+			&it.AfterDeposit,
 		)
 		if err != nil {
 			return nil, err
@@ -344,7 +348,8 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 		l.pickup_code_expires_at,
 		i.moderation_note,
 		i.moderation_details,
-		i.moderated_at
+		i.moderated_at,
+		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit
 		FROM items i
 		JOIN users u ON u.id = i.user_id
 		LEFT JOIN item_logistics l ON l.item_id = i.id
@@ -369,6 +374,7 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 		&it.DepositPointName, &it.ContainerName,
 		&depExp, &pickExp,
 		&it.ModerationNote, &it.ModerationDetails, &modAt,
+		&it.AfterDeposit,
 	)
 	
 	if err != nil {
@@ -533,9 +539,6 @@ func (r *Repository) GetUserItemState(itemID, userID int64) (*UserItemState, err
 	state.HasLogistics = hasLogistics
 	state.AfterDeposit = depositedAt.Valid || map[string]bool{
 		WFDeposited: true,
-		WFAvailable: true,
-		WFPendingPayment: true,
-		WFReserved:  true,
 		WFPickedUp:  true,
 	}[state.WorkflowStatus]
 
@@ -550,12 +553,15 @@ func (r *Repository) MarkCancelledByUser(itemID, userID int64) error {
 	defer tx.Rollback()
 
 	var currentStatus string
+	var title string
+	var proUserID sql.NullInt64
 	err = tx.QueryRow(`
-		SELECT status
-		FROM items
-		WHERE id = $1 AND user_id = $2 AND deleted_by_user = false
-		FOR UPDATE
-	`, itemID, userID).Scan(&currentStatus)
+		SELECT i.status, i.title, l.reserved_by_user_id
+		FROM items i
+		LEFT JOIN item_logistics l ON l.item_id = i.id
+		WHERE i.id = $1 AND i.user_id = $2 AND i.deleted_by_user = false
+		FOR UPDATE OF i
+	`, itemID, userID).Scan(&currentStatus, &title, &proUserID)
 	if err != nil {
 		return err
 	}
@@ -587,7 +593,18 @@ func (r *Repository) MarkCancelledByUser(itemID, userID int64) error {
 		return err
 	}
 
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	// Notify professional if they had reserved it
+	if proUserID.Valid && proUserID.Int64 > 0 {
+		ctx := context.Background()
+		msg := fmt.Sprintf("La réservation pour l'annonce '%s' a été annulée car le vendeur a retiré son annonce.", title)
+		_ = CreateNotification(ctx, r.db, proUserID.Int64, "Réservation annulée", msg, "booking_cancelled")
+	}
+
+	return nil
 }
 
 func (r *Repository) UndoCancelledByUser(itemID, userID int64) error {
@@ -682,9 +699,13 @@ func (r *Repository) SyncRefundFromStripeWebhook(ctx context.Context, paymentInt
 		}
 		if _, err := r.db.ExecContext(ctx, `
 			UPDATE item_logistics
-			SET stripe_payment_status = 'refunded', updated_at = NOW()
-			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
-		`, pi); err != nil {
+			SET stripe_payment_status = 'refunded',
+			    stripe_refund_id = CASE WHEN $1 <> '' THEN $1 ELSE stripe_refund_id END,
+			    refund_amount = CASE WHEN $2 > 0 THEN ($2::numeric / 100.0) ELSE refund_amount END,
+			    refund_error = '',
+			    updated_at = NOW()
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $3
+		`, rid, amountCents, pi); err != nil {
 			return err
 		}
 		return nil
@@ -708,10 +729,12 @@ func (r *Repository) SyncRefundFromStripeWebhook(ctx context.Context, paymentInt
 		}
 		if _, err := r.db.ExecContext(ctx, `
 			UPDATE item_logistics
-			SET stripe_payment_status = 'failed', updated_at = NOW()
-			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
+			SET stripe_payment_status = 'failed',
+			    refund_error = $1,
+			    updated_at = NOW()
+			WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $2
 			  AND stripe_payment_status IS DISTINCT FROM 'refunded'
-		`, pi); err != nil {
+		`, errMsg, pi); err != nil {
 			return err
 		}
 		return nil

@@ -399,8 +399,14 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		}
 
 		if err := repo.MarkCancelledByUser(itemID, userID); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not cancel item")
+			log.Printf("Error in MarkCancelledByUser for item %d: %v", itemID, err)
+			writeError(w, http.StatusInternalServerError, "could not cancel item: "+err.Error())
 			return
+		}
+
+		// Trigger refund if paid
+		if refundErr := repo.RefundItemLogisticsIfPaid(r.Context(), itemID); refundErr != nil {
+			log.Printf("Warning: refund failed for item %d: %v", itemID, refundErr)
 		}
 
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
@@ -466,6 +472,20 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			}
 		}
 
+		if p.Status == "refusee" || p.Status == "desactivee" || p.Status == "desactive" {
+			// Cancel logistics if one exists
+			if cancelErr := repo.CancelLogistics(r.Context(), id, p.ModerationNote, ""); cancelErr != nil {
+				// Ignore "item not in logistics" error if the item was never in logistics
+				if !strings.Contains(cancelErr.Error(), "item not in logistics") {
+					log.Printf("Warning: could not cancel logistics for item %d on status change: %v", id, cancelErr)
+				}
+			}
+			// Trigger refund if paid
+			if refundErr := repo.RefundItemLogisticsIfPaid(r.Context(), id); refundErr != nil {
+				log.Printf("Warning: refund failed for item %d on status change: %v", id, refundErr)
+			}
+		}
+
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 	})))
 
@@ -483,6 +503,11 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid item id")
 			return
+		}
+
+		// Trigger refund if paid before deleting the item record
+		if refundErr := repo.RefundItemLogisticsIfPaid(r.Context(), id); refundErr != nil {
+			log.Printf("Warning: refund failed before deleting item %d: %v", id, refundErr)
 		}
 
 		err = repo.Delete(id)

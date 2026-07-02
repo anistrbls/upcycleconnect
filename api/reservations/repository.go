@@ -1,10 +1,13 @@
 package reservations
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
 	"time"
+
+	"upcycleconnect/api/items"
 )
 
 // Repository contient la connexion à la base de données.
@@ -55,6 +58,44 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE service_bookings ADD COLUMN IF NOT EXISTS refund_request_reason TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE service_bookings ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`,
 		`ALTER TABLE service_bookings ADD COLUMN IF NOT EXISTS cancelled_by TEXT NOT NULL DEFAULT ''`,
+		// service_reminder_sent : évite d'envoyer plusieurs rappels pour le même rendez-vous
+		`ALTER TABLE service_bookings ADD COLUMN IF NOT EXISTS service_reminder_sent BOOLEAN NOT NULL DEFAULT false`,
+		// Conseils notifications
+		`CREATE TABLE IF NOT EXISTS user_notification_settings (
+			user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			app_enabled BOOLEAN NOT NULL DEFAULT true,
+			email_enabled BOOLEAN NOT NULL DEFAULT true,
+			app_moderation BOOLEAN NOT NULL DEFAULT true,
+			email_moderation BOOLEAN NOT NULL DEFAULT true,
+			app_booking_received BOOLEAN NOT NULL DEFAULT true,
+			email_booking_received BOOLEAN NOT NULL DEFAULT true,
+			app_point_assigned BOOLEAN NOT NULL DEFAULT true,
+			email_point_assigned BOOLEAN NOT NULL DEFAULT true,
+			app_material_deposited BOOLEAN NOT NULL DEFAULT true,
+			email_material_deposited BOOLEAN NOT NULL DEFAULT true,
+			app_material_recovered BOOLEAN NOT NULL DEFAULT true,
+			email_material_recovered BOOLEAN NOT NULL DEFAULT true,
+			app_rating_received BOOLEAN NOT NULL DEFAULT true,
+			email_rating_received BOOLEAN NOT NULL DEFAULT true,
+			app_booking_cancelled BOOLEAN NOT NULL DEFAULT true,
+			email_booking_cancelled BOOLEAN NOT NULL DEFAULT true,
+			app_booking_expired BOOLEAN NOT NULL DEFAULT true,
+			email_booking_expired BOOLEAN NOT NULL DEFAULT true,
+			app_deposit_reminder BOOLEAN NOT NULL DEFAULT true,
+			email_deposit_reminder BOOLEAN NOT NULL DEFAULT true,
+			display_mode TEXT NOT NULL DEFAULT 'light',
+			language TEXT NOT NULL DEFAULT 'fr',
+			map_type TEXT NOT NULL DEFAULT 'plan',
+			show_phone_publicly BOOLEAN NOT NULL DEFAULT false,
+			show_email_publicly BOOLEAN NOT NULL DEFAULT false
+		)`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_conseil_moderation BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_conseil_moderation BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_new_conseil BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_new_conseil BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_conseil_engagement BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_admin_new_conseil BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_admin_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		// Réservations payées mais encore « pending » (ancien comportement) → confirmées
 		`UPDATE service_bookings
 		 SET status = 'confirmed'
@@ -100,8 +141,78 @@ const bookingSelect = `
 	LEFT JOIN users emp  ON emp.id = sb.employee_id
 `
 
+// sendUpcomingServiceReminders envoie une notification 24h avant chaque rendez-vous
+// de prestation confirmé qui n'a pas encore reçu de rappel.
+func (r *Repository) sendUpcomingServiceReminders() {
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT sb.id, sb.user_id, sb.employee_id,
+		       COALESCE(u.firstname || ' ' || u.lastname, 'Client #' || sb.user_id::TEXT),
+		       COALESCE(s.name, 'Prestation #' || sb.service_id::TEXT),
+		       sb.booking_date
+		FROM service_bookings sb
+		LEFT JOIN users u    ON u.id = sb.user_id
+		LEFT JOIN services s ON s.id = sb.service_id
+		WHERE sb.status = 'confirmed'
+		  AND sb.booking_date > NOW()
+		  AND sb.booking_date <= NOW() + INTERVAL '24 hours'
+		  AND sb.service_reminder_sent = false
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type reminder struct {
+		id          int64
+		userID      int64
+		employeeID  *int64
+		clientName  string
+		serviceName string
+		bookingDate time.Time
+	}
+	var reminders []reminder
+	for rows.Next() {
+		var rem reminder
+		if err := rows.Scan(&rem.id, &rem.userID, &rem.employeeID,
+			&rem.clientName, &rem.serviceName, &rem.bookingDate); err == nil {
+			reminders = append(reminders, rem)
+		}
+	}
+
+	for _, rem := range reminders {
+		// Notifier le client
+		msgClient := fmt.Sprintf(
+			"Rappel : votre rendez-vous pour la prestation \"%s\" est prévu demain à %s.",
+			rem.serviceName,
+			rem.bookingDate.Format("15h04"),
+		)
+		_ = items.CreateNotification(ctx, r.db, rem.userID,
+			"Rappel de prestation", msgClient, "service_reminder")
+
+		// Notifier le prestataire/salarié assigné
+		if rem.employeeID != nil {
+			msgEmp := fmt.Sprintf(
+				"Rappel : vous avez un rendez-vous pour la prestation \"%s\" demain à %s avec %s.",
+				rem.serviceName,
+				rem.bookingDate.Format("15h04"),
+				rem.clientName,
+			)
+			_ = items.CreateNotification(ctx, r.db, *rem.employeeID,
+				"Rappel de prestation", msgEmp, "service_reminder")
+		}
+
+		// Marquer le rappel comme envoyé
+		_, _ = r.db.ExecContext(ctx,
+			`UPDATE service_bookings SET service_reminder_sent = true WHERE id = $1`,
+			rem.id,
+		)
+	}
+}
+
 // List retourne toutes les réservations avec filtres optionnels.
 func (r *Repository) List(f ListFilters) ([]Booking, error) {
+	r.sendUpcomingServiceReminders()
 	var statusParam interface{}
 	if f.Status != "" {
 		statusParam = f.Status
@@ -195,10 +306,23 @@ func (r *Repository) UpdateStatus(id int64, p UpdateStatusPayload) (Booking, err
 		return Booking{}, err
 	}
 	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return Booking{}, sql.ErrNoRows
+	booking, err := r.GetByID(id)
+	if err != nil {
+		return Booking{}, err
 	}
-	return r.GetByID(id)
+	if affected > 0 {
+		ctx := context.Background()
+		dateStr := booking.BookingDate.Format("02/01/2006 à 15h04")
+		if p.Status == BookingConfirmed {
+			msg := fmt.Sprintf("Votre réservation pour la prestation \"%s\" le %s a été confirmée !", booking.ServiceName, dateStr)
+			_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation confirmée", msg, "booking_confirmed")
+		} else if p.Status == BookingCancelled {
+			msg := fmt.Sprintf("Votre réservation pour \"%s\" le %s a été annulée. Un remboursement a été initié le cas échéant.", booking.ServiceName, dateStr)
+			_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation annulée", msg, "booking_cancelled")
+		}
+	}
+
+	return booking, nil
 }
 
 // CreateBooking crée une nouvelle demande ou réservation depuis l'utilisateur connecté.
@@ -234,7 +358,37 @@ func (r *Repository) CreateBooking(userID int64, p CreateBookingPayload, booking
 	if err != nil {
 		return Booking{}, err
 	}
-	return r.GetByID(id)
+	booking, err := r.GetByID(id)
+	if err != nil {
+		return Booking{}, err
+	}
+
+	ctx := context.Background()
+
+	// 1. If it is pending request validation
+	if booking.Status == BookingPending {
+		msg := fmt.Sprintf("Nouvelle demande de prestation reçue pour \"%s\" de la part de %s.", booking.ServiceName, booking.UserName)
+		if booking.EmployeeID != nil && *booking.EmployeeID > 0 {
+			_ = items.CreateNotification(ctx, r.db, *booking.EmployeeID, "Nouvelle demande de prestation", msg, "booking_request_received")
+		}
+		// Also notify admins
+		if admins, errAdmins := r.GetAdminIDs(ctx); errAdmins == nil {
+			for _, adminID := range admins {
+				if booking.EmployeeID == nil || adminID != *booking.EmployeeID {
+					_ = items.CreateNotification(ctx, r.db, adminID, "Nouvelle demande de prestation", msg, "booking_request_received")
+				}
+			}
+		}
+	}
+
+	// 2. If it is confirmed immediately
+	if booking.Status == BookingConfirmed {
+		dateStr := booking.BookingDate.Format("02/01/2006 à 15h04")
+		msg := fmt.Sprintf("Votre réservation pour la prestation \"%s\" le %s a été confirmée !", booking.ServiceName, dateStr)
+		_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation confirmée", msg, "booking_confirmed")
+	}
+
+	return booking, nil
 }
 
 // AssignEmployee assigne un salarié à une réservation existante.
@@ -276,10 +430,17 @@ func (r *Repository) ConfirmPayment(bookingID int64, sessionID, paymentIntentID 
 		return Booking{}, err
 	}
 	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return r.GetByID(bookingID)
+	booking, err := r.GetByID(bookingID)
+	if err != nil {
+		return Booking{}, err
 	}
-	return r.GetByID(bookingID)
+	if affected > 0 && booking.Status == BookingConfirmed {
+		ctx := context.Background()
+		dateStr := booking.BookingDate.Format("02/01/2006 à 15h04")
+		msg := fmt.Sprintf("Votre réservation pour la prestation \"%s\" le %s a été confirmée !", booking.ServiceName, dateStr)
+		_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation confirmée", msg, "booking_confirmed")
+	}
+	return booking, nil
 }
 
 // GetBookingForCheckout charge une réservation pour initier le paiement.
@@ -331,4 +492,150 @@ func scanBooking(s scanner) (Booking, error) {
 		b.CancelledAt = &t
 	}
 	return b, err
+}
+
+// GetAdminIDs retrieves all user IDs that have the 'admin' role.
+func (r *Repository) GetAdminIDs(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM users WHERE role = 'admin'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// NotificationSettings represents user notification preferences.
+type NotificationSettings struct {
+    UserID                int64 `json:"user_id"`
+    AppEnabled            bool  `json:"appEnabled"`
+    EmailEnabled          bool  `json:"emailEnabled"`
+    AppModeration         bool  `json:"app_moderation"`
+    EmailModeration       bool  `json:"email_moderation"`
+    AppBookingReceived    bool  `json:"app_booking_received"`
+    EmailBookingReceived  bool  `json:"email_booking_received"`
+    AppPointAssigned      bool  `json:"app_point_assigned"`
+    EmailPointAssigned    bool  `json:"email_point_assigned"`
+    AppMaterialDeposited  bool  `json:"app_material_deposited"`
+    EmailMaterialDeposited bool `json:"email_material_deposited"`
+    AppMaterialRecovered  bool  `json:"app_material_recovered"`
+    EmailMaterialRecovered bool `json:"email_material_recovered"`
+    AppRatingReceived     bool  `json:"app_rating_received"`
+    EmailRatingReceived   bool  `json:"email_rating_received"`
+    AppBookingCancelled   bool  `json:"app_booking_cancelled"`
+    EmailBookingCancelled bool  `json:"email_booking_cancelled"`
+    AppBookingExpired     bool  `json:"app_booking_expired"`
+    EmailBookingExpired   bool  `json:"email_booking_expired"`
+    AppDepositReminder    bool  `json:"app_deposit_reminder"`
+    EmailDepositReminder  bool  `json:"email_deposit_reminder"`
+    AppConseilModeration  bool  `json:"app_conseil_moderation"`
+    EmailConseilModeration bool `json:"email_conseil_moderation"`
+    AppNewConseil         bool  `json:"app_new_conseil"`
+    EmailNewConseil       bool  `json:"email_new_conseil"`
+    AppConseilEngagement  bool  `json:"app_conseil_engagement"`
+    AppAdminNewConseil    bool  `json:"app_admin_new_conseil"`
+    EmailAdminNewConseil  bool  `json:"email_admin_new_conseil"`
+    DisplayMode           string `json:"displayMode"`
+    Language              string `json:"language"`
+    MapType               string `json:"mapType"`
+    ShowPhonePublicly     bool   `json:"showPhonePublicly"`
+    ShowEmailPublicly     bool   `json:"showEmailPublicly"`
+}
+
+// GetUserNotificationSettings fetches notification settings for a given user.
+func (r *Repository) GetUserNotificationSettings(userID int64) (NotificationSettings, error) {
+    var s NotificationSettings
+    row := r.db.QueryRow(`SELECT user_id, app_enabled, email_enabled, app_moderation, email_moderation,
+        app_booking_received, email_booking_received, app_point_assigned, email_point_assigned,
+        app_material_deposited, email_material_deposited, app_material_recovered, email_material_recovered,
+        app_rating_received, email_rating_received, app_booking_cancelled, email_booking_cancelled,
+        app_booking_expired, email_booking_expired, app_deposit_reminder, email_deposit_reminder,
+        app_conseil_moderation, email_conseil_moderation, app_new_conseil, email_new_conseil,
+        app_conseil_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        display_mode, language, map_type, show_phone_publicly, show_email_publicly
+        FROM user_notification_settings WHERE user_id = $1`, userID)
+    err := row.Scan(&s.UserID, &s.AppEnabled, &s.EmailEnabled, &s.AppModeration, &s.EmailModeration,
+        &s.AppBookingReceived, &s.EmailBookingReceived, &s.AppPointAssigned, &s.EmailPointAssigned,
+        &s.AppMaterialDeposited, &s.EmailMaterialDeposited, &s.AppMaterialRecovered, &s.EmailMaterialRecovered,
+        &s.AppRatingReceived, &s.EmailRatingReceived, &s.AppBookingCancelled, &s.EmailBookingCancelled,
+        &s.AppBookingExpired, &s.EmailBookingExpired, &s.AppDepositReminder, &s.EmailDepositReminder,
+        &s.AppConseilModeration, &s.EmailConseilModeration, &s.AppNewConseil, &s.EmailNewConseil,
+        &s.AppConseilEngagement, &s.AppAdminNewConseil, &s.EmailAdminNewConseil,
+        &s.DisplayMode, &s.Language, &s.MapType, &s.ShowPhonePublicly, &s.ShowEmailPublicly)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            // Return default settings if none exist
+            return NotificationSettings{
+                UserID: userID, AppEnabled: true, EmailEnabled: true, DisplayMode: "light", Language: "fr", MapType: "plan",
+                AppConseilModeration: true, EmailConseilModeration: true, AppNewConseil: true, EmailNewConseil: true,
+                AppConseilEngagement: true, AppAdminNewConseil: true, EmailAdminNewConseil: true,
+            }, nil
+        }
+        return NotificationSettings{}, err
+    }
+    return s, nil
+}
+
+// UpsertUserNotificationSettings inserts or updates a user's notification settings.
+func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) error {
+    _, err := r.db.Exec(`INSERT INTO user_notification_settings (
+        user_id, app_enabled, email_enabled, app_moderation, email_moderation,
+        app_booking_received, email_booking_received, app_point_assigned, email_point_assigned,
+        app_material_deposited, email_material_deposited, app_material_recovered, email_material_recovered,
+        app_rating_received, email_rating_received, app_booking_cancelled, email_booking_cancelled,
+        app_booking_expired, email_booking_expired, app_deposit_reminder, email_deposit_reminder,
+        app_conseil_moderation, email_conseil_moderation, app_new_conseil, email_new_conseil,
+        app_conseil_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        display_mode, language, map_type, show_phone_publicly, show_email_publicly
+    ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
+    ) ON CONFLICT (user_id) DO UPDATE SET
+        app_enabled = EXCLUDED.app_enabled,
+        email_enabled = EXCLUDED.email_enabled,
+        app_moderation = EXCLUDED.app_moderation,
+        email_moderation = EXCLUDED.email_moderation,
+        app_booking_received = EXCLUDED.app_booking_received,
+        email_booking_received = EXCLUDED.email_booking_received,
+        app_point_assigned = EXCLUDED.app_point_assigned,
+        email_point_assigned = EXCLUDED.email_point_assigned,
+        app_material_deposited = EXCLUDED.app_material_deposited,
+        email_material_deposited = EXCLUDED.email_material_deposited,
+        app_material_recovered = EXCLUDED.app_material_recovered,
+        email_material_recovered = EXCLUDED.email_material_recovered,
+        app_rating_received = EXCLUDED.app_rating_received,
+        email_rating_received = EXCLUDED.email_rating_received,
+        app_booking_cancelled = EXCLUDED.app_booking_cancelled,
+        email_booking_cancelled = EXCLUDED.email_booking_cancelled,
+        app_booking_expired = EXCLUDED.app_booking_expired,
+        email_booking_expired = EXCLUDED.email_booking_expired,
+        app_deposit_reminder = EXCLUDED.app_deposit_reminder,
+        email_deposit_reminder = EXCLUDED.email_deposit_reminder,
+        app_conseil_moderation = EXCLUDED.app_conseil_moderation,
+        email_conseil_moderation = EXCLUDED.email_conseil_moderation,
+        app_new_conseil = EXCLUDED.app_new_conseil,
+        email_new_conseil = EXCLUDED.email_new_conseil,
+        app_conseil_engagement = EXCLUDED.app_conseil_engagement,
+        app_admin_new_conseil = EXCLUDED.app_admin_new_conseil,
+        email_admin_new_conseil = EXCLUDED.email_admin_new_conseil,
+        display_mode = EXCLUDED.display_mode,
+        language = EXCLUDED.language,
+        map_type = EXCLUDED.map_type,
+        show_phone_publicly = EXCLUDED.show_phone_publicly,
+        show_email_publicly = EXCLUDED.show_email_publicly
+    `,
+        s.UserID, s.AppEnabled, s.EmailEnabled, s.AppModeration, s.EmailModeration,
+        s.AppBookingReceived, s.EmailBookingReceived, s.AppPointAssigned, s.EmailPointAssigned,
+        s.AppMaterialDeposited, s.EmailMaterialDeposited, s.AppMaterialRecovered, s.EmailMaterialRecovered,
+        s.AppRatingReceived, s.EmailRatingReceived, s.AppBookingCancelled, s.EmailBookingCancelled,
+        s.AppBookingExpired, s.EmailBookingExpired, s.AppDepositReminder, s.EmailDepositReminder,
+        s.AppConseilModeration, s.EmailConseilModeration, s.AppNewConseil, s.EmailNewConseil,
+        s.AppConseilEngagement, s.AppAdminNewConseil, s.EmailAdminNewConseil,
+        s.DisplayMode, s.Language, s.MapType, s.ShowPhonePublicly, s.ShowEmailPublicly)
+    return err
 }

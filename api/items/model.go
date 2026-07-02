@@ -43,6 +43,7 @@ type Item struct {
 	UserName             string    `json:"userName,omitempty"`
 	UserRegistrationDate string    `json:"userRegistrationDate,omitempty"`
 	WorkflowStatus       string    `json:"workflowStatus"`
+	AfterDeposit         bool      `json:"afterDeposit"`
 	DepositCode          string    `json:"depositCode"`
 	DepositCodeExpiresAt string    `json:"depositCodeExpiresAt,omitempty"`
 	PickupCode           string    `json:"pickupCode"`
