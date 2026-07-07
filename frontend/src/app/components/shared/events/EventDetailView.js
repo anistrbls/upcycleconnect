@@ -297,9 +297,15 @@ export default function EventDetailView({ eventId, onBack }) {
 
     const startDate = new Date(event.dateDebut);
     const endDate = new Date(event.dateFin);
-    const day = startDate.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+    const isSameEventDay = startDate.getFullYear() === endDate.getFullYear()
+        && startDate.getMonth() === endDate.getMonth()
+        && startDate.getDate() === endDate.getDate();
+    const day = isSameEventDay
+        ? startDate.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+        : `Du ${startDate.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} au ${endDate.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}`;
     const startTime = startDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     const endTime = endDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    const timeLabel = isSameEventDay ? `${startTime} - ${endTime}` : `${startTime} → ${endTime}`;
     
     const isPassed = startDate < new Date();
     
@@ -461,7 +467,7 @@ export default function EventDetailView({ eventId, onBack }) {
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.8rem", color: "var(--text-muted)", fontSize: "0.86rem", marginBottom: "1.2rem" }}>
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><MapPin size={14} /> {event.lieu ? <span data-i18n-user-content="true">{event.lieu}</span> : "Lieu non précisé"}</span>
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><Calendar size={14} /> {day}</span>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><Clock size={14} /> {startTime} - {endTime}</span>
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><Clock size={14} /> {timeLabel}</span>
                                 </div>
 
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.9rem", padding: "1.2rem 0", borderTop: "1px solid rgba(35,59,61,0.08)", borderBottom: "1px solid rgba(35,59,61,0.08)", marginBottom: "1.2rem" }}>

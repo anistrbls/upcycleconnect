@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -21,8 +22,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"upcycleconnect/api/items"
-	"upcycleconnect/api/projects"
+	"upcycleconnect/api/mailer"
 	"upcycleconnect/api/planning"
+	"upcycleconnect/api/projects"
 	"upcycleconnect/api/reservations"
 	"upcycleconnect/api/servicecatalog"
 	"upcycleconnect/api/sirene"
@@ -254,6 +256,8 @@ func main() {
 
 	// === Dashboard Stats (Admin) ===
 	mux.Handle("/api/admin/dashboard/stats", authMiddleware(http.HandlerFunc(dashboardStatsHandler)))
+	mux.Handle("/api/admin/mail/status", authMiddleware(http.HandlerFunc(adminMailStatusHandler)))
+	mux.Handle("/api/admin/mail/test", authMiddleware(http.HandlerFunc(adminMailTestHandler)))
 	mux.Handle("/api/user/dashboard/stats", authMiddleware(http.HandlerFunc(userDashboardStatsHandler)))
 
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
@@ -383,10 +387,16 @@ func main() {
 		if err := publishDueScheduledConseils(); err != nil {
 			log.Printf("[conseil] publication programmée: %v", err)
 		}
+		if err := expireDueSubscriptionCancellations(); err != nil {
+			log.Printf("[subscriptions] expiration programmée: %v", err)
+		}
 		sendUpcomingEventReminders()
 		for range ticker.C {
 			if err := publishDueScheduledConseils(); err != nil {
 				log.Printf("[conseil] publication programmée: %v", err)
+			}
+			if err := expireDueSubscriptionCancellations(); err != nil {
+				log.Printf("[subscriptions] expiration programmée: %v", err)
 			}
 			sendUpcomingEventReminders()
 		}
@@ -412,6 +422,28 @@ func main() {
 	}
 
 	log.Println("Server stopped gracefully")
+}
+
+func expireDueSubscriptionCancellations() error {
+	if db == nil {
+		return nil
+	}
+	_, err := db.Exec(`
+		UPDATE users
+		SET subscription_type = 'decouverte',
+		    subscription_start = NULL,
+		    subscription_billing_cycle = 'month',
+		    subscription_current_period_end = NULL,
+		    subscription_cancel_at_period_end = false,
+		    stripe_subscription_id = '',
+		    updated_at = NOW()
+		WHERE role = 'professionnel'
+		  AND COALESCE(subscription_type, '') NOT IN ('', 'decouverte', 'gratuit', 'none')
+		  AND subscription_cancel_at_period_end = true
+		  AND subscription_current_period_end IS NOT NULL
+		  AND subscription_current_period_end <= NOW()
+	`)
+	return err
 }
 
 func getEnv(key, fallback string) string {
@@ -542,18 +574,22 @@ func authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		r = r.WithContext(context.WithValue(r.Context(), "authClaims", claims))
-
 		// Vérification de l'invalidation de session (ex: après changement de mot de passe)
-		if iat, ok := claims["iat"].(float64); ok {
-			userID, _ := claims["userId"].(float64)
+		if userID, ok := claims["userId"].(float64); ok {
 			var invalidBefore sql.NullTime
-			err := db.QueryRow("SELECT sessions_invalid_before FROM users WHERE id = $1", int64(userID)).Scan(&invalidBefore)
-			if err == nil && invalidBefore.Valid && float64(invalidBefore.Time.Unix()) > iat {
+			var dbRole, dbEmployeeRole string
+			err := db.QueryRow("SELECT sessions_invalid_before, role, employee_role FROM users WHERE id = $1", int64(userID)).Scan(&invalidBefore, &dbRole, &dbEmployeeRole)
+			if iat, ok := claims["iat"].(float64); err == nil && ok && invalidBefore.Valid && float64(invalidBefore.Time.Unix()) > iat {
 				writeError(w, http.StatusUnauthorized, "session invalidated")
 				return
 			}
+			if err == nil {
+				claims["role"] = dbRole
+				claims["employeeRole"] = dbEmployeeRole
+			}
 		}
+
+		r = r.WithContext(context.WithValue(r.Context(), "authClaims", claims))
 
 		next.ServeHTTP(w, r)
 	})
@@ -609,6 +645,109 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func adminMailStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !requestIsAdmin(r) {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+
+	cfg := mailer.ConfigFromEnv()
+	writeJSON(w, http.StatusOK, cfg.PublicStatus())
+}
+
+func adminMailTestHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !requestIsAdmin(r) {
+		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+
+	var payload struct {
+		To      string `json:"to"`
+		Subject string `json:"subject"`
+		Body    string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	to := strings.TrimSpace(payload.To)
+	if to == "" {
+		to = requestEmail(r)
+	}
+	if to == "" {
+		writeError(w, http.StatusBadRequest, "recipient is required")
+		return
+	}
+	if err := mailer.ValidateAddress(to); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid recipient email")
+		return
+	}
+
+	subject := strings.TrimSpace(payload.Subject)
+	if subject == "" {
+		subject = "Test SMTP UpcycleConnect"
+	}
+	body := strings.TrimSpace(payload.Body)
+	if body == "" {
+		body = "Ceci est un test d'envoi SMTP depuis l'API UpcycleConnect."
+	}
+
+	cfg := mailer.ConfigFromEnv()
+	if !cfg.Configured() {
+		writeError(w, http.StatusServiceUnavailable, "smtp is not configured")
+		return
+	}
+
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout+5*time.Second)
+	defer cancel()
+
+	if err := mailer.Send(ctx, cfg, mailer.Message{To: []string{to}, Subject: subject, Text: body}); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"to": to,
+	})
+}
+
+func requestIsAdmin(r *http.Request) bool {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok {
+		return false
+	}
+	role, _ := claims["role"].(string)
+	return role == "admin"
+}
+
+func requestEmail(r *http.Request) string {
+	claims, ok := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	if !ok {
+		return ""
+	}
+	if email, _ := claims["email"].(string); strings.TrimSpace(email) != "" {
+		return strings.TrimSpace(email)
+	}
+	if email, _ := claims["sub"].(string); strings.TrimSpace(email) != "" {
+		return strings.TrimSpace(email)
+	}
+	return ""
+}
+
 type serviceCategoryPayload struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -616,18 +755,18 @@ type serviceCategoryPayload struct {
 }
 
 type servicePayload struct {
-	Name                string   `json:"name"`
-	ShortDescription    string   `json:"shortDescription"`
-	Description         string   `json:"description"`
-	CategoryID          int64    `json:"categoryId"`
-	Type                string   `json:"bookingMode"`
-	Price               float64  `json:"price"`
-	DurationMinutes     int      `json:"durationMinutes"`
-	TargetAudience      string   `json:"targetAudience"`
-	ImageURL            string   `json:"imageUrl"`
-	Photos              []string `json:"photos"`
-	Status              string   `json:"status"`
-	EmployeeIDs         []int64  `json:"employeeIds"`
+	Name             string   `json:"name"`
+	ShortDescription string   `json:"shortDescription"`
+	Description      string   `json:"description"`
+	CategoryID       int64    `json:"categoryId"`
+	Type             string   `json:"bookingMode"`
+	Price            float64  `json:"price"`
+	DurationMinutes  int      `json:"durationMinutes"`
+	TargetAudience   string   `json:"targetAudience"`
+	ImageURL         string   `json:"imageUrl"`
+	Photos           []string `json:"photos"`
+	Status           string   `json:"status"`
+	EmployeeIDs      []int64  `json:"employeeIds"`
 }
 
 type eventPayload struct {
@@ -1280,23 +1419,23 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			result = append(result, map[string]interface{}{
-				"id":                  id,
-				"name":                name,
-				"shortDescription":    shortDesc,
-				"description":         description,
-				"categoryId":          catID,
-				"categoryName":        categoryName,
-				"type":                svcType,
-				"price":               price,
-				"durationMinutes":     durationMinutes,
-				"targetAudience":      targetAudience,
-				"isBookable":          isBookable,
-				"imageUrl":            imageURL,
-				"photos":              photos,
-				"status":              status,
-				"linkedBookings":      linkedBookings,
-				"createdAt":           createdAt.UTC().Format(time.RFC3339),
-				"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+				"id":               id,
+				"name":             name,
+				"shortDescription": shortDesc,
+				"description":      description,
+				"categoryId":       catID,
+				"categoryName":     categoryName,
+				"type":             svcType,
+				"price":            price,
+				"durationMinutes":  durationMinutes,
+				"targetAudience":   targetAudience,
+				"isBookable":       isBookable,
+				"imageUrl":         imageURL,
+				"photos":           photos,
+				"status":           status,
+				"linkedBookings":   linkedBookings,
+				"createdAt":        createdAt.UTC().Format(time.RFC3339),
+				"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 			})
 		}
 
@@ -1368,24 +1507,24 @@ func servicesHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT name FROM service_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName)
 
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"id":                  id,
-			"name":                name,
-			"shortDescription":    shortDesc,
-			"description":         description,
-			"categoryId":          payload.CategoryID,
-			"categoryName":        categoryName,
-			"bookingMode":         bookingMode,
-			"price":               payload.Price,
-			"durationMinutes":     payload.DurationMinutes,
-			"targetAudience":      targetAudience,
-			"isBookable":          bookingMode == "booking",
-			"imageUrl":            payload.ImageURL,
-			"photos":              payload.Photos,
-			"status":              status,
-			"employeeIds":         employeeIDs,
-			"providers":           providers,
-			"createdAt":           createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+			"id":               id,
+			"name":             name,
+			"shortDescription": shortDesc,
+			"description":      description,
+			"categoryId":       payload.CategoryID,
+			"categoryName":     categoryName,
+			"bookingMode":      bookingMode,
+			"price":            payload.Price,
+			"durationMinutes":  payload.DurationMinutes,
+			"targetAudience":   targetAudience,
+			"isBookable":       bookingMode == "booking",
+			"imageUrl":         payload.ImageURL,
+			"photos":           payload.Photos,
+			"status":           status,
+			"employeeIds":      employeeIDs,
+			"providers":        providers,
+			"createdAt":        createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	default:
@@ -1429,27 +1568,27 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		employeeIDs, providers := loadServiceProviderFields(svcID)
 		linkedBookings, _ := countLinkedServiceBookings(svcID)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":                    svcID,
-			"name":                  name,
-			"shortDescription":      shortDesc,
-			"description":           description,
-			"detailedDescription":   detailedDesc,
-			"categoryId":            catID,
-			"categoryName":          categoryName,
-			"type":                  svcType,
-			"bookingMode":           svcType,
-			"price":                 price,
-			"durationMinutes":       durationMinutes,
-			"targetAudience":        targetAudience,
-			"isBookable":            isBookable,
-			"imageUrl":              imageURL,
-			"photos":                photos,
-			"status":                status,
-			"employeeIds":           employeeIDs,
-			"providers":             providers,
-			"linkedBookings":        linkedBookings,
-			"createdAt":             createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":             updatedAt.UTC().Format(time.RFC3339),
+			"id":                  svcID,
+			"name":                name,
+			"shortDescription":    shortDesc,
+			"description":         description,
+			"detailedDescription": detailedDesc,
+			"categoryId":          catID,
+			"categoryName":        categoryName,
+			"type":                svcType,
+			"bookingMode":         svcType,
+			"price":               price,
+			"durationMinutes":     durationMinutes,
+			"targetAudience":      targetAudience,
+			"isBookable":          isBookable,
+			"imageUrl":            imageURL,
+			"photos":              photos,
+			"status":              status,
+			"employeeIds":         employeeIDs,
+			"providers":           providers,
+			"linkedBookings":      linkedBookings,
+			"createdAt":           createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	case http.MethodPut:
@@ -1527,25 +1666,25 @@ func serviceByIDHandler(w http.ResponseWriter, r *http.Request) {
 		_ = db.QueryRow(`SELECT name FROM service_categories WHERE id = $1`, payload.CategoryID).Scan(&categoryName)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":                  id,
-			"name":                name,
-			"shortDescription":    shortDesc,
-			"description":         description,
-			"categoryId":          payload.CategoryID,
-			"categoryName":        categoryName,
-			"type":                bookingMode,
-			"bookingMode":         bookingMode,
-			"price":               payload.Price,
-			"durationMinutes":     payload.DurationMinutes,
-			"targetAudience":      targetAudience,
-			"isBookable":          bookingMode == "booking",
-			"imageUrl":            payload.ImageURL,
-			"photos":              payload.Photos,
-			"status":              status,
-			"employeeIds":         employeeIDs,
-			"providers":           providers,
-			"createdAt":           createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+			"id":               id,
+			"name":             name,
+			"shortDescription": shortDesc,
+			"description":      description,
+			"categoryId":       payload.CategoryID,
+			"categoryName":     categoryName,
+			"type":             bookingMode,
+			"bookingMode":      bookingMode,
+			"price":            payload.Price,
+			"durationMinutes":  payload.DurationMinutes,
+			"targetAudience":   targetAudience,
+			"isBookable":       bookingMode == "booking",
+			"imageUrl":         payload.ImageURL,
+			"photos":           payload.Photos,
+			"status":           status,
+			"employeeIds":      employeeIDs,
+			"providers":        providers,
+			"createdAt":        createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 		})
 
 	case http.MethodDelete:
@@ -1636,23 +1775,23 @@ func publicServicesListHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result = append(result, map[string]interface{}{
-			"id":                  id,
-			"name":                name,
-			"shortDescription":    shortDesc,
-			"description":         description,
-			"categoryId":          catID,
-			"categoryName":        categoryName,
-			"type":                svcType,
-			"bookingMode":         svcType,
-			"price":               price,
-			"durationMinutes":     durationMinutes,
-			"targetAudience":      targetAud,
-			"isBookable":          svcType == "booking",
-			"imageUrl":            imageURL,
-			"photos":              photos,
-			"status":              status,
-			"createdAt":           createdAt.UTC().Format(time.RFC3339),
-			"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+			"id":               id,
+			"name":             name,
+			"shortDescription": shortDesc,
+			"description":      description,
+			"categoryId":       catID,
+			"categoryName":     categoryName,
+			"type":             svcType,
+			"bookingMode":      svcType,
+			"price":            price,
+			"durationMinutes":  durationMinutes,
+			"targetAudience":   targetAud,
+			"isBookable":       svcType == "booking",
+			"imageUrl":         imageURL,
+			"photos":           photos,
+			"status":           status,
+			"createdAt":        createdAt.UTC().Format(time.RFC3339),
+			"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": result})
@@ -1698,24 +1837,24 @@ func publicServiceByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_, providers := loadServiceProviderFields(svcID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"id":                  svcID,
-		"name":                name,
-		"shortDescription":    shortDesc,
-		"description":         description,
-		"categoryId":          catID,
-		"categoryName":        categoryName,
-		"type":                svcType,
-		"bookingMode":         svcType,
-		"price":               price,
-		"durationMinutes":     durationMinutes,
-		"targetAudience":      targetAudience,
-		"isBookable":          svcType == "booking",
-		"imageUrl":            imageURL,
-		"photos":              photos,
-		"status":              status,
-		"providers":           providers,
-		"createdAt":           createdAt.UTC().Format(time.RFC3339),
-		"updatedAt":           updatedAt.UTC().Format(time.RFC3339),
+		"id":               svcID,
+		"name":             name,
+		"shortDescription": shortDesc,
+		"description":      description,
+		"categoryId":       catID,
+		"categoryName":     categoryName,
+		"type":             svcType,
+		"bookingMode":      svcType,
+		"price":            price,
+		"durationMinutes":  durationMinutes,
+		"targetAudience":   targetAudience,
+		"isBookable":       svcType == "booking",
+		"imageUrl":         imageURL,
+		"photos":           photos,
+		"status":           status,
+		"providers":        providers,
+		"createdAt":        createdAt.UTC().Format(time.RFC3339),
+		"updatedAt":        updatedAt.UTC().Format(time.RFC3339),
 	})
 }
 
@@ -3575,7 +3714,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	var userID int64
-	var userEmail, userRole, passwordHash, status, firstname, lastname string
+	var userEmail, userRole, employeeRole, passwordHash, status, firstname, lastname string
 	// 1. Vérifier si c'est le super-admin (env)
 	if email == adminEmail {
 		userEmail = adminEmail
@@ -3587,10 +3726,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// 2. Sinon, chercher en base de données
 		err := db.QueryRow(`
-			SELECT id, email, role, password_hash, status, firstname, lastname
+			SELECT id, email, role, employee_role, password_hash, status, firstname, lastname
 			FROM users
 			WHERE email = $1
-		`, email).Scan(&userID, &userEmail, &userRole, &passwordHash, &status, &firstname, &lastname)
+		`, email).Scan(&userID, &userEmail, &userRole, &employeeRole, &passwordHash, &status, &firstname, &lastname)
 
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -3624,12 +3763,13 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(jwtExpiration)
 	claims := jwt.MapClaims{
-		"sub":    userEmail,
-		"userId": userID,
-		"email":  userEmail,
-		"role":   userRole,
-		"iat":    now.Unix(),
-		"exp":    expiresAt.Unix(),
+		"sub":          userEmail,
+		"userId":       userID,
+		"email":        userEmail,
+		"role":         userRole,
+		"employeeRole": employeeRole,
+		"iat":          now.Unix(),
+		"exp":          expiresAt.Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -3644,10 +3784,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		"token_type": "Bearer",
 		"expires_at": expiresAt.Format(time.RFC3339),
 		"user": map[string]string{
-			"email":     userEmail,
-			"role":      userRole,
-			"firstname": firstname,
-			"lastname":  lastname,
+			"email":        userEmail,
+			"role":         userRole,
+			"employeeRole": employeeRole,
+			"firstname":    firstname,
+			"lastname":     lastname,
 		},
 	})
 }
@@ -3684,12 +3825,28 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		id = v
 	}
 
-	var firstname, lastname string
-	var subscriptionType, companyName, siret sql.NullString
-	var subscriptionStart sql.NullTime
+	var firstname, lastname, dbRole, employeeRole string
+	var subscriptionType, subscriptionBillingCycle, companyName, siret sql.NullString
+	var subscriptionStart, subscriptionCurrentPeriodEnd sql.NullTime
+	var subscriptionCancelAtPeriodEnd bool
 	var tutorialCompleted bool
-	err := db.QueryRow("SELECT firstname, lastname, subscription_type, subscription_start, company_name, siret, tutorial_completed FROM users WHERE id = $1", id).Scan(
-		&firstname, &lastname, &subscriptionType, &subscriptionStart, &companyName, &siret, &tutorialCompleted,
+	err := db.QueryRow(`
+		SELECT firstname,
+		       lastname,
+		       role,
+		       employee_role,
+		       subscription_type,
+		       subscription_start,
+		       subscription_billing_cycle,
+		       subscription_current_period_end,
+		       subscription_cancel_at_period_end,
+		       company_name,
+		       siret,
+		       tutorial_completed
+		FROM users
+		WHERE id = $1
+	`, id).Scan(
+		&firstname, &lastname, &dbRole, &employeeRole, &subscriptionType, &subscriptionStart, &subscriptionBillingCycle, &subscriptionCurrentPeriodEnd, &subscriptionCancelAtPeriodEnd, &companyName, &siret, &tutorialCompleted,
 	)
 	if err != nil {
 		firstname = ""
@@ -3697,10 +3854,14 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role, _ := claims["role"].(string)
+	if dbRole != "" {
+		role = dbRole
+	}
 	userPayload := map[string]any{
 		"id":                id,
 		"email":             claims["email"],
 		"role":              role,
+		"employeeRole":      employeeRole,
 		"firstname":         firstname,
 		"lastname":          lastname,
 		"tutorialCompleted": tutorialCompleted,
@@ -3714,6 +3875,17 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		userPayload["subscriptionStart"] = subscriptionStart.Time
 	} else {
 		userPayload["subscriptionStart"] = nil
+	}
+	if subscriptionBillingCycle.Valid {
+		userPayload["subscriptionBillingCycle"] = items.NormalizeSubscriptionBillingCycle(subscriptionBillingCycle.String)
+	} else {
+		userPayload["subscriptionBillingCycle"] = items.SubscriptionBillingCycleMonth
+	}
+	userPayload["subscriptionCancelAtPeriodEnd"] = subscriptionCancelAtPeriodEnd
+	if subscriptionCurrentPeriodEnd.Valid {
+		userPayload["subscriptionCurrentPeriodEnd"] = subscriptionCurrentPeriodEnd.Time
+	} else {
+		userPayload["subscriptionCurrentPeriodEnd"] = nil
 	}
 	if companyName.Valid {
 		userPayload["companyName"] = companyName.String
@@ -6416,19 +6588,19 @@ func adminEventRegistrationRefundDecisionHandler(w http.ResponseWriter, r *http.
 }
 
 type PaymentTransaction struct {
-	Source           string    `json:"source"`
-	SourceID         int64     `json:"sourceId"`
-	EventID          int64     `json:"eventId,omitempty"`
-	UserID           int64     `json:"userId"`
-	UserName         string    `json:"userName"`
-	EntityName       string    `json:"entityName"`
-	Date             time.Time `json:"date"`
-	Amount           float64   `json:"amount"`
-	Status           string    `json:"status"`
-	TransactionRef   string    `json:"transactionRef"`
-	RefundAmount       float64   `json:"refundAmount"`
-	StripeRefundID     string    `json:"stripeRefundId"`
-	RefundError        string    `json:"refundError"`
+	Source         string    `json:"source"`
+	SourceID       int64     `json:"sourceId"`
+	EventID        int64     `json:"eventId,omitempty"`
+	UserID         int64     `json:"userId"`
+	UserName       string    `json:"userName"`
+	EntityName     string    `json:"entityName"`
+	Date           time.Time `json:"date"`
+	Amount         float64   `json:"amount"`
+	Status         string    `json:"status"`
+	TransactionRef string    `json:"transactionRef"`
+	RefundAmount   float64   `json:"refundAmount"`
+	StripeRefundID string    `json:"stripeRefundId"`
+	RefundError    string    `json:"refundError"`
 }
 
 func adminEventRefundRequestsHandler(w http.ResponseWriter, r *http.Request) {
@@ -6465,22 +6637,22 @@ func adminEventRefundRequestsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type rowItem struct {
-		RegistrationID int64     `json:"registrationId"`
-		EventID          int64     `json:"eventId"`
-		EventName        string    `json:"eventName"`
-		DateDebut        string    `json:"dateDebut"`
-		DateFin          string    `json:"dateFin"`
-		Lieu             string    `json:"lieu"`
-		Price            float64   `json:"price"`
-		UserID           int64     `json:"userId"`
-		UserName         string    `json:"userName"`
-		UserEmail        string    `json:"userEmail"`
-		RegisteredAt     string    `json:"registeredAt"`
-		CancelledAt      string    `json:"cancelledAt"`
-		Reason           string    `json:"reason"`
-		TransactionRef   string    `json:"transactionRef"`
-		RefundStatus     string    `json:"refundStatus"`
-		PaymentStatus    string    `json:"paymentStatus"`
+		RegistrationID int64   `json:"registrationId"`
+		EventID        int64   `json:"eventId"`
+		EventName      string  `json:"eventName"`
+		DateDebut      string  `json:"dateDebut"`
+		DateFin        string  `json:"dateFin"`
+		Lieu           string  `json:"lieu"`
+		Price          float64 `json:"price"`
+		UserID         int64   `json:"userId"`
+		UserName       string  `json:"userName"`
+		UserEmail      string  `json:"userEmail"`
+		RegisteredAt   string  `json:"registeredAt"`
+		CancelledAt    string  `json:"cancelledAt"`
+		Reason         string  `json:"reason"`
+		TransactionRef string  `json:"transactionRef"`
+		RefundStatus   string  `json:"refundStatus"`
+		PaymentStatus  string  `json:"paymentStatus"`
 	}
 	items := []rowItem{}
 	for rows.Next() {
@@ -6581,18 +6753,20 @@ func adminFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 
 		UNION ALL
 
-		SELECT 'Abonnement' AS source, u.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id, 
-		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name, 
-		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 'Abonnement Pro Essentiel' ELSE 'Abonnement Premium Atelier' END AS entity_name, 
-		       u.subscription_start AS date, 
-		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 15.0 ELSE 30.0 END AS amount, 
-		       'paid' AS status, 
+			SELECT 'Abonnement' AS source, u.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id,
+			       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name,
+			       COALESCE('Abonnement ' || NULLIF(TRIM(sp.name), ''), 'Abonnement professionnel') AS entity_name,
+			       u.subscription_start AS date,
+		       (COALESCE(sp.price_euro, 0)
+		        * CASE WHEN COALESCE(u.subscription_billing_cycle, 'month') = 'year' THEN 12 ELSE 1 END)::double precision AS amount,
+			       'paid' AS status,
 		       COALESCE(u.stripe_subscription_id, '') AS transaction_ref,
 		       0::double precision AS refund_amount,
 		       '' AS stripe_refund_id,
 		       '' AS refund_error
 		FROM users u
-		WHERE u.subscription_type IN ('pro_essentiel', 'premium_atelier')
+		LEFT JOIN subscription_plans sp ON sp.key = u.subscription_type
+		WHERE COALESCE(u.subscription_type, '') NOT IN ('', 'decouverte', 'gratuit', 'none')
 		  AND u.subscription_start IS NOT NULL
 		
 		ORDER BY date DESC;
@@ -6734,17 +6908,19 @@ func myFinancesPaymentsHandler(w http.ResponseWriter, r *http.Request) {
 
 		SELECT 'Abonnement' AS source, u.id AS source_id, CAST(0 AS BIGINT) AS event_id, u.id AS user_id,
 		       COALESCE(NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS user_name,
-		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 'Abonnement Pro Essentiel' ELSE 'Abonnement Premium Atelier' END AS entity_name,
+		       COALESCE('Abonnement ' || NULLIF(TRIM(sp.name), ''), 'Abonnement professionnel') AS entity_name,
 		       u.subscription_start AS date,
-		       CASE WHEN u.subscription_type = 'pro_essentiel' THEN 15.0 ELSE 30.0 END AS amount,
+		       (COALESCE(sp.price_euro, 0)
+		        * CASE WHEN COALESCE(u.subscription_billing_cycle, 'month') = 'year' THEN 12 ELSE 1 END)::double precision AS amount,
 		       'paid' AS status,
 		       COALESCE(u.stripe_subscription_id, '') AS transaction_ref,
 		       0::double precision AS refund_amount,
 		       '' AS stripe_refund_id,
 		       '' AS refund_error
 		FROM users u
+		LEFT JOIN subscription_plans sp ON sp.key = u.subscription_type
 		WHERE u.id = $1
-		  AND u.subscription_type IN ('pro_essentiel', 'premium_atelier')
+		  AND COALESCE(u.subscription_type, '') NOT IN ('', 'decouverte', 'gratuit', 'none')
 		  AND u.subscription_start IS NOT NULL
 
 		ORDER BY date DESC
@@ -6959,21 +7135,31 @@ func ensureForumSchema() error {
 	return nil
 }
 
-func forumCallerID(r *http.Request) (int64, string, error) {
+func canModerateForum(role, employeeRole string) bool {
+	role = strings.TrimSpace(strings.ToLower(role))
+	employeeRole = strings.TrimSpace(strings.ToLower(employeeRole))
+	return role == "admin" || (role == "salarie" && employeeRole == "moderateur")
+}
+
+func forumCallerID(r *http.Request) (int64, string, string, error) {
 	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
 	email, _ := claims["sub"].(string)
 	role, _ := claims["role"].(string)
 	var id int64
-	if err := db.QueryRow(`SELECT id FROM users WHERE email = $1`, email).Scan(&id); err != nil {
-		return 0, "", err
+	var dbRole, employeeRole string
+	if err := db.QueryRow(`SELECT id, role, employee_role FROM users WHERE email = $1`, email).Scan(&id, &dbRole, &employeeRole); err != nil {
+		return 0, "", "", err
 	}
-	return id, role, nil
+	if dbRole != "" {
+		role = dbRole
+	}
+	return id, role, employeeRole, nil
 }
 
 // GET /api/forum/topics          — liste
 // POST /api/forum/topics         — créer un sujet
 func forumTopicsHandler(w http.ResponseWriter, r *http.Request) {
-	callerID, callerRole, err := forumCallerID(r)
+	callerID, callerRole, callerEmployeeRole, err := forumCallerID(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -6982,7 +7168,7 @@ func forumTopicsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		statusFilter := r.URL.Query().Get("status") // "" = tous visibles
 		var rows *sql.Rows
-		if callerRole == "admin" || callerRole == "salarie" {
+		if canModerateForum(callerRole, callerEmployeeRole) {
 			if statusFilter != "" {
 				rows, err = db.Query(`
 					SELECT t.id, t.user_id, u.firstname, u.lastname, t.title, t.content, t.status, t.created_at, t.updated_at,
@@ -7067,16 +7253,16 @@ func forumTopicsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/forum/topics/{id}     — détail + replies
-// PUT /api/forum/topics/{id}     — modifier (owner ou admin/salarié)
-// DELETE /api/forum/topics/{id}  — supprimer (owner ou admin)
-// PATCH /api/forum/topics/{id}   — changer le statut (admin/salarié)
+// PUT /api/forum/topics/{id}     — modifier (owner ou modérateur)
+// DELETE /api/forum/topics/{id}  — supprimer (owner ou modérateur)
+// PATCH /api/forum/topics/{id}   — changer le statut (modérateur)
 func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 	topicID, err := parseIDFromPath(r.URL.Path, "/api/forum/topics/")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	callerID, callerRole, err := forumCallerID(r)
+	callerID, callerRole, callerEmployeeRole, err := forumCallerID(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -7094,7 +7280,8 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "topic not found")
 			return
 		}
-		if status == "hidden" && callerRole != "admin" && callerRole != "salarie" {
+		callerCanModerate := canModerateForum(callerRole, callerEmployeeRole)
+		if status == "hidden" && !callerCanModerate {
 			writeError(w, http.StatusForbidden, "topic not accessible")
 			return
 		}
@@ -7121,14 +7308,14 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 			if err := replyRows.Scan(&rid, &ruID, &rfn, &rln, &rc, &rs, &rca, &rua, &replyPhotosJSON, &lc, &likedByMe); err != nil {
 				continue
 			}
-			if rs == "hidden" && callerRole != "admin" && callerRole != "salarie" {
+			if rs == "hidden" && !callerCanModerate {
 				continue
 			}
 			replies = append(replies, map[string]interface{}{
 				"id": rid, "userId": ruID,
 				"authorName": strings.TrimSpace(rfn + " " + rln),
 				"content":    rc, "status": rs,
-				"photos":     parseStringArrayJSON(replyPhotosJSON),
+				"photos":    parseStringArrayJSON(replyPhotosJSON),
 				"likeCount": lc, "likedByMe": likedByMe,
 				"isOwn":     ruID == callerID,
 				"createdAt": rca.UTC().Format(time.RFC3339),
@@ -7154,7 +7341,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&p)
 		var ownerID int64
 		db.QueryRow(`SELECT user_id FROM forum_topics WHERE id = $1`, topicID).Scan(&ownerID)
-		if ownerID != callerID && callerRole != "admin" {
+		if ownerID != callerID && !canModerateForum(callerRole, callerEmployeeRole) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -7166,7 +7353,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 
 	case http.MethodPatch:
-		if callerRole != "admin" && callerRole != "salarie" {
+		if !canModerateForum(callerRole, callerEmployeeRole) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -7188,7 +7375,7 @@ func forumTopicByIDHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		var ownerID int64
 		db.QueryRow(`SELECT user_id FROM forum_topics WHERE id = $1`, topicID).Scan(&ownerID)
-		if ownerID != callerID && callerRole != "admin" {
+		if ownerID != callerID && !canModerateForum(callerRole, callerEmployeeRole) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -7206,7 +7393,7 @@ func forumRepliesHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	callerID, _, err := forumCallerID(r)
+	callerID, _, _, err := forumCallerID(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -7259,7 +7446,7 @@ func forumRepliesHandler(w http.ResponseWriter, r *http.Request) {
 // POST   /api/forum/replies/{id}/like   — liker
 // DELETE /api/forum/replies/{id}/like   — unliker
 func forumReplyByIDHandler(w http.ResponseWriter, r *http.Request) {
-	callerID, callerRole, err := forumCallerID(r)
+	callerID, callerRole, callerEmployeeRole, err := forumCallerID(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -7308,7 +7495,7 @@ func forumReplyByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 
 	case http.MethodPatch:
-		if callerRole != "admin" && callerRole != "salarie" {
+		if !canModerateForum(callerRole, callerEmployeeRole) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -7327,7 +7514,7 @@ func forumReplyByIDHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		var ownerID int64
 		db.QueryRow(`SELECT user_id FROM forum_replies WHERE id = $1`, replyID).Scan(&ownerID)
-		if ownerID != callerID && callerRole != "admin" && callerRole != "salarie" {
+		if ownerID != callerID && !canModerateForum(callerRole, callerEmployeeRole) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -7342,7 +7529,7 @@ func forumReplyByIDHandler(w http.ResponseWriter, r *http.Request) {
 // POST /api/forum/reports        — signaler
 // GET  /api/forum/reports        — liste signalements (admin/salarié)
 func forumReportsHandler(w http.ResponseWriter, r *http.Request) {
-	callerID, callerRole, err := forumCallerID(r)
+	callerID, callerRole, callerEmployeeRole, err := forumCallerID(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -7378,7 +7565,7 @@ func forumReportsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]interface{}{"success": true})
 
 	case http.MethodGet:
-		if callerRole != "admin" && callerRole != "salarie" {
+		if !canModerateForum(callerRole, callerEmployeeRole) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -7451,8 +7638,8 @@ func forumReportByIDHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	_, callerRole, err := forumCallerID(r)
-	if err != nil || (callerRole != "admin" && callerRole != "salarie") {
+	_, callerRole, callerEmployeeRole, err := forumCallerID(r)
+	if err != nil || !canModerateForum(callerRole, callerEmployeeRole) {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -7519,14 +7706,14 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 	_ = db.QueryRow("SELECT COUNT(*) FROM notifications WHERE DATE(created_at) = CURRENT_DATE").Scan(&notificationsPush)
 
 	operationsToday := map[string]int{
-		"annoncesDeposees": annoncesDeposees,
-		"annoncesValidees": annoncesValidees,
-		"depotsConteneurs": depotsConteneurs,
-		"objetsRecuperes": objetsRecuperes,
+		"annoncesDeposees":       annoncesDeposees,
+		"annoncesValidees":       annoncesValidees,
+		"depotsConteneurs":       depotsConteneurs,
+		"objetsRecuperes":        objetsRecuperes,
 		"inscriptionsFormations": inscriptionsFormations,
-		"paiementsConfirmes": paiementsConfirmes,
-		"nouveauxAbonnements": nouveauxAbonnements,
-		"notificationsPush": notificationsPush,
+		"paiementsConfirmes":     paiementsConfirmes,
+		"nouveauxAbonnements":    nouveauxAbonnements,
+		"notificationsPush":      notificationsPush,
 	}
 
 	// Alertes
@@ -7535,9 +7722,9 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 	_ = db.QueryRow("SELECT COUNT(*) FROM forum_reports WHERE status = 'pending'").Scan(&moderationCommunautaire)
 
 	alerts := map[string]int{
-		"alertesOperationnelles": alertesOperationnelles,
+		"alertesOperationnelles":  alertesOperationnelles,
 		"moderationCommunautaire": moderationCommunautaire,
-		"alertesAdministratives": alertesAdministratives,
+		"alertesAdministratives":  alertesAdministratives,
 	}
 
 	// Flux d'activité en direct
@@ -7565,18 +7752,18 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stats := map[string]interface{}{
-		"totalUsers": totalUsers,
-		"particuliers": particuliers,
-		"pros": pros,
-		"salaries": salaries,
-		"pendingItems": pendingItems,
+		"totalUsers":        totalUsers,
+		"particuliers":      particuliers,
+		"pros":              pros,
+		"salaries":          salaries,
+		"pendingItems":      pendingItems,
 		"itemsInContainers": itemsInContainers,
-		"donItems": donItems,
-		"venteItems": venteItems,
+		"donItems":          donItems,
+		"venteItems":        venteItems,
 		"upcyclingProjects": upcyclingProjects,
-		"operationsToday": operationsToday,
-		"alerts": alerts,
-		"realtimeActivity": realtimeActivity,
+		"operationsToday":   operationsToday,
+		"alerts":            alerts,
+		"realtimeActivity":  realtimeActivity,
 	}
 
 	writeJSON(w, http.StatusOK, stats)
@@ -7616,7 +7803,7 @@ func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Champs communs à tous : note vendeur et score
 	urepo := users.NewRepository(db)
-	
+
 	if role == "professionnel" || role == "pro" {
 		avg, cnt, err := urepo.GetProRatingAggregate(id)
 		if err == nil {
@@ -7645,8 +7832,9 @@ func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var subscriptionType string
 	_ = db.QueryRow("SELECT COALESCE(subscription_type, '') FROM users WHERE id = $1", id).Scan(&subscriptionType)
+	subscriptionType = strings.TrimSpace(strings.ToLower(subscriptionType))
 	if role == "professionnel" || role == "pro" {
-		if subscriptionType != "pro_essentiel" && subscriptionType != "premium_atelier" {
+		if subscriptionType == "" || subscriptionType == "gratuit" || subscriptionType == "none" {
 			subscriptionType = "decouverte"
 		}
 	}
@@ -7749,10 +7937,8 @@ func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 		`, id).Scan(&depensesEvenementsPro)
 
 		abonnementMontant := 0.0
-		if subscriptionType == "pro_essentiel" {
-			abonnementMontant = 15.0
-		} else if subscriptionType == "pro_premium" || subscriptionType == "pro" {
-			abonnementMontant = 30.0
+		if subscriptionType != "" && subscriptionType != "decouverte" && subscriptionType != "gratuit" && subscriptionType != "none" {
+			_ = db.QueryRow(`SELECT COALESCE(price_euro, 0)::double precision FROM subscription_plans WHERE key = $1`, subscriptionType).Scan(&abonnementMontant)
 		}
 
 		stats["objetsTraites"] = objetsTraites

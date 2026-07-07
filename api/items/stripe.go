@@ -240,9 +240,92 @@ type stripeWebhookInvoice struct {
 }
 
 type stripeWebhookSubscription struct {
-	ID       string            `json:"id"`
-	Customer string            `json:"customer"`
-	Metadata map[string]string `json:"metadata"`
+	ID                string            `json:"id"`
+	Customer          string            `json:"customer"`
+	Status            string            `json:"status"`
+	CurrentPeriodEnd  int64             `json:"current_period_end"`
+	CancelAtPeriodEnd bool              `json:"cancel_at_period_end"`
+	CancelAt          int64             `json:"cancel_at"`
+	CanceledAt        int64             `json:"canceled_at"`
+	Metadata          map[string]string `json:"metadata"`
+}
+
+func stripeSubscriptionPeriodEnd(unixSeconds int64) *time.Time {
+	if unixSeconds <= 0 {
+		return nil
+	}
+	t := time.Unix(unixSeconds, 0).UTC()
+	return &t
+}
+
+func fetchStripeSubscription(cfg *StripeConfig, subscriptionID string) (*stripeWebhookSubscription, error) {
+	cleanID := strings.TrimSpace(subscriptionID)
+	if cleanID == "" {
+		return nil, fmt.Errorf("missing subscription id")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.stripe.com/v1/subscriptions/"+url.PathEscape(cleanID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe subscription fetch failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var sub stripeWebhookSubscription
+	if err := json.Unmarshal(body, &sub); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(sub.ID) == "" {
+		return nil, fmt.Errorf("invalid stripe subscription response")
+	}
+	return &sub, nil
+}
+
+func updateStripeSubscriptionCancelAtPeriodEnd(cfg *StripeConfig, subscriptionID string, cancel bool) (*stripeWebhookSubscription, error) {
+	cleanID := strings.TrimSpace(subscriptionID)
+	if cleanID == "" {
+		return nil, fmt.Errorf("missing subscription id")
+	}
+
+	form := url.Values{}
+	form.Set("cancel_at_period_end", strconv.FormatBool(cancel))
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/subscriptions/"+url.PathEscape(cleanID), strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe subscription update failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var sub stripeWebhookSubscription
+	if err := json.Unmarshal(body, &sub); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(sub.ID) == "" {
+		return nil, fmt.Errorf("invalid stripe subscription response")
+	}
+	return &sub, nil
 }
 
 func verifyStripeSignature(payload []byte, signatureHeader, webhookSecret string) error {

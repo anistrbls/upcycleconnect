@@ -1,9 +1,9 @@
 package projects
 
 import (
-	"encoding/json"
-	"encoding/base64"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	maxProjectImageCount = 20
-	maxProjectImageBytes = 5 * 1024 * 1024
+	maxProjectImageCount            = 20
+	maxProjectImageBytes            = 5 * 1024 * 1024
 	maxProjectDetailImagesEssential = 3
 )
 
@@ -217,7 +217,7 @@ func validateProjectStepsForSubscription(subscriptionType string, steps []Projec
 		return nil
 	}
 	switch strings.TrimSpace(strings.ToLower(subscriptionType)) {
-	case "", "decouverte", "gratuit":
+	case "", "decouverte", "gratuit", "none":
 		return errors.New("les etapes de projet sont reservees aux offres Pro Essentiel et Premium Atelier")
 	default:
 		return nil
@@ -309,7 +309,7 @@ func (r *Repository) ListByPro(proUserID int64) ([]Project, error) {
 		         JOIN items i ON i.id = upi.item_id
 		         WHERE upi.project_id = p.id
 		       ), 0) AS total_weight_grams,
-		       ` + sqlExprCorrelatedProjectPublishedUCScore + ` AS upcycling_score,
+		       `+sqlExprCorrelatedProjectPublishedUCScore+` AS upcycling_score,
 		       p.created_at, p.updated_at
 		FROM upcycling_projects p
 		JOIN users u ON u.id = p.pro_user_id
@@ -399,7 +399,7 @@ func (r *Repository) AdminProSummary(projectID int64) (*ProSummary, error) {
 		SELECT u.id,
 		       TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')),
 		       COALESCE(NULLIF(TRIM(u.company_name), ''), 'N/A'),
-		       (` + sqlExprCorrelatedProUCConnectScore + `)::double precision AS total_uc_score,
+		       (`+sqlExprCorrelatedProUCConnectScore+`)::double precision AS total_uc_score,
 		       COALESCE((
 		         SELECT COUNT(*)
 		         FROM upcycling_projects p3
@@ -1037,7 +1037,7 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 		SELECT p.id, p.pro_user_id,
 		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
 		       u.created_at,
-		       ` + sqlExprCorrelatedProUCConnectScore + ` AS pro_total_uc_score,
+		       `+sqlExprCorrelatedProUCConnectScore+` AS pro_total_uc_score,
 		       COALESCE((
 		         SELECT COUNT(*)
 		         FROM upcycling_projects p3
@@ -1056,7 +1056,7 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 		         JOIN items i2 ON i2.id = upi.item_id
 		         WHERE upi.project_id = p.id
 		       ), 0) AS total_weight_grams,
-		       ` + sqlExprCorrelatedProjectPublishedUCScore + ` AS upcycling_score,
+		       `+sqlExprCorrelatedProjectPublishedUCScore+` AS upcycling_score,
 		       (SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
 		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
 		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
@@ -1129,7 +1129,7 @@ func (r *Repository) ProPublishedProjectsForMyUpcycle(viewerUserID, ownerProUser
 		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
 		       COALESCE(NULLIF(TRIM(u.company_name), ''), 'Professionnel'),
 		       u.created_at,
-		       ` + sqlExprCorrelatedProUCConnectScore + ` AS pro_total_uc_score,
+		       `+sqlExprCorrelatedProUCConnectScore+` AS pro_total_uc_score,
 		       COALESCE((
 		         SELECT COUNT(*)
 		         FROM upcycling_projects p3
@@ -1148,7 +1148,7 @@ func (r *Repository) ProPublishedProjectsForMyUpcycle(viewerUserID, ownerProUser
 		         JOIN items i2 ON i2.id = upi.item_id
 		         WHERE upi.project_id = p.id
 		       ), 0) AS total_weight_grams,
-		       ` + sqlExprCorrelatedProjectPublishedUCScore + ` AS upcycling_score,
+		       `+sqlExprCorrelatedProjectPublishedUCScore+` AS upcycling_score,
 		       (SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
 		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
 		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
@@ -1220,7 +1220,7 @@ func (r *Repository) ParticulierListParticipated(userID int64) ([]Project, error
 		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
 		       COALESCE(NULLIF(TRIM(u.company_name), ''), 'Professionnel'),
 		       u.created_at,
-		       ` + sqlExprCorrelatedProUCConnectScore + ` AS pro_total_uc_score,
+		       `+sqlExprCorrelatedProUCConnectScore+` AS pro_total_uc_score,
 		       COALESCE((
 		         SELECT COUNT(*)
 		         FROM upcycling_projects p3
@@ -1239,7 +1239,7 @@ func (r *Repository) ParticulierListParticipated(userID int64) ([]Project, error
 		         JOIN items i3 ON i3.id = upi.item_id
 		         WHERE upi.project_id = p.id
 		       ), 0) AS total_weight_grams,
-		       ` + sqlExprCorrelatedProjectPublishedUCScore + ` AS upcycling_score,
+		       `+sqlExprCorrelatedProjectPublishedUCScore+` AS upcycling_score,
 		       (SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
 		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
 		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
@@ -1305,7 +1305,6 @@ func (r *Repository) ParticulierListParticipated(userID int64) ([]Project, error
 	return projects, nil
 }
 
-
 // GetUserPersonalScore calcule le score UC personnel du particulier.
 // Il tient compte uniquement des objets lui appartenant dans des projets publiés et approuvés.
 func (r *Repository) GetUserPersonalScore(userID int64) (float64, error) {
@@ -1340,7 +1339,6 @@ func (r *Repository) GetUserPersonalWeight(userID int64) (float64, error) {
 	return grams / 1000.0, err
 }
 
-
 // AdminModerate met à jour le statut de modération d'un projet.
 func (r *Repository) AdminModerate(projectID int64, moderationStatus, note string) error {
 	valid := map[string]bool{"pending": true, "approved": true, "rejected": true}
@@ -1364,7 +1362,7 @@ func (r *Repository) AdminModerate(projectID int64, moderationStatus, note strin
 			var limit int
 			var planName string
 			switch subscriptionType {
-			case "decouverte", "gratuit", "":
+			case "decouverte", "gratuit", "none", "":
 				limit = 3
 				planName = "Découverte"
 			case "pro_essentiel":
@@ -1448,7 +1446,7 @@ func (r *Repository) ValidatePublishReadiness(projectID, proUserID int64) error 
 	}
 
 	switch subscriptionType {
-	case "", "decouverte", "gratuit":
+	case "", "decouverte", "gratuit", "none":
 		if detailImageCount > 0 {
 			return errors.New("les images detail ne sont pas disponibles avec l'offre Decouverte")
 		}
@@ -1576,7 +1574,7 @@ func (r *Repository) ParticulierListFavorites(userID int64) ([]Project, error) {
 		       TRIM(COALESCE(u.firstname,'') || ' ' || COALESCE(u.lastname,'')),
 		       COALESCE(NULLIF(TRIM(u.company_name), ''), 'Professionnel'),
 		       u.created_at,
-		       ` + sqlExprCorrelatedProUCConnectScore + ` AS pro_total_uc_score,
+		       `+sqlExprCorrelatedProUCConnectScore+` AS pro_total_uc_score,
 		       COALESCE((
 		         SELECT COUNT(*)
 		         FROM upcycling_projects p3
@@ -1595,7 +1593,7 @@ func (r *Repository) ParticulierListFavorites(userID int64) ([]Project, error) {
 		         JOIN items i3 ON i3.id = upi.item_id
 		         WHERE upi.project_id = p.id
 		       ), 0) AS total_weight_grams,
-		       ` + sqlExprCorrelatedProjectPublishedUCScore + ` AS upcycling_score,
+		       `+sqlExprCorrelatedProjectPublishedUCScore+` AS upcycling_score,
 		       (SELECT COUNT(*) FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
 		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
 		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
@@ -1733,7 +1731,8 @@ func (r *Repository) GetProjectAnalytics(projectID, proUserID int64) (*ProjectAn
 	if err != nil {
 		return nil, err
 	}
-	if subscriptionType != "pro_essentiel" && subscriptionType != "premium_atelier" {
+	switch subscriptionType {
+	case "", "decouverte", "gratuit", "none":
 		return nil, errors.New("stats reservees aux offres Pro Essentiel et Premium Atelier")
 	}
 
@@ -1753,4 +1752,3 @@ func (r *Repository) GetProjectAnalytics(projectID, proUserID int64) (*ProjectAn
 
 	return stats, nil
 }
-

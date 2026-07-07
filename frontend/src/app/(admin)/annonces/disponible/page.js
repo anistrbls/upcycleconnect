@@ -7,6 +7,7 @@ import { formatBuyerCardPrice } from "../../../lib/salePrice";
 import { Filter, Star, Check } from "lucide-react";
 import AdminModal from "../../../components/admin/AdminModal";
 import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
+import { useI18n } from "../../../components/i18n/I18nProvider";
 
 const SELECT_ARROW_BG = "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='292.4' height='292.4'%3E%3Cpath fill='%232b4548' d='M287 69.4a17.6 17.6 0 0 0-13-5.4H18.4c-5 0-9.3 1.8-12.9 5.4A17.6 17.6 0 0 0 0 82.2c0 5 1.8 9.3 5.4 12.9l128 127.9c3.6 3.6 7.8 5.4 12.8 5.4s9.2-1.8 12.8-5.4L287 95c3.5-3.5 5.4-7.8 5.4-12.8 0-5-1.9-9.2-5.5-12.8z'/%3E%3C/svg%3E\")";
 
@@ -317,12 +318,12 @@ const styles = {
     },
 };
 
-function formatPublishDate(item) {
+function formatPublishDate(item, locale = "fr") {
     const raw = item.createdAt || item.created_at || item.publishedAt || item.published_at;
     if (!raw) return "Date non renseignee";
     const date = new Date(raw);
     if (Number.isNaN(date.getTime())) return "Date non renseignee";
-    return date.toLocaleDateString("fr-FR", {
+    return date.toLocaleDateString(locale === "en" ? "en-US" : "fr-FR", {
         day: "2-digit",
         month: "short",
         year: "numeric",
@@ -331,6 +332,7 @@ function formatPublishDate(item) {
 
 export default function ProfessionalAvailablePage() {
     const router = useRouter();
+    const { locale } = useI18n();
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -678,12 +680,12 @@ export default function ProfessionalAvailablePage() {
                                 <div style={styles.pricePill}>{item.type === "don" ? "GRATUIT" : formatBuyerCardPrice(item)}</div>
                             </div>
 
-                            <p style={styles.description}>Publiée le {formatPublishDate(item)}</p>
+                            <p style={styles.description}>Publiée le {formatPublishDate(item, locale)}</p>
 
                             <div style={styles.tagsRow}>
-                                {item.category && <span style={styles.tag} data-i18n-user-content="true">{item.category}</span>}
-                                {item.material && <span style={styles.tag} data-i18n-user-content="true">{item.material}</span>}
-                                {item.condition && <span style={styles.tag} data-i18n-user-content="true">{item.condition}</span>}
+                                {item.category && <span style={styles.tag}>{item.category}</span>}
+                                {item.material && <span style={styles.tag}>{item.material}</span>}
+                                {item.condition && <span style={styles.tag}>{item.condition}</span>}
                             </div>
 
                             <div style={styles.cardActions}>
@@ -897,7 +899,9 @@ export default function ProfessionalAvailablePage() {
             >
                 <div style={{ display: "grid", gap: "1rem", paddingTop: "0.2rem" }}>
                     <p style={{ margin: 0, color: "var(--text-main)", fontSize: "0.95rem", lineHeight: 1.5 }}>
-                        Êtes-vous sûr de vouloir réserver le matériau "{reserveConfirmItem?.title}" ?
+                        <span>Êtes-vous sûr de vouloir réserver le matériau </span>
+                        <span data-i18n-user-content="true">&quot;{reserveConfirmItem?.title}&quot;</span>
+                        <span>?</span>
                     </p>
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.7rem" }}>
                         <button

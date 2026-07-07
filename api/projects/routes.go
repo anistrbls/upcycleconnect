@@ -9,6 +9,24 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+func claimsRole(claims jwt.MapClaims) string {
+	role, _ := claims["role"].(string)
+	return strings.TrimSpace(strings.ToLower(role))
+}
+
+func claimsEmployeeRole(claims jwt.MapClaims) string {
+	employeeRole, _ := claims["employeeRole"].(string)
+	return strings.TrimSpace(strings.ToLower(employeeRole))
+}
+
+func claimsCanModerateProjects(claims jwt.MapClaims) bool {
+	return claimsRole(claims) == "admin" || (claimsRole(claims) == "salarie" && claimsEmployeeRole(claims) == "moderateur")
+}
+
+func claimsIsAdmin(claims jwt.MapClaims) bool {
+	return claimsRole(claims) == "admin"
+}
+
 // RegisterRoutes enregistre toutes les routes du module projects.
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Handler) http.Handler) {
 	repo := NewRepository(db)
@@ -34,16 +52,16 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		}))
 	}
 
-	// Middleware admin uniquement
-	adminOnly := func(next http.HandlerFunc) http.Handler {
+	// Middleware moderation : admin + salariés modérateurs.
+	moderationOnly := func(next http.HandlerFunc) http.Handler {
 		return authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
 			if !ok {
 				writeError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-			if claims["role"] != "admin" {
-				writeError(w, http.StatusForbidden, "admin only")
+			if !claimsCanModerateProjects(claims) {
+				writeError(w, http.StatusForbidden, "moderator only")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -160,7 +178,7 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	// GET  /api/admin/projects          — liste tous les projets
 	// GET  /api/admin/projects/{id}     — détail d'un projet
 	// POST /api/admin/projects/{id}/moderate — modérer un projet
-	mux.Handle("/api/admin/projects", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/admin/projects", moderationOnly(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -202,7 +220,7 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}))
 
-	mux.Handle("/api/admin/projects/", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/admin/projects/", moderationOnly(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if strings.HasSuffix(path, "/moderate") && r.Method == http.MethodPost {
 			h.AdminModerateHandler(w, r)
@@ -213,6 +231,11 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 		if r.Method == http.MethodDelete {
+			claims, _ := r.Context().Value("authClaims").(jwt.MapClaims)
+			if !claimsIsAdmin(claims) {
+				writeError(w, http.StatusForbidden, "admin only")
+				return
+			}
 			h.AdminDeleteHandler(w, r)
 			return
 		}

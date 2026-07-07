@@ -1,27 +1,52 @@
 "use client";
 
-import { use } from "react";
-import { TOKEN_KEY } from "../../../lib/api";
+import { use, useEffect, useState } from "react";
+import { apiUrl, buildAuthHeaders, canModerateForum, getTokenPayload } from "../../../lib/api";
 import ForumView from "../../../components/forum/ForumView";
 import ForumModerationView from "../../../components/forum/ForumModerationView";
 import ModulePlaceholder from "../../../components/admin/ModulePlaceholder";
 
 const getUserInfo = () => {
-    try {
-        const token = typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
-        if (!token) return { role: null, id: null };
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        return { role: payload.role || null, id: payload.sub || payload.id || null };
-    } catch {
-        return { role: null, id: null };
-    }
+    const payload = getTokenPayload();
+    if (!payload) return { role: null, employeeRole: "", id: null };
+    return {
+        role: payload.role || null,
+        employeeRole: payload.employeeRole || "",
+        id: payload.userId || payload.sub || payload.id || null,
+    };
 };
 
 export default function ForumSubPage({ params }) {
     const { subpage } = use(params);
-    const { role, id: callerUserId } = getUserInfo();
+    const [userInfo, setUserInfo] = useState(getUserInfo);
 
-    const canModerate = role === "admin" || role === "salarie";
+    useEffect(() => {
+        let cancelled = false;
+        const refreshUser = async () => {
+            try {
+                const response = await fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() });
+                if (!response.ok) return;
+                const data = await response.json();
+                if (!cancelled && data?.user) {
+                    setUserInfo((prev) => ({
+                        ...prev,
+                        id: data.user.id || prev.id,
+                        role: data.user.role || prev.role,
+                        employeeRole: data.user.employeeRole || "",
+                    }));
+                }
+            } catch {
+                // Le layout global gère déjà l'expiration de session.
+            }
+        };
+        refreshUser();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const { role, employeeRole, id: callerUserId } = userInfo;
+    const canModerate = canModerateForum({ role, employeeRole });
 
     if (subpage === "moderation") {
         if (!canModerate) {
@@ -31,5 +56,5 @@ export default function ForumSubPage({ params }) {
     }
 
     // subpage === "sujets" (ou toute autre valeur → vue par défaut)
-    return <ForumView role={role} callerUserId={callerUserId} />;
+    return <ForumView role={role} employeeRole={employeeRole} callerUserId={callerUserId} />;
 }

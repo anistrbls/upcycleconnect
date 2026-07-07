@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { Search, XCircle, Clock3, ShieldAlert, Check, X, Eye } from "lucide-react";
-import { TOKEN_KEY, apiUrl } from "../../../lib/api";
+import { TOKEN_KEY, apiUrl, canModeratePlatform } from "../../../lib/api";
 import { formatBuyerCardPrice } from "../../../lib/salePrice";
 
 const styles = {
@@ -296,8 +296,8 @@ function ModerationContent() {
                 if (!response.ok) return;
 
                 const data = await response.json();
-                const admin = data?.user?.role === "admin";
-                if (!admin) {
+                const canModerate = canModeratePlatform(data?.user);
+                if (!canModerate) {
                     router.replace("/annonces/mes-annonces");
                     return;
                 }

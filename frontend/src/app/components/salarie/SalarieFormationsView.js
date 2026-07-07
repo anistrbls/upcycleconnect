@@ -37,13 +37,37 @@ const VALIDATION_COLORS = {
 const VALIDATION_LABELS = { pending: "En attente", approved: "Validé", rejected: "Refusé" };
 const TYPE_EMOJI = { atelier: "🛠️", formation: "📚", conference: "🎤", evenement: "🎉" };
 const SALARIE_STATUSES = ["brouillon", "planifie"];
+const DURATION_OPTIONS = [30, 60, 90, 120, 180, 240, 360, 480];
+const MULTI_DAY_EVENT_TYPE = "formation";
 const EMPTY_FORM = {
     name: "", description: "", type: "formation",
-    dateDebut: "", duree: "60",
+    dateDebut: "", dateFin: "", duree: "60",
     adresse: "", codePostal: "", ville: "", pays: "France",
     capaciteMax: "",
     status: "brouillon", imageUrl: "",
     pricingType: "gratuit", price: "",
+};
+
+const isMultiDayEventType = (type) => type === MULTI_DAY_EVENT_TYPE;
+
+const computeDateFinFromDuration = (dateDebut, duree) => {
+    if (!dateDebut) {
+        return "";
+    }
+    const startDate = new Date(dateDebut);
+    const minutes = Number(duree);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(minutes) || minutes <= 0) {
+        return "";
+    }
+    return toDateTimeInputValue(new Date(startDate.getTime() + minutes * 60000));
+};
+
+const nearestDuration = (dateFin, dateDebut) => {
+    const m = Math.round((new Date(dateFin) - new Date(dateDebut)) / 60000);
+    if (!Number.isFinite(m) || m <= 0) {
+        return "60";
+    }
+    return String(DURATION_OPTIONS.reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a, DURATION_OPTIONS[0]));
 };
 
 const S = {
@@ -87,8 +111,34 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
     const fileRef = useRef();
     const [adresseSuggestions, setAdresseSuggestions] = useState([]);
     const [adresseLoading, setAdresseLoading] = useState(false);
+    const usesExplicitEndDate = isMultiDayEventType(formState.type);
 
     const set = (key) => (e) => setFormState(p => ({ ...p, [key]: e.target.value }));
+
+    const setType = (e) => {
+        const nextType = e.target.value;
+        setFormState((p) => ({
+            ...p,
+            type: nextType,
+            dateFin: isMultiDayEventType(nextType) && !p.dateFin
+                ? computeDateFinFromDuration(p.dateDebut, p.duree)
+                : p.dateFin,
+        }));
+    };
+
+    const setDateDebut = (e) => {
+        const nextDateDebut = e.target.value;
+        setFormState((p) => {
+            const nextDateFin = computeDateFinFromDuration(nextDateDebut, p.duree);
+            const shouldRefreshEndDate = isMultiDayEventType(p.type)
+                && (!p.dateFin || new Date(p.dateFin) <= new Date(nextDateDebut));
+            return {
+                ...p,
+                dateDebut: nextDateDebut,
+                dateFin: shouldRefreshEndDate ? nextDateFin : p.dateFin,
+            };
+        });
+    };
 
     const searchAddress = async (query) => {
         if (!query || query.length < 3) { setAdresseSuggestions([]); return; }
@@ -182,7 +232,7 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "1rem" }}>
                                     <label style={S.label}>
                                         Type
-                                        <select value={formState.type} onChange={set("type")} style={S.select}>
+                                        <select value={formState.type} onChange={setType} style={S.select}>
                                             {EVENT_TYPES.map(t => <option key={t} value={t}>{TYPE_LABELS[t] || t}</option>)}
                                         </select>
                                     </label>
@@ -196,22 +246,41 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                     Date de début *
                                     <input type="datetime-local" value={formState.dateDebut}
                                         min={!editingEvent ? new Date(Date.now() + 60000).toISOString().slice(0, 16) : undefined}
-                                        onChange={set("dateDebut")} style={S.input} required />
+                                        onChange={setDateDebut} style={S.input} required />
                                 </label>
-                                <label style={S.label}>
-                                    Durée *
-                                    <select value={formState.duree} onChange={set("duree")} style={S.select} required>
-                                        <option value="30">30 min</option>
-                                        <option value="60">1h</option>
-                                        <option value="90">1h30</option>
-                                        <option value="120">2h</option>
-                                        <option value="180">3h</option>
-                                        <option value="240">4h</option>
-                                        <option value="360">6h</option>
-                                        <option value="480">8h (journée)</option>
-                                    </select>
-                                </label>
+                                {usesExplicitEndDate ? (
+                                    <label style={S.label}>
+                                        Date de fin *
+                                        <input
+                                            type="datetime-local"
+                                            value={formState.dateFin}
+                                            min={formState.dateDebut || undefined}
+                                            onChange={set("dateFin")}
+                                            style={S.input}
+                                            required
+                                        />
+                                    </label>
+                                ) : (
+                                    <label style={S.label}>
+                                        Durée *
+                                        <select value={formState.duree} onChange={set("duree")} style={S.select} required>
+                                            <option value="30">30 min</option>
+                                            <option value="60">1h</option>
+                                            <option value="90">1h30</option>
+                                            <option value="120">2h</option>
+                                            <option value="180">3h</option>
+                                            <option value="240">4h</option>
+                                            <option value="360">6h</option>
+                                            <option value="480">8h (journée)</option>
+                                        </select>
+                                    </label>
+                                )}
                             </div>
+                            {usesExplicitEndDate && (
+                                <p style={{ margin: "-0.35rem 0 1rem", color: "var(--text-muted)", fontSize: "0.8rem", lineHeight: 1.5 }}>
+                                    Une formation peut se dérouler sur plusieurs jours : choisissez simplement une date de fin après la date de début.
+                                </p>
+                            )}
                             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "1rem" }}>
                                 <div style={S.label}>
                                     Adresse
@@ -394,7 +463,8 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
             name: item.name || "", description: item.description || "",
             type: item.type || "formation",
             dateDebut: toDateTimeInputValue(item.dateDebut),
-            duree: (() => { const opts=[30,60,90,120,180,240,360,480]; const m=Math.round((new Date(item.dateFin)-new Date(item.dateDebut))/60000); return String(opts.reduce((a,b)=>Math.abs(b-m)<Math.abs(a-m)?b:a,opts[0])); })(),
+            dateFin: toDateTimeInputValue(item.dateFin),
+            duree: nearestDuration(item.dateFin, item.dateDebut),
             adresse: parts[0] || "", codePostal: "", ville: parts[1] || "", pays: parts[2] || "France",
             capaciteMax: item.capaciteMax == null ? (item.capacite == null ? "" : String(item.capacite)) : String(item.capaciteMax),
             status: item.status || "brouillon", imageUrl: item.imageUrl || "",
@@ -411,7 +481,13 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
         if (!f.name.trim()) { setLocalError("Le nom est requis."); return; }
         if (!f.dateDebut) { setLocalError("La date de début est obligatoire."); return; }
         const startDate = new Date(f.dateDebut);
-        const endDate = new Date(startDate.getTime() + Number(f.duree) * 60000);
+        if (Number.isNaN(startDate.getTime())) { setLocalError("Format de date invalide."); return; }
+        if (isMultiDayEventType(f.type) && !f.dateFin) { setLocalError("La date de fin est obligatoire pour une formation."); return; }
+        const endDate = isMultiDayEventType(f.type)
+            ? new Date(f.dateFin)
+            : new Date(startDate.getTime() + Number(f.duree) * 60000);
+        if (Number.isNaN(endDate.getTime())) { setLocalError("Format de date de fin invalide."); return; }
+        if (endDate <= startDate) { setLocalError("La date de fin doit être après la date de début."); return; }
         if (!editingEvent && startDate <= new Date()) { setLocalError("La date de début doit être dans le futur."); return; }
         const conflict = detectConflict(startDate, endDate, editingEvent && editingEvent.id);
         if (conflict) { setLocalError(`Conflit horaire avec "${conflict.name}"`); return; }

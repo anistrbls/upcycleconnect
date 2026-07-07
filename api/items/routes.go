@@ -4,14 +4,171 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"upcycleconnect/api/mailer"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
+var subscriptionPlanKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,63}$`)
+
+type subscriptionPlanPayload struct {
+	Key       string   `json:"key"`
+	Name      string   `json:"name"`
+	PriceEuro int      `json:"price_euro"`
+	Features  []string `json:"features"`
+}
+
+type subscriptionPriceChangeNotificationResult struct {
+	Subscribers    int  `json:"subscribers"`
+	InAppSent      int  `json:"inAppSent"`
+	InAppFailed    int  `json:"inAppFailed"`
+	MailConfigured bool `json:"mailConfigured"`
+	MailSent       int  `json:"mailSent"`
+	MailSkipped    int  `json:"mailSkipped"`
+	MailFailed     int  `json:"mailFailed"`
+}
+
+func claimsRole(claims jwt.MapClaims) string {
+	role, _ := claims["role"].(string)
+	return strings.TrimSpace(strings.ToLower(role))
+}
+
+func claimsEmployeeRole(claims jwt.MapClaims) string {
+	employeeRole, _ := claims["employeeRole"].(string)
+	return strings.TrimSpace(strings.ToLower(employeeRole))
+}
+
+func claimsCanModerateListings(claims jwt.MapClaims) bool {
+	return claimsRole(claims) == "admin" || (claimsRole(claims) == "salarie" && claimsEmployeeRole(claims) == "moderateur")
+}
+
+func claimsIsAdmin(claims jwt.MapClaims) bool {
+	return claimsRole(claims) == "admin"
+}
+
+func validateSubscriptionPlanPayload(payload *subscriptionPlanPayload) error {
+	payload.Key = NormalizeSubscriptionPlanKey(payload.Key)
+	payload.Name = strings.TrimSpace(payload.Name)
+	payload.Features = cleanSubscriptionPlanFeatures(payload.Features)
+	if payload.Key == "" {
+		return fmt.Errorf("key is required")
+	}
+	if !subscriptionPlanKeyPattern.MatchString(payload.Key) {
+		return fmt.Errorf("key must contain only lowercase letters, numbers, underscores or hyphens")
+	}
+	if payload.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if payload.PriceEuro < 0 {
+		return fmt.Errorf("price_euro must be positive")
+	}
+	return nil
+}
+
+func validateSubscriptionPlanPricePayload(payload *subscriptionPlanPayload) error {
+	payload.Key = NormalizeSubscriptionPlanKey(payload.Key)
+	if payload.Key == "" {
+		return fmt.Errorf("key is required")
+	}
+	if !subscriptionPlanKeyPattern.MatchString(payload.Key) {
+		return fmt.Errorf("key must contain only lowercase letters, numbers, underscores or hyphens")
+	}
+	if payload.PriceEuro < 0 {
+		return fmt.Errorf("price_euro must be positive")
+	}
+	return nil
+}
+
+func formatSubscriptionEuroAmount(amount int) string {
+	return fmt.Sprintf("%d €", amount)
+}
+
+func notifySubscriptionPriceChange(ctx context.Context, repo *Repository, oldPlan SubscriptionPlan, newPlan SubscriptionPlan) (*subscriptionPriceChangeNotificationResult, error) {
+	result := &subscriptionPriceChangeNotificationResult{}
+	if oldPlan.PriceEuro == newPlan.PriceEuro || IsFreeSubscriptionPlanKey(newPlan.Key) {
+		return result, nil
+	}
+
+	subscribers, err := repo.ListActiveSubscribersForSubscriptionPlan(ctx, newPlan.Key)
+	if err != nil {
+		return result, err
+	}
+	result.Subscribers = len(subscribers)
+
+	mailCfg := mailer.ConfigFromEnv()
+	result.MailConfigured = mailCfg.Configured()
+
+	for _, subscriber := range subscribers {
+		oldAmount := oldPlan.PriceEuroForBillingCycle(subscriber.BillingCycle)
+		newAmount := newPlan.PriceEuroForBillingCycle(subscriber.BillingCycle)
+		if oldAmount == newAmount {
+			continue
+		}
+
+		direction := "supérieur"
+		if newAmount < oldAmount {
+			direction = "inférieur"
+		}
+		cadence := "mensuel"
+		if NormalizeSubscriptionBillingCycle(subscriber.BillingCycle) == SubscriptionBillingCycleYear {
+			cadence = "annuel"
+		}
+
+		title := "Tarif de votre abonnement modifié"
+		message := fmt.Sprintf(
+			"Le tarif %s de votre abonnement %s passe de %s à %s. Votre prochain prélèvement sera %s à ce que vous payez actuellement.",
+			cadence,
+			newPlan.Name,
+			formatSubscriptionEuroAmount(oldAmount),
+			formatSubscriptionEuroAmount(newAmount),
+			direction,
+		)
+
+		if err := CreateNotification(ctx, repo.db, subscriber.ID, title, message, "subscription_price_change"); err != nil {
+			result.InAppFailed++
+			log.Printf("[subscriptions] failed to create price-change notification for user %d: %v", subscriber.ID, err)
+		} else {
+			result.InAppSent++
+		}
+
+		if !result.MailConfigured {
+			result.MailSkipped++
+			continue
+		}
+
+		greeting := "Bonjour,"
+		if displayName := strings.TrimSpace(subscriber.DisplayName); displayName != "" {
+			greeting = fmt.Sprintf("Bonjour %s,", displayName)
+		}
+		body := fmt.Sprintf(`%s
+
+%s
+
+Cette information concerne votre abonnement actif UpcycleConnect.
+
+L'équipe UpcycleConnect`, greeting, message)
+
+		if err := mailer.Send(ctx, mailCfg, mailer.Message{
+			To:      []string{subscriber.Email},
+			Subject: "UpcycleConnect - changement de tarif de votre abonnement",
+			Text:    body,
+		}); err != nil {
+			result.MailFailed++
+			log.Printf("[subscriptions] failed to send price-change email to user %d: %v", subscriber.ID, err)
+		} else {
+			result.MailSent++
+		}
+	}
+
+	return result, nil
+}
 
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Handler) http.Handler) {
 	repo := NewRepository(db)
@@ -412,12 +569,12 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 	})))
 
-	// Moderation routes (Admin only)
+	// Moderation routes (admin + moderator employees)
 	// GET /api/admin/items (moderation list)
 	mux.Handle("GET /api/admin/items", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := r.Context().Value("authClaims").(jwt.MapClaims)
-		if claims["role"] != "admin" {
-			writeError(w, http.StatusForbidden, "admin only")
+		if !claimsCanModerateListings(claims) {
+			writeError(w, http.StatusForbidden, "moderator only")
 			return
 		}
 
@@ -437,8 +594,8 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	// PATCH /api/admin/items/{id}/status (moderate)
 	mux.Handle("PATCH /api/admin/items/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := r.Context().Value("authClaims").(jwt.MapClaims)
-		if claims["role"] != "admin" {
-			writeError(w, http.StatusForbidden, "admin only")
+		if !claimsCanModerateListings(claims) {
+			writeError(w, http.StatusForbidden, "moderator only")
 			return
 		}
 
@@ -492,7 +649,7 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	// DELETE /api/admin/items/{id} (delete item completely)
 	mux.Handle("DELETE /api/admin/items/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := r.Context().Value("authClaims").(jwt.MapClaims)
-		if claims["role"] != "admin" {
+		if !claimsIsAdmin(claims) {
 			writeError(w, http.StatusForbidden, "admin only")
 			return
 		}
@@ -546,8 +703,12 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 		// constraints
-		if cfg.Length < 4 { cfg.Length = 4 }
-		if cfg.Length > 16 { cfg.Length = 16 }
+		if cfg.Length < 4 {
+			cfg.Length = 4
+		}
+		if cfg.Length > 16 {
+			cfg.Length = 16
+		}
 		if err := repo.UpdateCodeConfig(r.Context(), cfg); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to save config")
 			return
@@ -565,31 +726,86 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		writeJSON(w, http.StatusOK, map[string]any{"plans": plans})
 	})
 
-	mux.Handle("PUT /api/admin/subscription-plans", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/admin/subscription-plans", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := r.Context().Value("authClaims").(jwt.MapClaims)
-		if claims["role"] != "admin" {
+		if !claimsIsAdmin(claims) {
 			writeError(w, http.StatusForbidden, "admin only")
 			return
 		}
-		var payload struct {
-			Key       string   `json:"key"`
-			Name      string   `json:"name"`
-			PriceEuro int      `json:"price_euro"`
-			Features  []string `json:"features"`
-		}
+		var payload subscriptionPlanPayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid payload")
 			return
 		}
-		if payload.Key == "" {
-			writeError(w, http.StatusBadRequest, "key is required")
+		if err := validateSubscriptionPlanPayload(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := repo.UpdateSubscriptionPlan(r.Context(), payload.Key, payload.Name, payload.PriceEuro, payload.Features); err != nil {
+
+		plan, err := repo.CreateSubscriptionPlan(r.Context(), payload.Key, payload.Name, payload.PriceEuro, payload.Features)
+		if err != nil {
+			if strings.Contains(err.Error(), "duplicate key") {
+				writeError(w, http.StatusConflict, "subscription plan already exists")
+				return
+			}
+			log.Printf("[subscriptions] failed to create plan %q: %v", payload.Key, err)
+			writeError(w, http.StatusInternalServerError, "failed to create subscription plan")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"success": true, "plan": plan})
+	})))
+
+	mux.Handle("PUT /api/admin/subscription-plans", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		if !claimsIsAdmin(claims) {
+			writeError(w, http.StatusForbidden, "admin only")
+			return
+		}
+		var payload subscriptionPlanPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		if err := validateSubscriptionPlanPricePayload(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		previousPlan, err := repo.GetSubscriptionPlan(r.Context(), payload.Key)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "subscription plan not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to load subscription plan")
+			return
+		}
+
+		plan, err := repo.UpdateSubscriptionPlanPrice(r.Context(), payload.Key, payload.PriceEuro)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeError(w, http.StatusNotFound, "subscription plan not found")
+				return
+			}
+			log.Printf("[subscriptions] failed to update plan %q: %v", payload.Key, err)
 			writeError(w, http.StatusInternalServerError, "failed to update subscription plan")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"success": true})
+
+		notifications, notificationErr := notifySubscriptionPriceChange(r.Context(), repo, previousPlan, plan)
+		if notificationErr != nil {
+			log.Printf("[subscriptions] failed to notify price change for plan %q: %v", payload.Key, notificationErr)
+		}
+
+		response := map[string]any{
+			"success":       true,
+			"plan":          plan,
+			"notifications": notifications,
+		}
+		if notificationErr != nil {
+			response["notificationError"] = "price updated, but notifications could not be fully processed"
+		}
+		writeJSON(w, http.StatusOK, response)
 	})))
 
 	// Deposit Points Routes

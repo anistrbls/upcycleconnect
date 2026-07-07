@@ -4,12 +4,22 @@ import { useEffect, useState, useCallback } from "react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
 import { Check, Sparkles, AlertCircle, Calendar, ShieldCheck, XCircle, CreditCard, ArrowRight } from "lucide-react";
 
+const normalizeBillingCycle = (value) => {
+    return value === "year" || value === "annual" ? "year" : "month";
+};
+
+const getPlanMonthlyPrice = (plan) => {
+    const value = Number(plan?.priceEuro ?? 0);
+    return Number.isFinite(value) ? value : 0;
+};
+
 export default function MySubscriptionView() {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [actionLoading, setActionLoading] = useState(null);
     const [toast, setToast] = useState(null);
+    const [billingCycle, setBillingCycle] = useState("month");
     const [downgradeModal, setDowngradeModal] = useState({
         open: false,
         blocker: null,
@@ -20,6 +30,7 @@ export default function MySubscriptionView() {
         {
             key: "decouverte",
             name: "Découverte",
+            priceEuro: 0,
             price: "0 €",
             period: "/ mois",
             color: "#4F6163",
@@ -42,6 +53,7 @@ export default function MySubscriptionView() {
         {
             key: "pro_essentiel",
             name: "Pro Essentiel",
+            priceEuro: 15,
             price: "15 €",
             period: "/ mois",
             color: "#2E5C60",
@@ -63,6 +75,7 @@ export default function MySubscriptionView() {
         {
             key: "premium_atelier",
             name: "Premium Atelier",
+            priceEuro: 30,
             price: "30 €",
             period: "/ mois",
             color: "#3E4A1A",
@@ -92,6 +105,7 @@ export default function MySubscriptionView() {
             const data = await res.json().catch(() => ({}));
             if (res.ok && data.plans) {
                 const enriched = data.plans.map(p => {
+                    const priceEuro = Number(p.price_euro || 0);
                     let color = "#4F6163";
                     let bgHeader = "#EAF0F1";
                     let ctaLabel = `Choisir ${p.name}`;
@@ -109,7 +123,8 @@ export default function MySubscriptionView() {
                     return {
                         key: p.key,
                         name: p.name,
-                        price: `${p.price_euro} €`,
+                        priceEuro,
+                        price: `${priceEuro} €`,
                         period: "/ mois",
                         color,
                         bgHeader,
@@ -203,7 +218,7 @@ export default function MySubscriptionView() {
                     ...buildAuthHeaders(),
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ plan: planKey }),
+                body: JSON.stringify({ plan: planKey, billing_cycle: billingCycle }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || "Impossible d'initier la transaction Stripe.");
@@ -221,7 +236,7 @@ export default function MySubscriptionView() {
 
     // Handle subscription cancellation
     const requestUnsubscribe = useCallback(async (requireConfirm = true) => {
-        if (requireConfirm && !window.confirm("Êtes-vous sûr de vouloir résilier votre abonnement payant ? Vous retournerez à l'offre Découverte à la fin de la période.")) {
+        if (requireConfirm && !window.confirm("Êtes-vous sûr de vouloir résilier votre abonnement payant ? Vous garderez l'accès à votre offre jusqu'à la fin de la période en cours, puis le renouvellement sera annulé.")) {
             return;
         }
         setActionLoading("cancel");
@@ -248,7 +263,8 @@ export default function MySubscriptionView() {
                 }
                 throw new Error(data.error || "Impossible de résilier l'abonnement.");
             }
-            showToast("Votre abonnement a été résilié. Vous êtes repassé au plan Découverte.", "success");
+            const endLabel = formatDate(data.current_period_end || data.currentPeriodEnd);
+            showToast(`Résiliation programmée. Vous gardez l'accès jusqu'au ${endLabel}.`, "success");
             fetchUser();
         } catch (err) {
             showToast(err.message, "error");
@@ -335,12 +351,15 @@ export default function MySubscriptionView() {
     }
 
     const currentPlan = user?.subscriptionType || "decouverte";
+    const currentBillingCycle = normalizeBillingCycle(user?.subscriptionBillingCycle);
+    const cancellationScheduled = Boolean(user?.subscriptionCancelAtPeriodEnd && currentPlan !== "decouverte");
+    const cancellationEndLabel = formatDate(user?.subscriptionCurrentPeriodEnd);
 
 
 
     const getPlanName = (key) => {
-        if (key === "pro_essentiel") return "Pro Essentiel";
-        if (key === "premium_atelier") return "Premium Atelier";
+        const plan = plans.find((p) => p.key === key);
+        if (plan) return plan.name;
         return "Découverte";
     };
 
@@ -373,37 +392,90 @@ export default function MySubscriptionView() {
                             <span>Abonné depuis le {formatDate(user.subscriptionStart)}</span>
                         </div>
                     )}
+                    {cancellationScheduled && (
+                        <div style={{ marginTop: "0.6rem", color: "#b45309", fontSize: "0.86rem", fontWeight: 700 }}>
+                            Résiliation programmée : accès conservé jusqu'au {cancellationEndLabel}.
+                        </div>
+                    )}
                 </div>
 
                 <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
                     <div style={{ textAlign: "right" }}>
                         <div style={{ fontWeight: "700", color: currentPlan === "decouverte" ? "var(--text-muted)" : "var(--primary-color)", fontSize: "0.95rem" }}>
-                            {currentPlan === "decouverte" ? "Mode Gratuit" : "Abonnement Actif"}
+                            {cancellationScheduled ? "Résiliation programmée" : currentPlan === "decouverte" ? "Mode Gratuit" : "Abonnement Actif"}
                         </div>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Facturation mensuelle</div>
+                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                            {cancellationScheduled
+                                ? `Accès jusqu'au ${cancellationEndLabel}`
+                                : currentPlan === "decouverte"
+                                ? "Aucune facturation"
+                                : currentBillingCycle === "year"
+                                    ? "Facturation annuelle"
+                                    : "Facturation mensuelle"}
+                        </div>
                     </div>
 
                     {currentPlan !== "decouverte" && (
                         <button
                             type="button"
                             className="action-btn"
-                            disabled={actionLoading === "cancel"}
+                            disabled={actionLoading === "cancel" || cancellationScheduled}
                             onClick={handleCancelSubscription}
                             style={{
                                 border: "1px solid var(--border-color)",
                                 background: "transparent",
-                                color: "#ef4444",
+                                color: cancellationScheduled ? "var(--text-muted)" : "#ef4444",
                                 borderRadius: "12px",
                                 padding: "0.6rem 1rem",
                                 fontSize: "0.85rem",
                                 fontWeight: "600",
-                                cursor: "pointer",
+                                cursor: cancellationScheduled ? "not-allowed" : "pointer",
                                 transition: "all 0.2s"
                             }}
                         >
-                            {actionLoading === "cancel" ? "Résiliation…" : "Résilier"}
+                            {actionLoading === "cancel" ? "Résiliation…" : cancellationScheduled ? "Résiliation programmée" : "Résilier"}
                         </button>
                     )}
+                </div>
+            </div>
+
+            <div className="panel" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "1rem", marginBottom: "2rem" }}>
+                <div>
+                    <span style={{ fontSize: "0.75rem", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)" }}>
+                        Mode de paiement
+                    </span>
+                    <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.86rem" }}>
+                        Choisissez une facturation mensuelle ou un paiement annuel en une seule fois.
+                    </p>
+                </div>
+                <div style={{ display: "inline-flex", background: "#111819", borderRadius: "999px", padding: "0.35rem", gap: "0.25rem" }}>
+                    {[
+                        { value: "month", label: "Mensuel" },
+                        { value: "year", label: "Annuel" },
+                    ].map((option) => {
+                        const active = billingCycle === option.value;
+                        return (
+                            <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setBillingCycle(option.value)}
+                                style={{
+                                    border: "none",
+                                    borderRadius: "999px",
+                                    background: active ? "#fff" : "transparent",
+                                    color: active ? "var(--text-main)" : "rgba(255,255,255,0.72)",
+                                    padding: "0.62rem 1.05rem",
+                                    fontSize: "0.86rem",
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                    minWidth: "6rem",
+                                    transition: "all 0.18s ease",
+                                }}
+                            >
+                                {option.label}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -411,6 +483,10 @@ export default function MySubscriptionView() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "2rem", marginBottom: "2rem" }}>
                 {plans.map((p) => {
                     const isActive = currentPlan === p.key;
+                    const displayCycle = isActive && p.key !== "decouverte" ? currentBillingCycle : billingCycle;
+                    const monthlyPrice = getPlanMonthlyPrice(p);
+                    const displayedPrice = p.key === "decouverte" ? 0 : monthlyPrice * (displayCycle === "year" ? 12 : 1);
+                    const displayedPeriod = p.key === "decouverte" ? "" : displayCycle === "year" ? "/ an" : "/ mois";
 
                     return (
                         <div
@@ -452,9 +528,14 @@ export default function MySubscriptionView() {
                                     {p.name}
                                 </h3>
                                 <div style={{ display: "flex", alignItems: "baseline" }}>
-                                    <span style={{ fontSize: "2.25rem", fontWeight: "800", color: "var(--text-main)" }}>{p.price}</span>
-                                    <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginLeft: "0.3rem" }}>{p.period}</span>
+                                    <span style={{ fontSize: "2.25rem", fontWeight: "800", color: "var(--text-main)" }}>{displayedPrice} €</span>
+                                    {displayedPeriod && <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginLeft: "0.3rem" }}>{displayedPeriod}</span>}
                                 </div>
+                                {p.key !== "decouverte" && displayCycle === "year" && (
+                                    <p style={{ margin: "0.45rem 0 0", color: "var(--text-muted)", fontSize: "0.78rem", fontWeight: 600 }}>
+                                        Équivalent au prix mensuel, facturé en une seule fois.
+                                    </p>
+                                )}
                             </div>
 
                             {/* Plan Features */}

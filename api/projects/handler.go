@@ -256,7 +256,7 @@ func (h *Handler) PublishHandler(w http.ResponseWriter, r *http.Request) {
 		var limit int
 		var planName string
 		switch subscriptionType {
-		case "decouverte", "gratuit", "":
+		case "decouverte", "gratuit", "none", "":
 			limit = 3
 			planName = "Découverte"
 		case "pro_essentiel":
@@ -590,7 +590,6 @@ func (h *Handler) ParticulierListParticipatedHandler(w http.ResponseWriter, r *h
 		"myWeight": myWeight,
 	})
 }
-
 
 // AdminDetailHandler gère GET /api/admin/projects/{id} — détail d'un projet (admin).
 func (h *Handler) AdminDetailHandler(w http.ResponseWriter, r *http.Request) {

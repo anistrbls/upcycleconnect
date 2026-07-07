@@ -161,7 +161,7 @@ export default function UserDetails({ open, user, onClose, onEdit }) {
 
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.5rem" }}>
                     <button type="button" className="action-btn" onClick={() => { setCurrentTab("profile"); onClose(); }}>Fermer</button>
-                    {currentTab === "profile" && (
+                    {currentTab === "profile" && onEdit && (
                         <button type="button" className="action-btn primary" onClick={() => { onClose(); onEdit(user); }}>
                             Modifier
                         </button>

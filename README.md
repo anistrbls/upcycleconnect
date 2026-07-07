@@ -138,10 +138,43 @@ Cette commande reconstruit localement `api` et `frontend` puis démarre les serv
 | `STRIPE_WEBHOOK_SECRET` | Secret de signature webhook Stripe |
 | `STRIPE_SUCCESS_URL` | URL de retour Stripe apres paiement valide |
 | `STRIPE_CANCEL_URL` | URL de retour Stripe apres annulation |
+| `SMTP_HOST` | Hote du serveur SMTP |
+| `SMTP_PORT` | Port SMTP (`587` STARTTLS ou `465` TLS direct) |
+| `SMTP_USERNAME` | Identifiant SMTP |
+| `SMTP_PASSWORD` | Mot de passe SMTP |
+| `SMTP_FROM_EMAIL` | Adresse expediteur utilisee par l'application |
+| `SMTP_FROM_NAME` | Nom expediteur affiche |
+| `SMTP_REPLY_TO` | Adresse de reponse optionnelle |
+| `SMTP_TLS` | `true` pour TLS direct, typiquement port `465` |
+| `SMTP_STARTTLS` | `true` pour STARTTLS, typiquement port `587` |
+| `SMTP_SKIP_VERIFY` | `true` uniquement pour tester un certificat auto-signe |
+| `SMTP_TIMEOUT_SECONDS` | Timeout SMTP en secondes |
 
 Webhook Stripe a configurer dans le dashboard Stripe:
 
 - `POST /api/webhooks/stripe`
+
+### Test SMTP en production
+
+Une fois les variables SMTP renseignees dans `.env` et l'API redemarree, un administrateur peut verifier la configuration:
+
+```bash
+TOKEN="<jwt-admin>"
+
+curl -H "Authorization: Bearer $TOKEN" \
+  https://votre-domaine.fr/api/admin/mail/status
+```
+
+Puis envoyer un mail de test depuis l'API:
+
+```bash
+curl -X POST https://votre-domaine.fr/api/admin/mail/test \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"votre-adresse@example.com"}'
+```
+
+Le mot de passe SMTP n'est jamais renvoye par l'endpoint de statut.
 
 ## Structure rapide
 

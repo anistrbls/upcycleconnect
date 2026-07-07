@@ -21,6 +21,7 @@
     "» a été saisi dans un conseil mais n'est pas dans cette liste. L'ajouter ici pour qu'il soit proposé dans les futurs formulaires de conseils ?": "\" was entered in an advice post but is not in this list. Add it here so it is suggested in future advice forms?",
     "(min. 8 caractères)": "(min. 8 characters)",
     "(optionnel)": "(optional)",
+    "/ an": "/ year",
     "/ mois": "/ month",
     "↺ Réactiver": "↺ Reactivate",
     "+ Ajouter un outil": "+ Add a tool",
@@ -51,6 +52,7 @@
     "8 caractères min.": "8 characters min.",
     "8h (journée)": "8h (full day)",
     "À assigner": "To assign",
+    "À confirmer": "To be confirmed",
     "a bien été enregistrée. Elle sera vérifiée par notre équipe sous 24h.": "has been saved. It will be reviewed by our team within 24 hours.",
     "À communiquer ou à présenter au moment du retrait.": "Share or show this at pickup.",
     "À conserver pour vos échanges avec le support ou le point de dépôt.": "Keep this for your exchanges with support or the drop-off point.",
@@ -67,6 +69,7 @@
     "Abonnés Payants": "Paying subscribers",
     "Absent": "Absent",
     "Accédez rapidement aux modules principaux de votre activité sur UpcycleConnect.": "Quickly access the main modules for your UpcycleConnect activity.",
+    "Accès rapides": "Quick access",
     "Accès au forum": "Access to the forum",
     "Accès aux annonces publiques": "Access to public listings",
     "Accès aux conseils": "Access to advice",
@@ -91,6 +94,7 @@
     "Activités & inscriptions": "Activities & registrations",
     "Actualiser": "Refresh",
     "Actualités": "News",
+    "Achats d'objets": "Item purchases",
     "Admin": "Admin",
     "Administration": "Administration",
     "Admins": "Admins",
@@ -217,6 +221,8 @@
     "Aucun projet trouvé": "No project found",
     "Aucun projet validé pour l'instant": "No approved project yet",
     "Aucun résultat trouvé": "No result found",
+    "Aucun resultat pour ces filtres.": "No result for these filters.",
+    "Aucun résultat pour cette recherche.": "No result for this search.",
     "Aucun salarié enregistré. Créez des comptes salarié dans l'administration.": "No employee saved. Create employee accounts in the administration area.",
     "Aucun signalement communautaire.": "No community report.",
     "Aucun signalement en attente": "No pending reports",
@@ -261,6 +267,7 @@
     "Belgique": "Belgium",
     "Besoin d'aide ?": "Need help?",
     "Bienvenue sur UpcycleConnect !": "Welcome to UpcycleConnect!",
+    "Bienvenue sur votre espace UpcycleConnect. Déposez vos objets, participez à des ateliers et rejoignez la communauté.": "Welcome to your UpcycleConnect space. Submit your items, join workshops and connect with the community.",
     "Bienvenue,": "Welcome,",
     "Bois": "Wood",
     "Bon état": "Good condition",
@@ -353,6 +360,7 @@
     "Chargement…": "Loading…",
     "Chargement\\u2026": "Loading\\u2026",
     "Chez le vendeur": "At the seller's",
+    "Chez vendeur": "At seller's",
     "Choisir dans la liste ou saisir un matériau…": "Choose from the list or enter a material…",
     "Choisir le type de visuels cartographiques lors de la recherche d'annonces.": "Choose the map visual type when searching listings.",
     "Choisir Premium Atelier": "Choose Premium Workshop",
@@ -367,7 +375,7 @@
     "Cliquez sur une miniature pour la définir comme photo de couverture principale.": "Click a thumbnail to set it as the main cover photo.",
     "Code *": "Code *",
     "Code de dépôt": "Drop-off code",
-    "Code de dépôt généré": "Drop-off code généré",
+    "Code de dépôt généré": "Drop-off code generated",
     "Code de récupération": "Pickup code",
     "Code Expiré": "Expired code",
     "Code invalide ou expiré": "Invalid or expired code",
@@ -401,6 +409,7 @@
     "Confirmation de dépôt": "Drop-off confirmation",
     "Confirmation de récupération": "Pickup confirmation",
     "Confirmation de réservation": "Booking confirmation",
+    "Confirmation...": "Confirming...",
     "Confirmée": "Confirmed",
     "Confirmer": "Confirm",
     "Confirmer dépôt": "Confirm drop-off",
@@ -459,6 +468,7 @@
     "Créé le": "Created on",
     "Créée le": "Created on",
     "Créer et suivre vos projets d’upcycling.": "Create and track your upcycling projects.",
+    "Créer et suivre vos projets d'upcycling.": "Create and track your upcycling projects.",
     "Créer l'événement": "Create event",
     "Créer mon premier événement": "Create my first event",
     "Créer un événement": "Create an event",
@@ -477,10 +487,13 @@
     "Date à laquelle vous avez réservé cet objet.": "Date when you reserved this item.",
     "Date de début *": "Start date *",
     "Date de début de l'abonnement": "Subscription start date",
+    "Date de fin *": "End date *",
     "Date de la transaction": "Transaction date",
     "Date de publication prévue (facultatif)": "Scheduled publication date (optional)",
     "Date Début": "Start date",
     "Date inscription": "Registration date",
+    "Date inconnue": "Unknown date",
+    "Date non renseignee": "Date not provided",
     "Dates": "Dates",
     "Dates & lieu": "Dates & location",
     "de frais plateforme": "platform fee",
@@ -496,6 +509,7 @@
     "Découverte (0 €/mois - Inclus par défaut)": "Discovery (0 €/mois - Included by default)",
     "Découverte (Free)": "Discovery (Free)",
     "Découvrez la liste complète des événements à venir : ateliers DIY, formations certifiantes, conférences... Filtrez par type ou par date et inscrivez-vous en un clic.": "Discover the full list of upcoming events: DIY workshops, certified training, talks... Filter by type or date and register in one click.",
+    "Découvrir les activités à venir.": "Discover upcoming activities.",
     "Découvrez les projets upcycling validés et publiés par les professionnels.": "Discover upcycling projects approved and published by professionals.",
     "Décrivez l'événement…": "Describe the event…",
     "Décrivez la situation (obligatoire pour enregistrer votre demande)…": "Describe the situation (required to save your request)…",
@@ -550,6 +564,7 @@
     "Domaines de compétence": "Skill areas",
     "Don": "Donation",
     "DON": "DONATION",
+    "Donner ou vendre un objet.": "Donate or sell an item.",
     "Données insuffisantes pour les artisans.": "Not enough data for craftspeople.",
     "Données insuffisantes pour les zones.": "Not enough data for areas.",
     "Dons actifs": "Active donations",
@@ -560,6 +575,7 @@
     "Durée": "Duration",
     "Durée (minutes)": "Duration (minutes)",
     "Durée *": "Duration *",
+    "Une formation peut se dérouler sur plusieurs jours : choisissez simplement une date de fin après la date de début.": "A training event can span several days: simply choose an end date after the start date.",
     "Échanger avec la communauté.": "Talk with the community.",
     "Échangez avec toute la communauté UpcycleConnect ! Posez vos questions, partagez vos expériences de réparation ou de transformation, et aidez les autres membres.": "Talk with the whole UpcycleConnect community! Ask questions, share repair or transformation experiences, and help other members.",
     "Échec remb.": "Refund failed",
@@ -575,6 +591,7 @@
     "En attente de réservation pro": "Awaiting pro booking",
     "En attente de traitement par l'équipe.": "Awaiting processing by l'équipe.",
     "En attente de validation": "Awaiting approval",
+    "En attente du vendeur": "At the seller's",
     "En attente Dépôt": "Awaiting drop-off",
     "En Catalogue": "In catalog",
     "En déposant cette annonce, vous évitez en moyenne 12kg de déchets et soutenez l'économie locale.": "By submitting this listing, you avoid an average of 12kg of waste and support the local economy.",
@@ -605,6 +622,7 @@
     "Erreur lors de la suppression": "Error while deleting",
     "Erreur lors de la suppression de l'annonce.": "Error while deleting the listing.",
     "Erreur lors de la suppression du brouillon.": "Error while deleting the draft.",
+    "Erreur lors de la réservation": "Error while booking",
     "Erreur lors du changement": "Error while changing",
     "Erreur réseau": "Network error",
     "Erreur réseau lors de la restauration du flux.": "Network error while restoring the flow.",
@@ -635,6 +653,7 @@
     "État mis à jour.": "Condition updated.",
     "État supprimé.": "Condition supprimé.",
     "États des objets": "Item conditions",
+    "Êtes-vous sûr de vouloir réserver le matériau": "Are you sure you want to book the material",
     "Êtes-vous sûr de vouloir annuler votre participation à l'événement": "Are you sure you want to cancel your participation in the event",
     "Êtes-vous sûr de vouloir annuler votre réservation pour": "Are you sure you want to cancel your booking for",
     "Êtes-vous sûr de vouloir résilier votre abonnement payant ? Vous retournerez à l'offre Découverte à la fin de la période.": "Are you sure you want to cancel your paid subscription? You will return to the Discovery plan at the end of the period.",
@@ -687,6 +706,7 @@
     "Export groupé des données": "Bulk data export",
     "Export simple de l’historique": "Simple history export",
     "Facturation mensuelle": "Monthly billing",
+    "Facturation annuelle": "Annual billing",
     "Facture": "Invoice",
     "Facturé à :": "Billed to:",
     "Factures": "Invoices",
@@ -720,6 +740,7 @@
     "Fonctionnalités gratuites de base": "Basic free features",
     "Fonctionnalités incluses": "Included features",
     "Format d'email invalide.": "Invalid email format.",
+    "Format de date de fin invalide.": "Invalid end date format.",
     "Format de date invalide.": "Invalid date format.",
     "Format non accepté. Utilisez une image (JPG, PNG, WebP…) ou une vidéo MP4 / WebM / MOV.": "Unsupported format. Use an image (JPG, PNG, WebP…) or an MP4 / WebM / MOV video.",
     "Format non supporté. Utilisez JPG, PNG ou WEBP.": "Unsupported format. Use JPG, PNG or WEBP.",
@@ -742,6 +763,7 @@
     "Gérer l'abonnement": "Manage subscription",
     "Gérer la réservation": "Manage booking",
     "Gérer les containers": "Manage containers",
+    "Gérer votre profil et vos préférences.": "Manage your profile and preferences.",
     "Gérez la formule de votre compte professionnel et découvrez nos offres adaptées aux artisans et ateliers de revalorisation.": "Manage your professional account plan and discover our offers for craftspeople and upcycling workshops.",
     "Gérez les lieux physiques de collecte et surveillez leur saturation.": "Manage physical collection locations and monitor their capacity.",
     "Gérez les réglages globaux de la plateforme UpcycleConnect.": "Manage global settings for the UpcycleConnect platform.",
@@ -853,6 +875,7 @@
     "Jusqu’à 5 alertes personnalisées": "Up to 5 custom alerts",
     "Jusqu'à 8 images pour le point de dépôt": "Up to 8 images for the drop-off point",
     "Justificatifs individuels": "Individual receipts",
+    "Journée complète": "Full day",
     "kg": "kg",
     "KPIs": "KPIs",
     "KPIs & Statistiques": "KPIs & Statistics",
@@ -866,9 +889,12 @@
     "La communauté est tranquille !": "The community is quiet!",
     "La date de début doit être dans le futur.": "The start date must be in the future.",
     "La date de début est obligatoire.": "The start date is required.",
+    "La date de fin doit être après la date de début.": "The end date must be after the start date.",
+    "La date de fin est obligatoire pour une formation.": "The end date is required for a training event.",
     "La date de fin de maintenance doit être après la date de début.": "The maintenance end date must be after the start date.",
     "La ville contient des caractères non valides.": "City contains invalid characters.",
     "La ville doit contenir au moins 2 caractères.": "City must contain at least 2 characters.",
+    "L'annonce a été validée par la modération et a intégré le circuit logistique.": "The listing was approved by moderation and entered the logistics flow.",
     "Langue active dans le sélecteur": "Active language in the selector",
     "Langue introuvable.": "Language not found.",
     "Langue protégée non supprimable": "Protected language cannot be deleted",
@@ -878,6 +904,7 @@
     "Le catalogue doit être un objet JSON.": "The catalog must be a JSON object.",
     "Le code a expiré": "The code has expired",
     "Le contenu est requis.": "Content is required.",
+    "Le dépôt a été confirmé.": "The drop-off was confirmed.",
     "Le forum communautaire": "The community forum",
     "Le JSON du catalogue est invalide.": "The catalog JSON is invalid.",
     "Le matériau «": "The material \"",
@@ -890,6 +917,8 @@
     "Le nom doit contenir au moins 2 caractères.": "Last name must contain at least 2 characters.",
     "Le nom est requis.": "The name is required.",
     "Le paiement n'a pas pu etre confirme. Reessayez depuis l'evenement.": "Payment could not be confirmed. Try again from the event.",
+    "Le professionnel a effectué le paiement avec succès pour cette vente.": "The professional successfully paid for this sale.",
+    "Le professionnel a retiré l'objet du point de dépôt. Cycle terminé.": "The professional collected the item from the drop-off point. Cycle complete.",
     "Le participant verra le statut « non remboursable ». Vous pouvez préciser un message (stocké avec la demande).": "The participant will see the \"not refundable\" status. You can add a message stored with the request.",
     "Le poids estime accepte au maximum 3 decimales.": "Estimated weight accepts up to 3 decimal places.",
     "Le poids estime doit etre un nombre strictement positif.": "Estimated weight must be a strictly positive number.",
@@ -914,6 +943,7 @@
     "Les projets avec un récit clair et des visuels complets ont de meilleures performances de consultation.": "Projects with a clear story and complete visuals perform better in views.",
     "Les projets upcycle": "Upcycle projects",
     "Les règles dynamiques doivent être un tableau JSON.": "Dynamic rules must be a JSON array.",
+    "L'utilisateur a déposé l'objet dans le conteneur. Le dépôt a été confirmé.": "The user dropped the item in the container. The drop-off was confirmed.",
     "Libellé *": "Label *",
     "Lien copié !": "Link copied!",
     "Lien copié.": "Link copied.",
@@ -1015,6 +1045,7 @@
     "Mode de facturation": "Billing mode",
     "Mode de fonctionnement": "Operating mode",
     "Mode de règlement : Carte Bancaire via Stripe": "Payment method: Card via Stripe",
+    "Mode de paiement": "Payment mode",
     "Mode Gratuit": "Free mode",
     "Modérateur": "Moderator",
     "Modération": "Moderation",
@@ -1041,6 +1072,14 @@
     "Mon planning": "My schedule",
     "Mon Planning": "My schedule",
     "Mon profil": "My profile",
+    "Mon profil Pro": "My Pro profile",
+    "Mes dépenses": "My expenses",
+    "Mes revenus": "My income",
+    "Mes statistiques": "My statistics",
+    "Note acheteur": "Buyer rating",
+    "Note vendeur": "Seller rating",
+    "Abonnement actuel": "Current subscription",
+    "Abonnement(s) actif(s)": "Active subscription(s)",
     "Montant": "Amount",
     "Montant à rembourser :": "Amount to refund:",
     "Montant en euros": "Amount in euros",
@@ -1087,6 +1126,7 @@
     "nom@exemple.com": "name@example.com",
     "Non": "No",
     "Non assigné": "Unassigned",
+    "Non assignée": "Unassigned",
     "Nos salariés publient régulièrement des tutoriels, guides pratiques et astuces pour vous aider à donner une seconde vie à vos objets. Tout le contenu est disponible ici.": "Our employees regularly publish tutorials, practical guides and tips to help you give your items a second life. All content is available here.",
     "Note admin": "Admin note",
     "Note au professionnel": "Note to the professional",
@@ -1124,12 +1164,14 @@
     "Objet déposé": "Item dropped off",
     "Objet JSON : chaque clé est le texte français présent sur le site, chaque valeur est sa traduction.": "JSON object: each key is the French text present on the site, and each value is its translation.",
     "Objet récupéré": "Item collected",
-    "Objet réservé par un visiteur pro": "Reserved item by un visiteur pro",
+    "Objet réservé par un visiteur pro": "Item reserved by a professional visitor",
     "Objets": "Items",
     "Objets déposés et récupérables par les professionnels.": "Items dropped off and available for professionals to collect.",
     "Objets dispo dans les conteneurs": "Items available in containers",
+    "Objets donnés / récupérés": "Donated / recovered items",
     "Objets récupérés": "Recovered items",
     "Objets revalorisés": "Upcycled items",
+    "Objets traités": "Items processed",
     "Occupation": "Occupancy",
     "Offre gratuite par défaut pour les professionnels": "Free default plan for professionals",
     "Offres": "Plans",
@@ -1226,7 +1268,7 @@
     "Point Assigné": "Assigned point",
     "Point de dépôt": "Drop-off point",
     "Point de depot": "Drop-off point",
-    "Point de dépôt assigné": "Drop-off point assigné",
+    "Point de dépôt assigné": "Drop-off point assigned",
     "Points de dépôt": "Drop-off points",
     "Points saturés": "Full points",
     "Points totaux": "Total points",
@@ -1259,10 +1301,13 @@
     "Premium Atelier (30€)": "Premium Workshop (30€)",
     "Prénom": "First name",
     "Présentez brièvement votre prestation...": "Briefly present your service...",
+    "Présentez ce QR au point de dépôt. Si le scan ne fonctionne pas, communiquez le code ci-dessous.": "Show this QR code at drop-off. If scanning does not work, share the code below.",
+    "Présentez ce QR au point de retrait. Si le scan ne fonctionne pas, communiquez le code ci-dessous.": "Show this QR code at pickup. If scanning does not work, share the code below.",
     "Prestation :": "Service:",
     "Prestation introuvable.": "Service not found.",
     "Prestation supprimée.": "Service deleted.",
     "Prestations": "Services",
+    "Prêt à récupérer": "Ready to collect",
     "Prestations actives": "Active services",
     "Prestations inactives": "Inactive services",
     "Prestations récentes": "Recent services",
@@ -1417,10 +1462,13 @@
     "Réservation de mes annonces": "Booking for my listings",
     "Réservation Professionnelle": "Professional booking",
     "Réservation/récupération standard": "Standard booking/pickup",
+    "Réservation...": "Booking...",
     "Réservations": "Bookings",
     "Réservations confirmées": "Confirmed bookings",
     "Réservations en attente": "Pending bookings",
+    "Réservations en cours": "Current bookings",
     "Réservations formations": "Training bookings",
+    "Réservations gérées": "Bookings managed",
     "Réservations récentes": "Recent bookings",
     "Réservations total": "Bookings total",
     "Réservé": "Reserved",
@@ -1475,6 +1523,7 @@
     "Score calculé sur vos objets intégrés dans des projets certifiés — (poids en kg) × (coefficient matériau).": "Score calculated from your items included in certified projects — (weight in kg) × (material coefficient).",
     "Score Projet": "Project score",
     "Score Total": "Total score",
+    "Score UC Connect": "UC Connect score",
     "Score UC cumulé": "Cumulative UC score",
     "Score upcycling": "Upcycling score",
     "Score Upcycling": "Score Upcycling",
@@ -1530,6 +1579,7 @@
     "Structure prête": "Structure ready",
     "Suisse": "Switzerland",
     "Suivant": "Next",
+    "Suivre vos ateliers et formations.": "Track your workshops and training sessions.",
     "Suivez l'état de vos demandes de prestations et vos rendez-vous.": "Track the status of your service requests and appointments.",
     "Suivi des abonnements professionnels, de la facturation récurrente et des statuts de compte.": "Tracking professional subscriptions, recurring billing and account statuses.",
     "Suivi des flux objets": "Item flow tracking",
@@ -1603,6 +1653,8 @@
     "Total flux": "Total flows",
     "Total Hors Taxes (HT) :": "Total excluding tax (HT):",
     "Total mensuel": "Monthly total",
+    "Total dépensé ce mois": "Total spent this month",
+    "Total encaissé ce mois": "Total earned this month",
     "Total payé par l'acheteur": "Total paid by buyer",
     "Total reçu par le vendeur": "Total received by seller",
     "Total TTC": "Total incl. tax",
@@ -1636,6 +1688,7 @@
     "Toutes catégories": "All categories",
     "Toutes les activités": "All activities",
     "Toutes les catégories": "All categories",
+    "Toutes les réservations": "All bookings",
     "Toutes les prestations": "All services",
     "Toutes vos réservations passées et à venir sont listées ici, avec leur statut (confirmée, en attente, annulée). Vous pouvez aussi annuler une réservation depuis cette vue.": "All your past and upcoming bookings are listed here with their status (confirmed, pending, canceled). You can also cancel a booking from this view.",
     "Traces d’usure": "Signs of wear",
@@ -1706,6 +1759,7 @@
     "Vendues": "Sold",
     "Vente": "Sale",
     "VENTE": "SALE",
+    "Ventes d'items": "Item sales",
     "Ventes actives": "Active sales",
     "Vérification de session...": "Checking session...",
     "Vérifiez les objets associés au projet": "Check the items linked to the project",
@@ -1718,6 +1772,11 @@
     "Veuillez renseigner a la fois la valeur et l'unite du poids.": "Please enter both the weight value and unit.",
     "Veuillez renseigner votre email et votre mot de passe.": "Please enter your email and password.",
     "Veuillez saisir un prix valide.": "Please enter a valid price.",
+    "Choisissez une facturation mensuelle ou un paiement annuel en une seule fois.": "Choose monthly billing or a one-time annual payment.",
+    "Équivalent au prix mensuel, facturé en une seule fois.": "Equivalent to the monthly price, billed once.",
+    "Mensuel": "Monthly",
+    "Annuel": "Annual",
+    "Aucune facturation": "No billing",
     "Veuillez selectionner un motif.": "Please select a reason.",
     "Ville": "City",
     "Ville *": "City *",
@@ -1794,6 +1853,126 @@
   },
   "patterns": [
     {
+      "match": "{{count}} resultat · {{favorites}} favori",
+      "replace": "{{count}} result · {{favorites}} favorite"
+    },
+    {
+      "match": "{{count}} resultats · {{favorites}} favori",
+      "replace": "{{count}} results · {{favorites}} favorite"
+    },
+    {
+      "match": "{{count}} resultat · {{favorites}} favoris",
+      "replace": "{{count}} result · {{favorites}} favorites"
+    },
+    {
+      "match": "{{count}} resultats · {{favorites}} favoris",
+      "replace": "{{count}} results · {{favorites}} favorites"
+    },
+    {
+      "match": "{{count}} réservation",
+      "replace": "{{count}} booking"
+    },
+    {
+      "match": "{{count}} réservations",
+      "replace": "{{count}} bookings"
+    },
+    {
+      "match": "Toutes les réservations — {{count}} affichée",
+      "replace": "All bookings — {{count}} shown"
+    },
+    {
+      "match": "Toutes les réservations — {{count}} affichées",
+      "replace": "All bookings — {{count}} shown"
+    },
+    {
+      "match": "Chez le vendeur — {{count}} affichée",
+      "replace": "At the seller's — {{count}} shown"
+    },
+    {
+      "match": "Chez le vendeur — {{count}} affichées",
+      "replace": "At the seller's — {{count}} shown"
+    },
+    {
+      "match": "Paiement — {{count}} affichée",
+      "replace": "Payment — {{count}} shown"
+    },
+    {
+      "match": "Paiement — {{count}} affichées",
+      "replace": "Payment — {{count}} shown"
+    },
+    {
+      "match": "À récupérer — {{count}} affichée",
+      "replace": "To collect — {{count}} shown"
+    },
+    {
+      "match": "À récupérer — {{count}} affichées",
+      "replace": "To collect — {{count}} shown"
+    },
+    {
+      "match": "Récupérées — {{count}} affichée",
+      "replace": "Collected — {{count}} shown"
+    },
+    {
+      "match": "Récupérées — {{count}} affichées",
+      "replace": "Collected — {{count}} shown"
+    },
+    {
+      "match": "Annulées — {{count}} affichée",
+      "replace": "Canceled — {{count}} shown"
+    },
+    {
+      "match": "Annulées — {{count}} affichées",
+      "replace": "Canceled — {{count}} shown"
+    },
+    {
+      "match": "{{label}} — {{count}} affichée",
+      "replace": "{{label}} — {{count}} shown"
+    },
+    {
+      "match": "{{label}} — {{count}} affichées",
+      "replace": "{{label}} — {{count}} shown"
+    },
+    {
+      "match": "{{count}} réservation · {{shown}} affichée(s)",
+      "replace": "{{count}} booking · {{shown}} shown"
+    },
+    {
+      "match": "{{count}} réservations · {{shown}} affichée(s)",
+      "replace": "{{count}} bookings · {{shown}} shown"
+    },
+    {
+      "match": "Annonce #{{id}}",
+      "replace": "Listing #{{id}}"
+    },
+    {
+      "match": "Expire le : {{date}}",
+      "replace": "Expires on: {{date}}"
+    },
+    {
+      "match": "Êtes-vous sûr de vouloir réserver le matériau \"{{name}}\" ?",
+      "replace": "Are you sure you want to book the material \"{{name}}\"?"
+    },
+    {
+      "match": "L'objet a été réservé par {{user}}.",
+      "replace": "The item was reserved by {{user}}."
+    },
+    {
+      "match": "L'objet a été assigné au point de dépôt \"{{point}}\" (Conteneur: {{container}}).",
+      "replace": "The item was assigned to drop-off point \"{{point}}\" (Container: {{container}})."
+    },
+    {
+      "match": "Le code de dépôt ({{code}}) a été généré et notifié à l'utilisateur.",
+      "replace": "Drop-off code ({{code}}) was generated and sent to the user."
+    },
+    {
+      "match": "L'action logistique a été annulée. Motif : {{reason}}",
+      "replace": "The logistics flow was canceled. Reason: {{reason}}"
+    },
+    {
+      "match": "({{count}} avis)",
+      "replace": "({{count}} reviews)"
+    },
+    {
       "match": "{{count}} élément",
       "replace": "{{count}} item"
     },
@@ -1824,6 +2003,10 @@
     {
       "match": "{{count}} événement(s)",
       "replace": "{{count}} event(s)"
+    },
+    {
+      "match": "Du {{start}} au {{end}}",
+      "replace": "From {{start}} to {{end}}"
     },
     {
       "match": "+ {{count}} autres",

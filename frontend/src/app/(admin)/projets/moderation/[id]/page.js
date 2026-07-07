@@ -226,6 +226,27 @@ function ProjectModerationDetailContent() {
     const [confirmAction, setConfirmAction] = useState(""); // approved | rejected | ""
     const [rejectReason, setRejectReason] = useState("");
     const [rejectError, setRejectError] = useState("");
+    const [canDeleteProject, setCanDeleteProject] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        const refreshUser = async () => {
+            try {
+                const res = await fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelled) {
+                    setCanDeleteProject(data?.user?.role === "admin");
+                }
+            } catch {
+                // Le layout global gère déjà l'expiration de session.
+            }
+        };
+        refreshUser();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         if (!id) return;
@@ -484,9 +505,11 @@ function ProjectModerationDetailContent() {
                                 <button className="action-button action-button-neutral" style={actionBtn("neutral")} onClick={() => router.push("/projets/moderation")}>
                                     Retour a la moderation
                                 </button>
-                                <button className="action-button action-button-danger" style={actionBtn("danger")} disabled={saving} onClick={removeProject}>
-                                    <Trash2 size={16} /> Supprimer le projet
-                                </button>
+                                {canDeleteProject ? (
+                                    <button className="action-button action-button-danger" style={actionBtn("danger")} disabled={saving} onClick={removeProject}>
+                                        <Trash2 size={16} /> Supprimer le projet
+                                    </button>
+                                ) : null}
                             </div>
                         </div>
                     </div>

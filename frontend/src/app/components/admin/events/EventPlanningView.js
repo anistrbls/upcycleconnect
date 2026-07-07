@@ -49,6 +49,51 @@ const isSameDay = (left, right) => (
     && left.getDate() === right.getDate()
 );
 
+const getDayBounds = (date) => {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+};
+
+const getEventRangeForDay = (item, dayDate) => {
+    const start = new Date(item.dateDebut);
+    const end = new Date(item.dateFin || item.dateDebut);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return null;
+    }
+    const bounds = getDayBounds(dayDate);
+    if (start >= bounds.end || end <= bounds.start) {
+        return null;
+    }
+    return {
+        start: start > bounds.start ? start : bounds.start,
+        end: end < bounds.end ? end : new Date(bounds.end.getTime() - 1),
+        originalStart: start,
+        originalEnd: end,
+    };
+};
+
+const getEventTimeLabelForDay = (item, dayDate, locale) => {
+    const range = getEventRangeForDay(item, dayDate);
+    if (!range) {
+        return "--:--";
+    }
+    const timeOptions = { hour: "2-digit", minute: "2-digit" };
+    const startsToday = isSameDay(range.originalStart, dayDate);
+    const endsToday = isSameDay(range.originalEnd, dayDate);
+    if (startsToday && endsToday) {
+        return `${range.originalStart.toLocaleTimeString(locale, timeOptions)} - ${range.originalEnd.toLocaleTimeString(locale, timeOptions)}`;
+    }
+    if (startsToday) {
+        return `${range.originalStart.toLocaleTimeString(locale, timeOptions)} ‚Üí`;
+    }
+    if (endsToday) {
+        return `‚Üí ${range.originalEnd.toLocaleTimeString(locale, timeOptions)}`;
+    }
+    return "Journ√©e compl√®te";
+};
+
 export default function EventPlanningView({ events = [], title = "Planning des √©v√©nements", subtitle = "√âv√©nements", onOpenEvent }) {
     const router = useRouter();
     const { locale } = useI18n();
@@ -68,14 +113,24 @@ export default function EventPlanningView({ events = [], title = "Planning des √
             if (item.validationStatus === "pending" || item.validationStatus === "rejected") {
                 return;
             }
-            const key = toDayKey(item.dateDebut);
-            if (!key) {
+            const start = new Date(item.dateDebut);
+            const end = new Date(item.dateFin || item.dateDebut);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
                 return;
             }
-            if (!map.has(key)) {
-                map.set(key, []);
+            const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+            const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+            while (cursor <= last) {
+                const range = getEventRangeForDay(item, cursor);
+                if (range) {
+                    const key = toDayKey(cursor);
+                    if (!map.has(key)) {
+                        map.set(key, []);
+                    }
+                    map.get(key).push(item);
+                }
+                cursor.setDate(cursor.getDate() + 1);
             }
-            map.get(key).push(item);
         });
 
         for (const dayEvents of map.values()) {
@@ -227,13 +282,12 @@ export default function EventPlanningView({ events = [], title = "Planning des √
 
                                                     {/* Events */}
                                                     {dayEvents.map(item => {
-                                                        const start = new Date(item.dateDebut);
-                                                        const end = new Date(item.dateFin);
-                                                        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+                                                        const range = getEventRangeForDay(item, dayDate);
+                                                        if (!range) return null;
 
-                                                        let startH = start.getHours() + start.getMinutes() / 60;
-                                                        let endH = end.getHours() + end.getMinutes() / 60;
-                                                        
+                                                        let startH = range.start.getHours() + range.start.getMinutes() / 60;
+                                                        let endH = range.end.getHours() + range.end.getMinutes() / 60;
+
                                                         if (endH <= START_HOUR || startH >= END_HOUR) return null;
                                                         if (startH < START_HOUR) startH = START_HOUR;
                                                         if (endH > END_HOUR) endH = END_HOUR;
@@ -241,8 +295,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                                         const top = (startH - START_HOUR) * HOUR_HEIGHT;
                                                         const height = Math.max((endH - startH) * HOUR_HEIGHT, 25);
 
-                                                        const hourText = start.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
-                                                        const endText = end.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
+                                                        const hourText = getEventTimeLabelForDay(item, dayDate, dateLocale);
 
                                                         return (
                                                             <div
@@ -269,10 +322,10 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                                                     flexDirection: "column",
                                                                     gap: "0.15rem"
                                                                 }}
-                                                                title={`${hourText} - ${endText}`}
+                                                                title={hourText}
                                                             >
                                                                 <span style={{ fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }} data-i18n-user-content="true">{item.name}</span>
-                                                                {height > 35 && <span style={{ opacity: 0.85, fontSize: "0.65rem", fontWeight: 600 }}>{hourText} - {endText}</span>}
+                                                                {height > 35 && <span style={{ opacity: 0.85, fontSize: "0.65rem", fontWeight: 600 }}>{hourText}</span>}
                                                                 {height > 55 && item.lieu && <span style={{ opacity: 0.75, fontSize: "0.65rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} data-i18n-user-content="true">üìç {item.lieu}</span>}
                                                             </div>
                                                         );
@@ -341,10 +394,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
 
                                     <div style={{ display: "grid", gap: "0.25rem" }}>
                                         {dayEvents.slice(0, 3).map((item) => {
-                                            const start = new Date(item.dateDebut);
-                                            const hourText = Number.isNaN(start.getTime())
-                                                ? "--:--"
-                                                : start.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
+                                            const hourText = getEventTimeLabelForDay(item, dayDate, dateLocale);
 
                                             return (
                                                 <span
@@ -398,14 +448,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                     ) : (
                         <div style={{ display: "grid", gap: "0.5rem" }}>
                             {selectedDayEvents.map((item) => {
-                                const start = new Date(item.dateDebut);
-                                const end = new Date(item.dateFin);
-                                const startText = Number.isNaN(start.getTime())
-                                    ? "--:--"
-                                    : start.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
-                                const endText = Number.isNaN(end.getTime())
-                                    ? "--:--"
-                                    : end.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
+                                const timeText = getEventTimeLabelForDay(item, selectedDate, dateLocale);
 
                                 return (
                                     <button
@@ -445,7 +488,7 @@ export default function EventPlanningView({ events = [], title = "Planning des √
                                                 <span className="db-badge" style={{ background: item.status === "valide" ? "#E5FFBC" : "#E6EDEE", textTransform: "capitalize" }}>{item.status}</span>
                                             </div>
                                             <div style={{ display: "flex", flexDirection: "column" }}>
-                                                <span style={{ color: "var(--text-muted)", fontSize: "0.82rem", fontWeight: 500 }}>{startText} - {endText}</span>
+                                                <span style={{ color: "var(--text-muted)", fontSize: "0.82rem", fontWeight: 500 }}>{timeText}</span>
                                                 <span style={{ fontSize: "0.84rem", color: "var(--text-main)", opacity: 0.8 }}>
                                                     {item.lieu ? <span data-i18n-user-content="true">{item.lieu}</span> : "Lieu √† confirmer"}
                                                 </span>

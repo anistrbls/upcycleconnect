@@ -4,9 +4,36 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+func claimsRole(claims jwt.MapClaims) string {
+	role, _ := claims["role"].(string)
+	return strings.TrimSpace(strings.ToLower(role))
+}
+
+func claimsEmployeeRole(claims jwt.MapClaims) string {
+	employeeRole, _ := claims["employeeRole"].(string)
+	return strings.TrimSpace(strings.ToLower(employeeRole))
+}
+
+func claimsIsAdmin(claims jwt.MapClaims) bool {
+	return claimsRole(claims) == "admin"
+}
+
+func claimsCanModerateUsers(claims jwt.MapClaims) bool {
+	return claimsIsAdmin(claims) || (claimsRole(claims) == "salarie" && claimsEmployeeRole(claims) == "moderateur")
+}
+
+func ensureModeratorCanAccessProfessional(repo *Repository, userID int64) (bool, error) {
+	u, err := repo.GetByID(userID)
+	if err != nil {
+		return false, err
+	}
+	return u.Role == RoleProfessionnel, nil
+}
 
 // RegisterRoutes enregistre toutes les routes du module users dans le mux fourni.
 // authMiddleware est la fonction du package main — on la reçoit en paramètre
@@ -23,10 +50,24 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 
 	// Liste + création
 	mux.Handle("/api/admin/users", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, _ := r.Context().Value("authClaims").(jwt.MapClaims)
+		if !claimsCanModerateUsers(claims) {
+			writeError(w, http.StatusForbidden, "moderator only")
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
+			if !claimsIsAdmin(claims) {
+				query := r.URL.Query()
+				query.Set("role", RoleProfessionnel)
+				r.URL.RawQuery = query.Encode()
+			}
 			h.ListHandler(w, r)
 		case http.MethodPost:
+			if !claimsIsAdmin(claims) {
+				writeError(w, http.StatusForbidden, "admin only")
+				return
+			}
 			h.CreateHandler(w, r)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -37,18 +78,71 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	// Le trailing slash "/" capture aussi /42, /42/status, /42/validate
 	mux.Handle("/api/admin/users/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		claims, _ := r.Context().Value("authClaims").(jwt.MapClaims)
+		if !claimsCanModerateUsers(claims) {
+			writeError(w, http.StatusForbidden, "moderator only")
+			return
+		}
 
 		// Routing manuel pour les sous-routes
 		if hasSuffix(path, "/status") {
+			if !claimsIsAdmin(claims) {
+				id, err := parseID(path, "/api/admin/users/")
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "invalid user id")
+					return
+				}
+				allowed, err := ensureModeratorCanAccessProfessional(repo, id)
+				if err != nil {
+					if err == sql.ErrNoRows {
+						writeError(w, http.StatusNotFound, "user not found")
+						return
+					}
+					writeError(w, http.StatusInternalServerError, "could not fetch user")
+					return
+				}
+				if !allowed {
+					writeError(w, http.StatusForbidden, "professional accounts only")
+					return
+				}
+			}
 			h.StatusHandler(w, r)
 			return
 		}
 		if hasSuffix(path, "/reset-password") {
+			if !claimsIsAdmin(claims) {
+				writeError(w, http.StatusForbidden, "admin only")
+				return
+			}
 			h.ResetPasswordHandler(w, r)
 			return
 		}
 
 		// Route de base : GET/PUT/DELETE /api/admin/users/:id
+		if !claimsIsAdmin(claims) {
+			if r.Method != http.MethodGet {
+				writeError(w, http.StatusForbidden, "admin only")
+				return
+			}
+			id, err := parseID(path, "/api/admin/users/")
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid user id")
+				return
+			}
+			allowed, err := ensureModeratorCanAccessProfessional(repo, id)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					writeError(w, http.StatusNotFound, "user not found")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "could not fetch user")
+				return
+			}
+			if !allowed {
+				writeError(w, http.StatusForbidden, "professional accounts only")
+				return
+			}
+		}
 		h.ByIDHandler(w, r)
 	})))
 

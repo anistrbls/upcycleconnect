@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { apiUrl, buildAuthHeaders } from "../../lib/api";
+import { apiUrl, buildAuthHeaders, canModerateForum } from "../../lib/api";
 import { formatDateFR } from "../../lib/formatters";
 import AdminModal from "../admin/AdminModal";
 import { ForumPhotoPicker, ForumPhotosGrid } from "./ForumPhotoAttachments";
@@ -147,7 +147,7 @@ function ForumTopicList({ topics, loading, onSelect, onNew, role }) {
 /* ══════════════════════════════════════════════════════════════════════════
    VUE DÉTAIL D'UN SUJET
    ══════════════════════════════════════════════════════════════════════════ */
-function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusChange }) {
+function ForumTopicDetail({ topicId, role, employeeRole = "", callerUserId, onBack, onTopicStatusChange }) {
     const [topic, setTopic] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -271,7 +271,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
         onBack();
     };
 
-    const canModerate = role === "admin" || role === "salarie";
+    const canModerate = canModerateForum({ role, employeeRole });
 
     if (loading) return <div style={{ padding: "3rem 0", textAlign: "center", color: "var(--text-muted)" }}>Chargement…</div>;
     if (error) return <div style={{ color: "#a23b3b", padding: "1rem" }}>{error}</div>;
@@ -318,7 +318,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
                             )}
                         </>
                     )}
-                    {(topic.isOwn || role === "admin") && (
+                    {(topic.isOwn || canModerate) && (
                         <>
                             <button className="action-cta" style={{ fontSize: "0.78rem", padding: "0.3rem 0.7rem", background: "#EFF3F4", color: "#0F1419" }}
                                 onClick={() => { setEditTopicForm({ title: topic.title, content: topic.content }); setEditTopicOpen(true); }}>
@@ -532,7 +532,7 @@ function ForumTopicDetail({ topicId, role, callerUserId, onBack, onTopicStatusCh
 /* ══════════════════════════════════════════════════════════════════════════
    COMPOSANT PRINCIPAL
    ══════════════════════════════════════════════════════════════════════════ */
-export default function ForumView({ role = "particulier", callerUserId }) {
+export default function ForumView({ role = "particulier", employeeRole = "", callerUserId }) {
     const [topics, setTopics] = useState([]);
     const [loading, setLoading] = useState(false);
     const [selectedTopicId, setSelectedTopicId] = useState(null);
@@ -583,6 +583,7 @@ export default function ForumView({ role = "particulier", callerUserId }) {
             <ForumTopicDetail
                 topicId={selectedTopicId}
                 role={role}
+                employeeRole={employeeRole}
                 callerUserId={callerUserId}
                 onBack={() => { setSelectedTopicId(null); loadTopics(); }}
                 onTopicStatusChange={loadTopics}

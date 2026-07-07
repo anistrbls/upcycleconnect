@@ -9,23 +9,24 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 type downgradePublishedProject struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
+	ID               int64  `json:"id"`
+	Title            string `json:"title"`
+	Status           string `json:"status"`
 	ModerationStatus string `json:"moderationStatus"`
-	UpdatedAt string `json:"updatedAt"`
+	UpdatedAt        string `json:"updatedAt"`
 }
 
 type downgradePublishedBlocker struct {
-	Code                  string                     `json:"code"`
-	Limit                 int                        `json:"limit"`
-	CurrentPublishedCount int                        `json:"currentPublishedCount"`
-	Excess                int                        `json:"excess"`
+	Code                  string                      `json:"code"`
+	Limit                 int                         `json:"limit"`
+	CurrentPublishedCount int                         `json:"currentPublishedCount"`
+	Excess                int                         `json:"excess"`
 	Projects              []downgradePublishedProject `json:"projects"`
 }
 
@@ -74,6 +75,33 @@ func getDowngradePublishedBlocker(repo *Repository, userID int64, limit int) (*d
 		Excess:                count - limit,
 		Projects:              projects,
 	}, nil
+}
+
+func timeOrNilArg(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UTC()
+}
+
+func estimatedSubscriptionPeriodEnd(start, currentPeriodEnd sql.NullTime, billingCycle string) time.Time {
+	now := time.Now().UTC()
+	if currentPeriodEnd.Valid && currentPeriodEnd.Time.After(now) {
+		return currentPeriodEnd.Time.UTC()
+	}
+
+	periodEnd := now
+	if start.Valid && !start.Time.IsZero() {
+		periodEnd = start.Time.UTC()
+	}
+	for !periodEnd.After(now) {
+		if NormalizeSubscriptionBillingCycle(billingCycle) == SubscriptionBillingCycleYear {
+			periodEnd = periodEnd.AddDate(1, 0, 0)
+		} else {
+			periodEnd = periodEnd.AddDate(0, 1, 0)
+		}
+	}
+	return periodEnd.UTC()
 }
 
 func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddleware func(http.Handler) http.Handler) {
@@ -292,18 +320,20 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 		}
 
 		var payload struct {
-			Plan string `json:"plan"`
+			Plan         string `json:"plan"`
+			BillingCycle string `json:"billing_cycle"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid payload")
 			return
 		}
 
-		plan := strings.TrimSpace(payload.Plan)
-		if plan != "pro_essentiel" && plan != "premium_atelier" {
+		plan := NormalizeSubscriptionPlanKey(payload.Plan)
+		if IsFreeSubscriptionPlanKey(plan) {
 			writeError(w, http.StatusBadRequest, "invalid plan")
 			return
 		}
+		billingCycle := NormalizeSubscriptionBillingCycle(payload.BillingCycle)
 
 		cfg, err := getStripeConfig()
 		if err != nil {
@@ -311,13 +341,23 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			return
 		}
 
-		amountCents := int64(1500) // pro_essentiel
-		planName := "Abonnement Pro Essentiel"
-		if plan == "premium_atelier" {
-			amountCents = int64(3000) // premium_atelier
-			planName = "Abonnement Premium Atelier"
+		subscriptionPlan, err := repo.GetSubscriptionPlan(r.Context(), plan)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "subscription plan not found")
+			return
+		}
+		if subscriptionPlan.PriceEuro <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid subscription plan price")
+			return
 		}
 
+		amountCents := int64(subscriptionPlan.PriceEuroForBillingCycle(billingCycle) * 100)
+		planName := "Abonnement " + subscriptionPlan.Name
+		if billingCycle == SubscriptionBillingCycleYear {
+			planName += " annuel"
+		} else {
+			planName += " mensuel"
+		}
 		userIDStr := strconv.FormatInt(userID, 10)
 
 		form := url.Values{}
@@ -326,12 +366,13 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 		form.Set("cancel_url", "http://localhost:3000/finances/abonnement?stripe=cancel")
 		form.Set("metadata[type]", "subscription")
 		form.Set("metadata[plan]", plan)
+		form.Set("metadata[billing_cycle]", billingCycle)
 		form.Set("metadata[user_id]", userIDStr)
 		form.Set("line_items[0][quantity]", "1")
 		form.Set("line_items[0][price_data][currency]", "eur")
 		form.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(amountCents, 10))
 		form.Set("line_items[0][price_data][product_data][name]", planName)
-		form.Set("line_items[0][price_data][recurring][interval]", "month")
+		form.Set("line_items[0][price_data][recurring][interval]", billingCycle)
 
 		var stripeCustID string
 		_ = repo.db.QueryRow(`SELECT stripe_customer_id FROM users WHERE id = $1`, userID).Scan(&stripeCustID)
@@ -405,6 +446,7 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 
 		subType := strings.TrimSpace(session.Metadata["type"])
 		plan := strings.TrimSpace(session.Metadata["plan"])
+		billingCycle := NormalizeSubscriptionBillingCycle(session.Metadata["billing_cycle"])
 		sessionUserID, err := strconv.ParseInt(strings.TrimSpace(session.Metadata["user_id"]), 10, 64)
 		if err != nil || sessionUserID != userID || subType != "subscription" {
 			writeError(w, http.StatusForbidden, "invalid stripe metadata or session ownership")
@@ -421,20 +463,35 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			return
 		}
 
+		subscriptionID := strings.TrimSpace(session.Subscription)
+		var currentPeriodEnd *time.Time
+		if subscriptionID != "" {
+			if sub, fetchErr := fetchStripeSubscription(cfg, subscriptionID); fetchErr == nil {
+				currentPeriodEnd = stripeSubscriptionPeriodEnd(sub.CurrentPeriodEnd)
+			}
+		}
+		if currentPeriodEnd == nil {
+			estimated := estimatedSubscriptionPeriodEnd(sql.NullTime{Time: time.Now().UTC(), Valid: true}, sql.NullTime{}, billingCycle)
+			currentPeriodEnd = &estimated
+		}
+
 		_, err = repo.db.Exec(`
 			UPDATE users 
 			SET subscription_type = $1, 
 			    subscription_start = NOW(), 
 			    stripe_customer_id = $3, 
-			    stripe_subscription_id = $4 
-			WHERE id = $2`, 
-			plan, userID, strings.TrimSpace(session.Customer), strings.TrimSpace(session.Subscription))
+			    stripe_subscription_id = $4,
+			    subscription_billing_cycle = $5,
+			    subscription_current_period_end = $6,
+			    subscription_cancel_at_period_end = false
+			WHERE id = $2`,
+			plan, userID, strings.TrimSpace(session.Customer), subscriptionID, billingCycle, timeOrNilArg(currentPeriodEnd))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not update subscription")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{"confirmed": true, "plan": plan})
+		writeJSON(w, http.StatusOK, map[string]any{"confirmed": true, "plan": plan, "billing_cycle": billingCycle})
 	}))
 
 	mux.Handle("POST /api/pro/unsubscribe", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -444,45 +501,80 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 			return
 		}
 
-		blocker, err := getDowngradePublishedBlocker(repo, userID, 3)
+		var subID, billingCycle sql.NullString
+		var subscriptionStart, currentPeriodEnd sql.NullTime
+		var cancelAtPeriodEnd bool
+		err = repo.db.QueryRow(`
+			SELECT stripe_subscription_id,
+			       subscription_billing_cycle,
+			       subscription_start,
+			       subscription_current_period_end,
+			       subscription_cancel_at_period_end
+			FROM users
+			WHERE id = $1
+		`, userID).Scan(&subID, &billingCycle, &subscriptionStart, &currentPeriodEnd, &cancelAtPeriodEnd)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not validate downgrade constraints")
+			writeError(w, http.StatusInternalServerError, "could not load subscription")
 			return
 		}
-		if blocker != nil {
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error": "Downgrade blocked: archive some published projects first.",
-				"code":  "SUBSCRIPTION_DOWNGRADE_BLOCKED",
-				"blockers": []any{blocker},
+
+		cycle := NormalizeSubscriptionBillingCycle(billingCycle.String)
+		subscriptionID := strings.TrimSpace(subID.String)
+		var periodEnd time.Time
+
+		if cancelAtPeriodEnd {
+			if currentPeriodEnd.Valid {
+				periodEnd = currentPeriodEnd.Time.UTC()
+			} else {
+				periodEnd = estimatedSubscriptionPeriodEnd(subscriptionStart, currentPeriodEnd, cycle)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":                   true,
+				"scheduled":            true,
+				"already_scheduled":    true,
+				"current_period_end":   periodEnd,
+				"cancel_at_period_end": true,
 			})
 			return
 		}
 
-		var subID string
-		_ = repo.db.QueryRow(`SELECT stripe_subscription_id FROM users WHERE id = $1`, userID).Scan(&subID)
-		subID = strings.TrimSpace(subID)
-
-		if subID != "" {
+		if subscriptionID != "" {
 			cfg, err := getStripeConfig()
-			if err == nil && cfg.SecretKey != "" {
-				req, err := http.NewRequest(http.MethodDelete, "https://api.stripe.com/v1/subscriptions/"+url.PathEscape(subID), nil)
-				if err == nil {
-					req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
-					resp, err := http.DefaultClient.Do(req)
-					if err == nil {
-						defer resp.Body.Close()
-					}
-				}
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+				return
+			}
+			sub, err := updateStripeSubscriptionCancelAtPeriodEnd(cfg, subscriptionID, true)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "could not schedule stripe subscription cancellation")
+				return
+			}
+			if stripeEnd := stripeSubscriptionPeriodEnd(sub.CurrentPeriodEnd); stripeEnd != nil {
+				periodEnd = stripeEnd.UTC()
 			}
 		}
+		if periodEnd.IsZero() {
+			periodEnd = estimatedSubscriptionPeriodEnd(subscriptionStart, currentPeriodEnd, cycle)
+		}
 
-		_, err = repo.db.Exec(`UPDATE users SET subscription_type = 'decouverte', subscription_start = NULL, stripe_subscription_id = '' WHERE id = $1`, userID)
+		_, err = repo.db.Exec(`
+			UPDATE users
+			SET subscription_cancel_at_period_end = true,
+			    subscription_current_period_end = $2,
+			    updated_at = NOW()
+			WHERE id = $1
+		`, userID, periodEnd)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not unsubscribe")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":                   true,
+			"scheduled":            true,
+			"current_period_end":   periodEnd,
+			"cancel_at_period_end": true,
+		})
 	}))
 
 	mux.Handle("GET /api/pro/my-reservations", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -691,19 +783,36 @@ func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEve
 		if subType == "subscription" {
 			if event.Type == "checkout.session.completed" {
 				plan := strings.TrimSpace(session.Metadata["plan"])
+				billingCycle := NormalizeSubscriptionBillingCycle(session.Metadata["billing_cycle"])
 				userIDStr := strings.TrimSpace(session.Metadata["user_id"])
 				userID, err := strconv.ParseInt(userIDStr, 10, 64)
 				if err != nil {
 					return false, err
+				}
+				subscriptionID := strings.TrimSpace(session.Subscription)
+				var currentPeriodEnd *time.Time
+				if subscriptionID != "" {
+					if cfg, cfgErr := getStripeConfig(); cfgErr == nil {
+						if sub, fetchErr := fetchStripeSubscription(cfg, subscriptionID); fetchErr == nil {
+							currentPeriodEnd = stripeSubscriptionPeriodEnd(sub.CurrentPeriodEnd)
+						}
+					}
+				}
+				if currentPeriodEnd == nil {
+					estimated := estimatedSubscriptionPeriodEnd(sql.NullTime{Time: time.Now().UTC(), Valid: true}, sql.NullTime{}, billingCycle)
+					currentPeriodEnd = &estimated
 				}
 				_, err = repo.db.Exec(`
 					UPDATE users 
 					SET subscription_type = $1, 
 					    subscription_start = NOW(), 
 					    stripe_customer_id = $3, 
-					    stripe_subscription_id = $4 
-					WHERE id = $2`, 
-					plan, userID, strings.TrimSpace(session.Customer), strings.TrimSpace(session.Subscription))
+					    stripe_subscription_id = $4,
+					    subscription_billing_cycle = $5,
+					    subscription_current_period_end = $6,
+					    subscription_cancel_at_period_end = false
+					WHERE id = $2`,
+					plan, userID, strings.TrimSpace(session.Customer), subscriptionID, billingCycle, timeOrNilArg(currentPeriodEnd))
 				if err != nil {
 					return false, err
 				}
@@ -761,12 +870,33 @@ func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEve
 			return true, nil
 		}
 
+		var currentPeriodEnd *time.Time
+		cancelAtPeriodEnd := false
+		hasSubscriptionDetails := false
+		if subID != "" {
+			if cfg, cfgErr := getStripeConfig(); cfgErr == nil {
+				if sub, fetchErr := fetchStripeSubscription(cfg, subID); fetchErr == nil {
+					currentPeriodEnd = stripeSubscriptionPeriodEnd(sub.CurrentPeriodEnd)
+					cancelAtPeriodEnd = sub.CancelAtPeriodEnd
+					hasSubscriptionDetails = true
+				}
+			}
+		}
+
 		var res sql.Result
 		var err error
 		if subID != "" {
-			res, err = repo.db.Exec(`UPDATE users SET subscription_start = NOW() WHERE stripe_subscription_id = $1`, subID)
-		}
-		if err == nil && subID != "" {
+			res, err = repo.db.Exec(`
+				UPDATE users
+				SET subscription_start = NOW(),
+				    subscription_current_period_end = COALESCE($2::timestamptz, subscription_current_period_end),
+				    subscription_cancel_at_period_end = CASE WHEN $4 THEN $3 ELSE subscription_cancel_at_period_end END,
+				    updated_at = NOW()
+				WHERE stripe_subscription_id = $1
+			`, subID, timeOrNilArg(currentPeriodEnd), cancelAtPeriodEnd, hasSubscriptionDetails)
+			if err != nil {
+				return false, err
+			}
 			rows, _ := res.RowsAffected()
 			if rows > 0 {
 				return true, nil
@@ -775,6 +905,44 @@ func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEve
 
 		if custID != "" {
 			_, _ = repo.db.Exec(`UPDATE users SET subscription_start = NOW() WHERE stripe_customer_id = $1`, custID)
+		}
+		return true, nil
+
+	case "customer.subscription.updated":
+		var sub stripeWebhookSubscription
+		if err := json.Unmarshal(event.Data.Object, &sub); err != nil {
+			return false, err
+		}
+		subID := strings.TrimSpace(sub.ID)
+		custID := strings.TrimSpace(sub.Customer)
+		periodEnd := stripeSubscriptionPeriodEnd(sub.CurrentPeriodEnd)
+		if subID == "" && custID == "" {
+			return true, nil
+		}
+
+		if subID != "" {
+			res, err := repo.db.Exec(`
+				UPDATE users
+				SET subscription_cancel_at_period_end = $2,
+				    subscription_current_period_end = COALESCE($3::timestamptz, subscription_current_period_end),
+				    updated_at = NOW()
+				WHERE stripe_subscription_id = $1
+			`, subID, sub.CancelAtPeriodEnd, timeOrNilArg(periodEnd))
+			if err == nil {
+				rows, _ := res.RowsAffected()
+				if rows > 0 {
+					return true, nil
+				}
+			}
+		}
+		if custID != "" {
+			_, _ = repo.db.Exec(`
+				UPDATE users
+				SET subscription_cancel_at_period_end = $2,
+				    subscription_current_period_end = COALESCE($3::timestamptz, subscription_current_period_end),
+				    updated_at = NOW()
+				WHERE stripe_customer_id = $1
+			`, custID, sub.CancelAtPeriodEnd, timeOrNilArg(periodEnd))
 		}
 		return true, nil
 
@@ -790,7 +958,17 @@ func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEve
 		}
 
 		if subID != "" {
-			res, err := repo.db.Exec(`UPDATE users SET subscription_type = 'decouverte', subscription_start = NULL WHERE stripe_subscription_id = $1`, subID)
+			res, err := repo.db.Exec(`
+				UPDATE users
+				SET subscription_type = 'decouverte',
+				    subscription_start = NULL,
+				    subscription_billing_cycle = 'month',
+				    subscription_current_period_end = NULL,
+				    subscription_cancel_at_period_end = false,
+				    stripe_subscription_id = '',
+				    updated_at = NOW()
+				WHERE stripe_subscription_id = $1
+			`, subID)
 			if err == nil {
 				rows, _ := res.RowsAffected()
 				if rows > 0 {
@@ -799,7 +977,17 @@ func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEve
 			}
 		}
 		if custID != "" {
-			_, _ = repo.db.Exec(`UPDATE users SET subscription_type = 'decouverte', subscription_start = NULL WHERE stripe_customer_id = $1`, custID)
+			_, _ = repo.db.Exec(`
+				UPDATE users
+				SET subscription_type = 'decouverte',
+				    subscription_start = NULL,
+				    subscription_billing_cycle = 'month',
+				    subscription_current_period_end = NULL,
+				    subscription_cancel_at_period_end = false,
+				    stripe_subscription_id = '',
+				    updated_at = NOW()
+				WHERE stripe_customer_id = $1
+			`, custID)
 		}
 		return true, nil
 

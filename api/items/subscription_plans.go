@@ -2,6 +2,8 @@ package items
 
 import (
 	"context"
+	"strings"
+
 	"github.com/lib/pq"
 )
 
@@ -10,6 +12,58 @@ type SubscriptionPlan struct {
 	Name      string   `json:"name"`
 	PriceEuro int      `json:"price_euro"`
 	Features  []string `json:"features"`
+}
+
+type SubscriptionPlanSubscriber struct {
+	ID           int64
+	Email        string
+	DisplayName  string
+	BillingCycle string
+}
+
+const (
+	SubscriptionBillingCycleMonth = "month"
+	SubscriptionBillingCycleYear  = "year"
+)
+
+func NormalizeSubscriptionBillingCycle(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "year", "annual", "annuel", "annee", "année":
+		return SubscriptionBillingCycleYear
+	default:
+		return SubscriptionBillingCycleMonth
+	}
+}
+
+func (p SubscriptionPlan) PriceEuroForBillingCycle(cycle string) int {
+	if NormalizeSubscriptionBillingCycle(cycle) == SubscriptionBillingCycleYear {
+		return p.PriceEuro * 12
+	}
+	return p.PriceEuro
+}
+
+func NormalizeSubscriptionPlanKey(value string) string {
+	return strings.TrimSpace(strings.ToLower(value))
+}
+
+func IsFreeSubscriptionPlanKey(value string) bool {
+	switch NormalizeSubscriptionPlanKey(value) {
+	case "", "decouverte", "gratuit", "none":
+		return true
+	default:
+		return false
+	}
+}
+
+func cleanSubscriptionPlanFeatures(features []string) []string {
+	cleaned := make([]string, 0, len(features))
+	for _, feature := range features {
+		feature = strings.TrimSpace(feature)
+		if feature != "" {
+			cleaned = append(cleaned, feature)
+		}
+	}
+	return cleaned
 }
 
 func (r *Repository) EnsureSubscriptionPlansSchema() error {
@@ -64,10 +118,7 @@ func (r *Repository) EnsureSubscriptionPlansSchema() error {
 			'Mise en avant du profil professionnel ou d’un projet',
 			'Support prioritaire'
 		])
-		ON CONFLICT (key) DO UPDATE SET
-			name = EXCLUDED.name,
-			price_euro = EXCLUDED.price_euro,
-			features = EXCLUDED.features;
+		ON CONFLICT (key) DO NOTHING;
 	`)
 	return err
 }
@@ -92,11 +143,91 @@ func (r *Repository) GetSubscriptionPlans(ctx context.Context) ([]SubscriptionPl
 	return plans, nil
 }
 
-func (r *Repository) UpdateSubscriptionPlan(ctx context.Context, key string, name string, priceEuro int, features []string) error {
-	_, err := r.db.ExecContext(ctx, `
+func (r *Repository) GetSubscriptionPlan(ctx context.Context, key string) (SubscriptionPlan, error) {
+	var p SubscriptionPlan
+	var features []string
+	err := r.db.QueryRowContext(ctx, "SELECT key, name, price_euro, features FROM subscription_plans WHERE key = $1", NormalizeSubscriptionPlanKey(key)).Scan(&p.Key, &p.Name, &p.PriceEuro, pq.Array(&features))
+	if err != nil {
+		return SubscriptionPlan{}, err
+	}
+	p.Features = features
+	return p, nil
+}
+
+func (r *Repository) CreateSubscriptionPlan(ctx context.Context, key string, name string, priceEuro int, features []string) (SubscriptionPlan, error) {
+	var p SubscriptionPlan
+	var savedFeatures []string
+	err := r.db.QueryRowContext(ctx, `
+		INSERT INTO subscription_plans (key, name, price_euro, features)
+		VALUES ($1, $2, $3, $4)
+		RETURNING key, name, price_euro, features
+	`, NormalizeSubscriptionPlanKey(key), strings.TrimSpace(name), priceEuro, pq.Array(cleanSubscriptionPlanFeatures(features))).Scan(&p.Key, &p.Name, &p.PriceEuro, pq.Array(&savedFeatures))
+	if err != nil {
+		return SubscriptionPlan{}, err
+	}
+	p.Features = savedFeatures
+	return p, nil
+}
+
+func (r *Repository) UpdateSubscriptionPlanPrice(ctx context.Context, key string, priceEuro int) (SubscriptionPlan, error) {
+	var p SubscriptionPlan
+	var savedFeatures []string
+	err := r.db.QueryRowContext(ctx, `
 		UPDATE subscription_plans
-		SET name = $1, price_euro = $2, features = $3
-		WHERE key = $4
-	`, name, priceEuro, pq.Array(features), key)
-	return err
+		SET price_euro = $1
+		WHERE key = $2
+		RETURNING key, name, price_euro, features
+	`, priceEuro, NormalizeSubscriptionPlanKey(key)).Scan(&p.Key, &p.Name, &p.PriceEuro, pq.Array(&savedFeatures))
+	if err != nil {
+		return SubscriptionPlan{}, err
+	}
+	p.Features = savedFeatures
+	return p, nil
+}
+
+func (r *Repository) ListActiveSubscribersForSubscriptionPlan(ctx context.Context, key string) ([]SubscriptionPlanSubscriber, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id,
+		       email,
+		       COALESCE(NULLIF(TRIM(company_name), ''), NULLIF(TRIM(firstname || ' ' || lastname), ''), email) AS display_name,
+		       COALESCE(subscription_billing_cycle, 'month') AS subscription_billing_cycle
+		FROM users
+		WHERE role = 'professionnel'
+		  AND status = 'active'
+		  AND subscription_type = $1
+		  AND subscription_start IS NOT NULL
+		  AND (
+		      subscription_cancel_at_period_end = false
+		      OR subscription_current_period_end IS NULL
+		      OR subscription_current_period_end > NOW()
+		  )
+		ORDER BY id ASC
+	`, NormalizeSubscriptionPlanKey(key))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	subscribers := []SubscriptionPlanSubscriber{}
+	for rows.Next() {
+		var subscriber SubscriptionPlanSubscriber
+		if err := rows.Scan(&subscriber.ID, &subscriber.Email, &subscriber.DisplayName, &subscriber.BillingCycle); err != nil {
+			return nil, err
+		}
+		subscriber.BillingCycle = NormalizeSubscriptionBillingCycle(subscriber.BillingCycle)
+		subscribers = append(subscribers, subscriber)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return subscribers, nil
+}
+
+func (r *Repository) HasSubscriptionPlan(ctx context.Context, key string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM subscription_plans WHERE key = $1)`, NormalizeSubscriptionPlanKey(key)).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { listUsers, updateUser } from "../../../lib/userService";
 import { fieldStyle, labelStyle } from "../../../lib/styles";
 import AdminModal from "../AdminModal";
-import { AlertCircle, Check, Search, CreditCard, Users, ShieldAlert, Sparkles, Plus, Trash } from "lucide-react";
+import { Check, Search, CreditCard, Users, ShieldAlert, Sparkles, Plus, Trash } from "lucide-react";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 
 const statusLabel = (status) => {
@@ -53,6 +53,7 @@ export default function SubscriptionsAdminView() {
         price_euro: 0,
         features: [],
     });
+    const [isCreatingPlan, setIsCreatingPlan] = useState(false);
     const [editSaving, setEditSaving] = useState(false);
     const [editError, setEditError] = useState("");
 
@@ -117,10 +118,56 @@ export default function SubscriptionsAdminView() {
         return () => clearTimeout(timer);
     }, [toast]);
 
+    const normalizeSubscriptionType = (value) => {
+        const normalized = String(value || "").trim().toLowerCase();
+        if (!normalized || normalized === "gratuit" || normalized === "none") return "decouverte";
+        return normalized;
+    };
+
+    const isFreeSubscriptionType = (value) => normalizeSubscriptionType(value) === "decouverte";
+
+    const getPlanByKey = (key) => plans.find((p) => p.key === normalizeSubscriptionType(key));
+
+    const getPlanLabel = (key) => {
+        const normalized = normalizeSubscriptionType(key);
+        return getPlanByKey(normalized)?.name || (normalized === "decouverte" ? "Découverte" : normalized);
+    };
+
+    const getPlanMonthlyPrice = (key) => {
+        const price = Number(getPlanByKey(key)?.price_euro ?? 0);
+        return Number.isFinite(price) ? price : 0;
+    };
+
+    const getPlanBadgeStyle = (key) => {
+        const normalized = normalizeSubscriptionType(key);
+        if (normalized === "premium_atelier") {
+            return {
+                background: "linear-gradient(135deg, #3E4A1A 0%, #586B24 100%)",
+                color: "#ffffff",
+                border: "none",
+                boxShadow: "0 2px 6px rgba(62, 74, 26, 0.14)",
+            };
+        }
+        if (normalized === "pro_essentiel" || !isFreeSubscriptionType(normalized)) {
+            return {
+                background: "linear-gradient(135deg, #2E5C60 0%, #1f4548 100%)",
+                color: "#ffffff",
+                border: "none",
+                boxShadow: "0 2px 6px rgba(46, 92, 96, 0.14)",
+            };
+        }
+        return {
+            background: "#f1f5f9",
+            color: "#475569",
+            border: "1px solid #cbd5e1",
+            boxShadow: "none",
+        };
+    };
+
     const handleOpenModal = (user) => {
         setSelectedUser(user);
         setFormData({
-            subscriptionType: user.subscriptionType || "decouverte",
+            subscriptionType: normalizeSubscriptionType(user.subscriptionType),
             subscriptionStart: user.subscriptionStart
                 ? new Date(user.subscriptionStart).toISOString().split("T")[0]
                 : "",
@@ -161,6 +208,7 @@ export default function SubscriptionsAdminView() {
     };
 
     const handleOpenEditPlanModal = (plan) => {
+        setIsCreatingPlan(false);
         setEditFormData({
             key: plan.key,
             name: plan.name,
@@ -171,31 +219,55 @@ export default function SubscriptionsAdminView() {
         setEditModalOpen(true);
     };
 
+    const handleOpenCreatePlanModal = () => {
+        setIsCreatingPlan(true);
+        setEditFormData({
+            key: "",
+            name: "",
+            price_euro: 0,
+            features: [],
+        });
+        setEditError("");
+        setEditModalOpen(true);
+    };
+
     const handleSavePlan = async (e) => {
         e.preventDefault();
         setEditSaving(true);
         setEditError("");
         try {
+            const payload = isCreatingPlan
+                ? editFormData
+                : {
+                    key: editFormData.key,
+                    price_euro: editFormData.price_euro,
+                };
             const res = await fetch(apiUrl("/admin/subscription-plans"), {
-                method: "PUT",
+                method: isCreatingPlan ? "POST" : "PUT",
                 headers: {
                     ...buildAuthHeaders(),
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify(editFormData),
+                body: JSON.stringify(payload),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 throw new Error(data.error || "Impossible de mettre à jour l'offre.");
             }
             setEditModalOpen(false);
+            const notificationStats = data.notifications;
+            const notificationSuffix = notificationStats?.subscribers > 0
+                ? ` ${notificationStats.inAppSent || 0} notification(s) in-app et ${notificationStats.mailSent || 0} e-mail(s) envoyés.`
+                : "";
             setToast({
                 type: "success",
-                msg: `L'offre "${editFormData.name}" a été mise à jour avec succès.`,
+                msg: isCreatingPlan
+                    ? `L'offre "${editFormData.name}" a été créée avec succès.`
+                    : `Le tarif de l'offre "${editFormData.name}" a été mis à jour avec succès.${notificationSuffix}`,
             });
             await loadPlans();
         } catch (err) {
-            setEditError(err.message || "Une erreur est survenue lors de la mise à jour de l'offre.");
+            setEditError(err.message || "Une erreur est survenue lors de l'enregistrement de l'offre.");
         } finally {
             setEditSaving(false);
         }
@@ -203,14 +275,17 @@ export default function SubscriptionsAdminView() {
 
     // Calculate dynamic stats
     const totalPros = users.length;
-    const decouverteCount = users.filter((u) => u.subscriptionType === "decouverte" || u.subscriptionType === "gratuit" || !u.subscriptionType).length;
-    const proCount = users.filter((u) => u.subscriptionType === "pro_essentiel").length;
-    const premiumCount = users.filter((u) => u.subscriptionType === "premium_atelier").length;
-    const paidCount = proCount + premiumCount;
-
-    const proPrice = plans.find((p) => p.key === "pro_essentiel")?.price_euro ?? 15;
-    const premiumPrice = plans.find((p) => p.key === "premium_atelier")?.price_euro ?? 30;
-    const estimatedMRR = (proCount * proPrice) + (premiumCount * premiumPrice);
+    const decouverteCount = users.filter((u) => isFreeSubscriptionType(u.subscriptionType)).length;
+    const paidCount = users.filter((u) => !isFreeSubscriptionType(u.subscriptionType)).length;
+    const estimatedMRR = users.reduce((total, user) => {
+        const type = normalizeSubscriptionType(user.subscriptionType);
+        if (isFreeSubscriptionType(type)) return total;
+        return total + getPlanMonthlyPrice(type);
+    }, 0);
+    const paidPlanSummary = plans
+        .filter((p) => !isFreeSubscriptionType(p.key))
+        .map((p) => `${p.name} ${p.price_euro}€`)
+        .join(" · ");
 
     // Filter users list
     const filteredUsers = users.filter((u) => {
@@ -224,8 +299,7 @@ export default function SubscriptionsAdminView() {
             (u.siret && u.siret.includes(q));
 
         // Subscription type filter
-        let currentType = u.subscriptionType || "decouverte";
-        if (currentType === "gratuit") currentType = "decouverte";
+        const currentType = normalizeSubscriptionType(u.subscriptionType);
         const matchesSubType = subTypeFilter === "all" || currentType === subTypeFilter;
 
         // Status filter
@@ -324,7 +398,9 @@ export default function SubscriptionsAdminView() {
                             <div style={{ fontSize: "1.75rem", fontWeight: "800", color: "#233b3d" }}>
                                 {loading ? "..." : `${estimatedMRR.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €`}
                             </div>
-                            <div style={{ fontSize: "0.78rem", color: "#3e4a1a", marginTop: "0.25rem" }}>15€ (Pro) & 30€ (Premium)</div>
+                            <div style={{ fontSize: "0.78rem", color: "#3e4a1a", marginTop: "0.25rem" }}>
+                                {paidPlanSummary || "Aucune offre payante"}
+                            </div>
                         </div>
                     </div>
 
@@ -376,9 +452,11 @@ export default function SubscriptionsAdminView() {
                             }}
                         >
                             <option value="all">Tous les abonnements</option>
-                            <option value="decouverte">Découverte (Free)</option>
-                            <option value="pro_essentiel">Pro Essentiel (15€)</option>
-                            <option value="premium_atelier">Premium Atelier (30€)</option>
+                            {plans.map((plan) => (
+                                <option key={plan.key} value={plan.key}>
+                                    {plan.name} ({plan.price_euro} €/mois)
+                                </option>
+                            ))}
                         </select>
 
                         <select
@@ -445,8 +523,9 @@ export default function SubscriptionsAdminView() {
                             <tbody>
                                 {filteredUsers.map((user) => {
                                     const st = statusStyle(user.status);
-                                    const isPremiumAtelier = user.subscriptionType === "premium_atelier";
-                                    const isProEssentiel = user.subscriptionType === "pro_essentiel";
+                                    const subscriptionType = normalizeSubscriptionType(user.subscriptionType);
+                                    const badgeStyle = getPlanBadgeStyle(subscriptionType);
+                                    const isPaidPlan = !isFreeSubscriptionType(subscriptionType);
 
                                     return (
                                         <tr key={user.id} className="table-row-hover" style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.2s" }}>
@@ -463,53 +542,19 @@ export default function SubscriptionsAdminView() {
                                                 <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }} data-i18n-user-content="true">{user.email}</div>
                                             </td>
                                             <td style={{ padding: "1.2rem 1.5rem" }}>
-                                                {isPremiumAtelier ? (
-                                                    <span style={{
-                                                        display: "inline-flex",
-                                                        alignItems: "center",
-                                                        padding: "0.3rem 0.75rem",
-                                                        borderRadius: "999px",
-                                                        fontSize: "0.75rem",
-                                                        fontWeight: "700",
-                                                        background: "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)",
-                                                        color: "#ffffff",
-                                                        boxShadow: "0 2px 6px rgba(109, 40, 217, 0.15)",
-                                                        gap: "4px"
-                                                    }}>
-                                                        <Sparkles size={11} />
-                                                        Premium Atelier
-                                                    </span>
-                                                ) : isProEssentiel ? (
-                                                    <span style={{
-                                                        display: "inline-flex",
-                                                        alignItems: "center",
-                                                        padding: "0.3rem 0.75rem",
-                                                        borderRadius: "999px",
-                                                        fontSize: "0.75rem",
-                                                        fontWeight: "700",
-                                                        background: "linear-gradient(135deg, #059669 0%, #047857 100%)",
-                                                        color: "#ffffff",
-                                                        boxShadow: "0 2px 6px rgba(5, 150, 105, 0.15)",
-                                                        gap: "4px"
-                                                    }}>
-                                                        <Sparkles size={11} />
-                                                        Pro Essentiel
-                                                    </span>
-                                                ) : (
-                                                    <span style={{
-                                                        display: "inline-flex",
-                                                        alignItems: "center",
-                                                        padding: "0.3rem 0.75rem",
-                                                        borderRadius: "999px",
-                                                        fontSize: "0.75rem",
-                                                        fontWeight: "600",
-                                                        background: "#f1f5f9",
-                                                        color: "#475569",
-                                                        border: "1px solid #cbd5e1"
-                                                    }}>
-                                                        Découverte
-                                                    </span>
-                                                )}
+                                                <span style={{
+                                                    display: "inline-flex",
+                                                    alignItems: "center",
+                                                    padding: "0.3rem 0.75rem",
+                                                    borderRadius: "999px",
+                                                    fontSize: "0.75rem",
+                                                    fontWeight: isPaidPlan ? "700" : "600",
+                                                    gap: "4px",
+                                                    ...badgeStyle,
+                                                }}>
+                                                    {isPaidPlan && <Sparkles size={11} />}
+                                                    {getPlanLabel(subscriptionType)}
+                                                </span>
                                             </td>
                                             <td style={{ padding: "1.2rem 1.5rem" }}>
                                                 <span style={{ fontWeight: "500", color: user.subscriptionStart ? "var(--text-main)" : "var(--text-muted)" }}>
@@ -554,6 +599,24 @@ export default function SubscriptionsAdminView() {
             ) : (
                 /* Plan Configuration panel */
                 <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+                        <div>
+                            <h2 style={{ margin: 0, color: "var(--text-main)", fontSize: "1.2rem" }}>Catalogue des offres</h2>
+                            <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.88rem" }}>
+                                Ajoutez une formule ou ajustez un tarif sans modifier le code du site.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            className="action-cta task-action-btn"
+                            onClick={handleOpenCreatePlanModal}
+                            style={{ display: "inline-flex", alignItems: "center", gap: "0.45rem" }}
+                        >
+                            <Plus size={16} />
+                            Ajouter une offre
+                        </button>
+                    </div>
+
                     {plansLoading ? (
                         <div style={{ padding: "4rem", textAlign: "center" }}>
                             <div className="loading-spinner" style={{ margin: "0 auto 1rem" }}></div>
@@ -643,7 +706,7 @@ export default function SubscriptionsAdminView() {
                                                 className="config-btn"
                                             >
                                                 <CreditCard size={16} />
-                                                Configurer l'offre
+                                                Modifier le tarif
                                             </button>
                                         </div>
                                     </div>
@@ -675,9 +738,11 @@ export default function SubscriptionsAdminView() {
                             value={formData.subscriptionType}
                             onChange={(e) => setFormData(prev => ({ ...prev, subscriptionType: e.target.value }))}
                         >
-                            <option value="decouverte">Découverte (0 €/mois - Inclus par défaut)</option>
-                            <option value="pro_essentiel">Pro Essentiel (15 €/mois)</option>
-                            <option value="premium_atelier">Premium Atelier (30 €/mois)</option>
+                            {plans.map((plan) => (
+                                <option key={plan.key} value={plan.key}>
+                                    {plan.name} ({plan.price_euro} €/mois{plan.key === "decouverte" ? " - inclus par défaut" : ""})
+                                </option>
+                            ))}
                         </select>
                     </label>
 
@@ -732,24 +797,48 @@ export default function SubscriptionsAdminView() {
                 </form>
             </AdminModal>
 
-            {/* Modal "Modifier l'offre d'abonnement" */}
+            {/* Modal "Créer / modifier l'offre d'abonnement" */}
             <AdminModal
                 open={editModalOpen}
-                title={<>Configurer l'offre : <span data-i18n-user-content="true">{editFormData.name}</span></>}
+                title={isCreatingPlan ? "Ajouter une offre" : <>Modifier le tarif : <span data-i18n-user-content="true">{editFormData.name}</span></>}
                 onClose={() => setEditModalOpen(false)}
             >
                 <form onSubmit={handleSavePlan} style={{ display: "grid", gap: "1.25rem", marginTop: "1rem" }}>
-                    
-                    <label style={labelStyle}>
-                        Nom de l'offre
-                        <input
-                            type="text"
-                            style={fieldStyle}
-                            value={editFormData.name}
-                            onChange={(e) => setEditFormData(prev => ({ ...prev, name: e.target.value }))}
-                            required
-                        />
-                    </label>
+                    {isCreatingPlan ? (
+                        <>
+                            <label style={labelStyle}>
+                                Clé technique
+                                <input
+                                    type="text"
+                                    style={fieldStyle}
+                                    value={editFormData.key}
+                                    onChange={(e) => setEditFormData(prev => ({ ...prev, key: e.target.value.toLowerCase().replace(/\s+/g, "_") }))}
+                                    placeholder="ex: pro_plus"
+                                    required
+                                />
+                                <span style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "0.35rem" }}>
+                                    Lettres minuscules, chiffres, tirets ou underscores. Cette clé ne se modifie plus après création.
+                                </span>
+                            </label>
+
+                            <label style={labelStyle}>
+                                Nom de l'offre
+                                <input
+                                    type="text"
+                                    style={fieldStyle}
+                                    value={editFormData.name}
+                                    onChange={(e) => setEditFormData(prev => ({ ...prev, name: e.target.value }))}
+                                    required
+                                />
+                            </label>
+                        </>
+                    ) : (
+                        <div style={{ background: "#f8fafb", padding: "1rem", borderRadius: "16px", border: "1px solid #e2eaea", fontSize: "0.85rem", color: "var(--text-muted)", display: "grid", gap: "0.35rem" }}>
+                            <div><strong style={{ color: "var(--text-main)" }}>Offre :</strong> <span data-i18n-user-content="true">{editFormData.name}</span></div>
+                            <div><strong style={{ color: "var(--text-main)" }}>Clé :</strong> <span data-i18n-user-content="true">{editFormData.key}</span></div>
+                            <div>Seule la tarification mensuelle est modifiable pour une offre existante.</div>
+                        </div>
+                    )}
 
                     <label style={labelStyle}>
                         Tarif mensuel (en €)
@@ -763,71 +852,73 @@ export default function SubscriptionsAdminView() {
                         />
                     </label>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                        <span style={labelStyle}>Fonctionnalités incluses</span>
-                        <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "0.25rem" }}>
-                            {editFormData.features.map((feat, index) => (
-                                <div key={index} style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.5rem" }}>
-                                    <input
-                                        type="text"
-                                        placeholder="Ex: Assistance VIP 7j/7"
-                                        style={{ ...fieldStyle, flex: 1 }}
-                                        value={feat}
-                                        onChange={(e) => {
-                                            const newFeats = [...editFormData.features];
-                                            newFeats[index] = e.target.value;
-                                            setEditFormData(prev => ({ ...prev, features: newFeats }));
-                                        }}
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const newFeats = editFormData.features.filter((_, idx) => idx !== index);
-                                            setEditFormData(prev => ({ ...prev, features: newFeats }));
-                                        }}
-                                        style={{
-                                            border: "1px solid #fee2e2",
-                                            background: "#fef2f2",
-                                            color: "#ef4444",
-                                            borderRadius: "12px",
-                                            padding: "0.6rem",
-                                            cursor: "pointer",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "center"
-                                        }}
-                                        title="Supprimer cette ligne"
-                                    >
-                                        <Trash size={16} />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
+                    {isCreatingPlan && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                            <span style={labelStyle}>Fonctionnalités incluses</span>
+                            <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                                {editFormData.features.map((feat, index) => (
+                                    <div key={index} style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.5rem" }}>
+                                        <input
+                                            type="text"
+                                            placeholder="Ex: Assistance VIP 7j/7"
+                                            style={{ ...fieldStyle, flex: 1 }}
+                                            value={feat}
+                                            onChange={(e) => {
+                                                const newFeats = [...editFormData.features];
+                                                newFeats[index] = e.target.value;
+                                                setEditFormData(prev => ({ ...prev, features: newFeats }));
+                                            }}
+                                            required
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const newFeats = editFormData.features.filter((_, idx) => idx !== index);
+                                                setEditFormData(prev => ({ ...prev, features: newFeats }));
+                                            }}
+                                            style={{
+                                                border: "1px solid #fee2e2",
+                                                background: "#fef2f2",
+                                                color: "#ef4444",
+                                                borderRadius: "12px",
+                                                padding: "0.6rem",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center"
+                                            }}
+                                            title="Supprimer cette ligne"
+                                        >
+                                            <Trash size={16} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
 
-                        <button
-                            type="button"
-                            onClick={() => setEditFormData(prev => ({ ...prev, features: [...prev.features, ""] }))}
-                            style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: "0.4rem",
-                                border: "1px dashed var(--border-color)",
-                                background: "rgba(0,0,0,0.02)",
-                                borderRadius: "12px",
-                                padding: "0.6rem",
-                                cursor: "pointer",
-                                fontWeight: "600",
-                                fontSize: "0.85rem",
-                                color: "var(--text-main)",
-                                marginTop: "0.25rem"
-                            }}
-                        >
-                            <Plus size={16} />
-                            Ajouter une fonctionnalité
-                        </button>
-                    </div>
+                            <button
+                                type="button"
+                                onClick={() => setEditFormData(prev => ({ ...prev, features: [...prev.features, ""] }))}
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "0.4rem",
+                                    border: "1px dashed var(--border-color)",
+                                    background: "rgba(0,0,0,0.02)",
+                                    borderRadius: "12px",
+                                    padding: "0.6rem",
+                                    cursor: "pointer",
+                                    fontWeight: "600",
+                                    fontSize: "0.85rem",
+                                    color: "var(--text-main)",
+                                    marginTop: "0.25rem"
+                                }}
+                            >
+                                <Plus size={16} />
+                                Ajouter une fonctionnalité
+                            </button>
+                        </div>
+                    )}
 
                     {editError && (
                         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", color: "var(--state-critical)", background: "#fef2f2", padding: "0.75rem", borderRadius: "12px", border: "1px solid #fecaca", fontSize: "0.85rem" }}>

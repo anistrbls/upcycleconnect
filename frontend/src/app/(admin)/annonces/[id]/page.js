@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
+import { TOKEN_KEY, apiUrl, buildAuthHeaders, canModeratePlatform } from "../../../lib/api";
 import DepositCodeQrPanel from "../../../components/DepositCodeQrPanel";
 import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
 import {
@@ -274,6 +274,7 @@ function AnnonceDetailContent() {
     const [detailFetchError, setDetailFetchError] = useState("");
     const [activePhoto,  setActivePhoto]  = useState(0);
     const [isAdmin,      setIsAdmin]      = useState(false);
+    const [canModerateAnnonce, setCanModerateAnnonce] = useState(false);
     const [currentUserID, setCurrentUserID] = useState(null);
     const [ownsAnnonce, setOwnsAnnonce] = useState(false);
     const [showSoldModal, setShowSoldModal] = useState(false);
@@ -317,6 +318,7 @@ function AnnonceDetailContent() {
                 const data = await response.json();
                 if (isMounted) {
                     setIsAdmin(data?.user?.role === "admin");
+                    setCanModerateAnnonce(canModeratePlatform(data?.user));
                     setCurrentUserID(data?.user?.id);
                 }
             } catch {
@@ -429,7 +431,7 @@ function AnnonceDetailContent() {
     }, []);
 
     useEffect(() => {
-        if (!annonce?.id || isAdmin || DISABLE_RATING) return;
+        if (!annonce?.id || canModerateAnnonce || DISABLE_RATING) return;
         if (String(annonce.workflowStatus || "").toLowerCase() !== "picked_up") return;
         const token = typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
         if (!token) return;
@@ -460,7 +462,7 @@ function AnnonceDetailContent() {
         return () => {
             cancelled = true;
         };
-    }, [annonce?.id, annonce?.workflowStatus, annonce?.userId, annonce?.user_id, isAdmin, currentUserID]);
+    }, [annonce?.id, annonce?.workflowStatus, annonce?.userId, annonce?.user_id, canModerateAnnonce, currentUserID]);
 
     useEffect(() => {
         if (!annonce) return;
@@ -589,7 +591,7 @@ function AnnonceDetailContent() {
         
         try {
             let response;
-            if (isAdmin) {
+            if (canModerateAnnonce) {
                 const bodyPayload = {
                     status: normalizedPatch.status,
                     moderationNote: patch.moderationNote || "",
@@ -789,7 +791,7 @@ function AnnonceDetailContent() {
         annonce?.user?.id ??
         null;
     const canManageAnnonce =
-        !isAdmin &&
+        !canModerateAnnonce &&
         (
             (currentUserID !== null &&
                 annonceOwnerId !== null &&
@@ -872,7 +874,7 @@ function AnnonceDetailContent() {
         const ownerId = annonce.userId ?? annonce.user_id;
         const ownerSeesProRating =
             wf === "picked_up" &&
-            !isAdmin &&
+            !canModerateAnnonce &&
             !DISABLE_RATING &&
             currentUserID != null &&
             ownerId != null &&
@@ -1025,7 +1027,7 @@ function AnnonceDetailContent() {
                             fontFamily: "inherit", fontWeight: "600", padding: "0.25rem 0",
                         }}
                     >
-                        <ArrowLeft size={16} /> {isAdmin ? "Retour admin" : "Mes annonces"}
+                        <ArrowLeft size={16} /> {canModerateAnnonce ? "Retour modération" : "Mes annonces"}
                     </button>
 
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -1173,7 +1175,7 @@ function AnnonceDetailContent() {
                     <div style={{ display: "grid", gap: "0.85rem", gridTemplateRows: "1fr auto", height: "100%" }}>
                         <div style={{ background: "#F7F8F7", borderRadius: "24px", padding: "1.15rem", border: "none", display: "flex", flexDirection: "column", justifyContent: "space-between", minHeight: 0 }}>
                             <div>
-                            <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>{isAdmin ? "Vue administrateur" : "Votre annonce"}</div>
+                            <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.45rem" }}>{canModerateAnnonce ? "Vue modération" : "Votre annonce"}</div>
                             <h1 style={{ fontSize: "1.74rem", fontWeight: "700", color: "var(--text-main)", margin: "0 0 0.42rem", lineHeight: "1.12", letterSpacing: "-0.03em" }} data-i18n-user-content="true">{annonce.title}</h1>
                             {isDon ? (
                                 <div style={{ fontSize: "1.5rem", fontWeight: "800", color: "var(--text-main)", marginBottom: "0.7rem" }}>Gratuit</div>
@@ -1223,9 +1225,9 @@ function AnnonceDetailContent() {
                         </div>
 
                             <div>
-                            <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.6rem" }}>{isAdmin ? "Moderation" : "Gestion"}</div>
+                            <div style={{ fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "0.6rem" }}>{canModerateAnnonce ? "Moderation" : "Gestion"}</div>
                             <div style={{ display: "grid", gap: "0.55rem" }}>
-                                {isAdmin ? (
+                                {canModerateAnnonce ? (
                                     <>
                                         {statusKey === "vendu" || statusKey === "vendue" ? (
                                             <div style={{ fontSize: "0.86rem", color: "var(--text-muted)", lineHeight: "1.5", marginBottom: "0.5rem" }}>
@@ -1240,9 +1242,11 @@ function AnnonceDetailContent() {
                                                 <button className="action-button action-button-primary" onClick={setAsPending} style={actionBtn("primary")}>
                                                     Repasser en attente
                                                 </button>
-                                                <button className="action-button action-button-danger" onClick={deleteAnnonce} style={actionBtn("danger")}>
-                                                    Supprimer l'annonce
-                                                </button>
+                                                {isAdmin ? (
+                                                    <button className="action-button action-button-danger" onClick={deleteAnnonce} style={actionBtn("danger")}>
+                                                        Supprimer l'annonce
+                                                    </button>
+                                                ) : null}
                                             </>
                                         ) : (
                                             <>
@@ -1317,7 +1321,7 @@ function AnnonceDetailContent() {
                             </div>
                         </div>
 
-                        {isAdmin && (
+                        {canModerateAnnonce && (
                             <div style={{
                                 background: "#F7F8F7",
                                 borderRadius: "20px",

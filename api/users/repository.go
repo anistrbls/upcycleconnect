@@ -63,6 +63,9 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS intervention_zone TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_type TEXT NOT NULL DEFAULT 'decouverte'`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_start TIMESTAMPTZ`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_billing_cycle TEXT NOT NULL DEFAULT 'month'`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_current_period_end TIMESTAMPTZ`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_cancel_at_period_end BOOLEAN NOT NULL DEFAULT false`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT NOT NULL DEFAULT ''`,
 
@@ -178,7 +181,8 @@ func (r *Repository) Create(p CreatePayload, passwordHash string) (User, error) 
 	if status == "" {
 		status = StatusPending
 	}
-	if p.SubscriptionType != "pro_essentiel" && p.SubscriptionType != "premium_atelier" {
+	p.SubscriptionType = normalizeSubscriptionType(p.SubscriptionType)
+	if p.SubscriptionType == "" {
 		p.SubscriptionType = "decouverte"
 	}
 
@@ -238,7 +242,8 @@ func (r *Repository) Update(id int64, p UpdatePayload) (User, error) {
 	if status == "" {
 		status = StatusPending
 	}
-	if p.SubscriptionType != "pro_essentiel" && p.SubscriptionType != "premium_atelier" {
+	p.SubscriptionType = normalizeSubscriptionType(p.SubscriptionType)
+	if p.SubscriptionType == "" {
 		p.SubscriptionType = "decouverte"
 	}
 
@@ -427,7 +432,8 @@ func scanRows(rows *sql.Rows) (User, error) {
 		u.SessionsInvalidBefore = &t
 	}
 	if u.Role == "professionnel" {
-		if u.SubscriptionType != "pro_essentiel" && u.SubscriptionType != "premium_atelier" {
+		u.SubscriptionType = normalizeSubscriptionType(u.SubscriptionType)
+		if u.SubscriptionType == "" {
 			u.SubscriptionType = "decouverte"
 		}
 	}
@@ -502,9 +508,20 @@ func scanRow(row *sql.Row) (User, error) {
 		u.SessionsInvalidBefore = &t
 	}
 	if u.Role == "professionnel" {
-		if u.SubscriptionType != "pro_essentiel" && u.SubscriptionType != "premium_atelier" {
+		u.SubscriptionType = normalizeSubscriptionType(u.SubscriptionType)
+		if u.SubscriptionType == "" {
 			u.SubscriptionType = "decouverte"
 		}
 	}
 	return u, nil
+}
+
+func normalizeSubscriptionType(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	switch value {
+	case "", "gratuit", "none":
+		return "decouverte"
+	default:
+		return value
+	}
 }

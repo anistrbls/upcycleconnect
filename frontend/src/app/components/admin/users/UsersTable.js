@@ -36,7 +36,7 @@ function Badge({ value, map }) {
 
 // Tableau principal des utilisateurs
 // Reçoit la liste filtrée + les callbacks d'action depuis UsersAdminView.
-export default function UsersTable({ users, loading, onView, onEdit, onDelete, onToggleStatus, onValidate, onResetPassword }) {
+export default function UsersTable({ users, loading, onView, onEdit, onDelete, onToggleStatus, onValidate, onResetPassword, moderatorMode = false }) {
     if (loading) {
         return <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>Chargement…</p>;
     }
@@ -98,6 +98,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
                                     onToggleStatus={onToggleStatus}
                                     onValidate={onValidate}
                                     onResetPassword={onResetPassword}
+                                    moderatorMode={moderatorMode}
                                 />
                             </td>
                         </tr>
@@ -108,7 +109,7 @@ export default function UsersTable({ users, loading, onView, onEdit, onDelete, o
     );
 }
 
-function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus, onValidate, onResetPassword }) {
+function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus, onValidate, onResetPassword, moderatorMode }) {
     const btn = (extra) => ({
         border: "none",
         borderRadius: "999px",
@@ -122,6 +123,21 @@ function ActionButtons({ user, onView, onEdit, onDelete, onToggleStatus, onValid
         boxSizing: "border-box",
         ...extra,
     });
+
+    if (moderatorMode) {
+        return (
+            <div style={{ display: "grid", gridTemplateColumns: user.status === "pending" && user.role === "professionnel" ? "1fr 1fr" : "1fr", gap: "0.3rem", minWidth: "140px" }}>
+                <button style={btn({ background: "#EAF0F1", color: "#233B3D" })} onClick={() => onView(user)}>
+                    Voir
+                </button>
+                {user.status === "pending" && user.role === "professionnel" ? (
+                    <button style={btn({ background: "#C8F5BC", color: "#1E5C1A" })} onClick={() => onValidate(user.id)}>
+                        Valider
+                    </button>
+                ) : null}
+            </div>
+        );
+    }
 
     // Bouton contextuel : Valider (pro en attente) > Réactiver > Suspendre
     const contextual = user.status === "pending" && user.role === "professionnel" ? (

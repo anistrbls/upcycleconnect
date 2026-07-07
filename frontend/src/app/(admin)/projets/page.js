@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { apiUrl, buildAuthHeaders } from "../../lib/api";
+import { apiUrl, buildAuthHeaders, canModeratePlatform } from "../../lib/api";
 
 export default function ProjetsIndexPage() {
     const router = useRouter();
@@ -12,7 +12,7 @@ export default function ProjetsIndexPage() {
             try {
                 const res = await fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() });
                 const data = await res.json();
-                if (data?.user?.role === "admin") {
+                if (canModeratePlatform(data?.user)) {
                     router.replace("/projets/moderation");
                     return;
                 }

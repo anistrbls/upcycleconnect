@@ -7,6 +7,7 @@ import {
     Truck, User, Package, XCircle, FileText, QrCode, AlertCircle, RefreshCw
 } from "lucide-react";
 import { apiUrl, buildAuthHeaders } from "../../../../lib/api";
+import { useI18n } from "../../../../components/i18n/I18nProvider";
 
 const STATUS_MAP = {
     'validated':        { label: 'Sortie Moderation', color: '#6366f1', icon: CheckCircle2, desc: 'En attente de point de dépôt' },
@@ -24,6 +25,7 @@ const STATUS_MAP = {
 export default function LogisticsDetailPage({ params }) {
     const { id } = use(params);
     const router = useRouter();
+    const { locale } = useI18n();
     const [logistics, setLogistics] = useState(null);
     const [loading, setLoading] = useState(true);
 
@@ -59,7 +61,7 @@ export default function LogisticsDetailPage({ params }) {
     const formatDate = (dateString) => {
         if (!dateString) return "Date inconnue";
         const date = new Date(dateString);
-        return date.toLocaleDateString("fr-FR", {
+        return date.toLocaleDateString(locale === "en" ? "en-US" : "fr-FR", {
             day: "numeric", month: "long", year: "numeric",
             hour: "2-digit", minute: "2-digit"
         });

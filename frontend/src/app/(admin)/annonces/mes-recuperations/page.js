@@ -6,6 +6,7 @@ import { TOKEN_KEY, apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { formatBuyerCardPrice } from "../../../lib/salePrice";
 import DepositCodeQrPanel from "../../../components/DepositCodeQrPanel";
 import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
+import { useI18n } from "../../../components/i18n/I18nProvider";
 import {
     CreditCard,
     MapPin,
@@ -533,11 +534,11 @@ async function generatePickupReceiptPDF(item) {
     doc.save(`justificatif_recuperation_${safeRef}.pdf`);
 }
 
-function formatDate(value) {
+function formatDate(value, locale = "fr") {
     if (!value) return "—";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "—";
-    return date.toLocaleDateString("fr-FR", {
+    return date.toLocaleDateString(locale === "en" ? "en-US" : "fr-FR", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
@@ -669,6 +670,7 @@ function SellerRatingBlock({ item, busy, onSubmit }) {
 export default function MyRecoveriesPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { locale } = useI18n();
     const stripeState = (searchParams?.get("stripe") || "").toLowerCase();
     const stripeSessionId = (searchParams?.get("session_id") || "").trim();
     const [items, setItems] = useState([]);
@@ -894,7 +896,7 @@ export default function MyRecoveriesPage() {
                         <div style={styles.detailRow}>
                             <CalendarClock size={18} style={styles.detailIcon} aria-hidden />
                             <div style={{ minWidth: 0 }}>
-                                <p style={styles.detailPrimary}>{formatDate(item.reservedAt || item.reserved_at)}</p>
+                                <p style={styles.detailPrimary}>{formatDate(item.reservedAt || item.reserved_at, locale)}</p>
                                 <p style={styles.detailMuted}>Date à laquelle vous avez réservé cet objet.</p>
                             </div>
                         </div>
@@ -955,7 +957,7 @@ export default function MyRecoveriesPage() {
                                     expiresText={(() => {
                                         const raw = item.pickupCodeExpiresAt || item.pickup_code_expires_at;
                                         if (!raw) return undefined;
-                                        const d = formatDate(raw);
+                                        const d = formatDate(raw, locale);
                                         return d === "—" ? undefined : `Expire le : ${d}`;
                                     })()}
                                 />
@@ -1089,7 +1091,7 @@ export default function MyRecoveriesPage() {
                         </h3>
                         <p style={styles.rowMeta}>
                             <CalendarClock size={12} />
-                            {formatDate(item.reservedAt || item.reserved_at)}
+                            {formatDate(item.reservedAt || item.reserved_at, locale)}
                             {item.transactionRef ? (
                                 <>
                                     <span aria-hidden>·</span>

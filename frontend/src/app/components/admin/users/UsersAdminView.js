@@ -8,7 +8,7 @@ import UserDetails from "./UserDetails";
 import ResetPasswordModal from "./ResetPasswordModal";
 import PlanningAdminView from "../planning/PlanningAdminView";
 import { listUsers, createUser, updateUser, deleteUser, setUserStatus, validateUser, resetUserPassword } from "../../../lib/userService";
-import { apiUrl, buildAuthHeaders } from "../../../lib/api";
+import { apiUrl, buildAuthHeaders, canModeratePlatform, getTokenPayload } from "../../../lib/api";
 
 // Correspondance sous-page → filtre automatique
 // Correspond aux clés définies dans constants.js pour le module "utilisateurs"
@@ -22,6 +22,12 @@ const SUBPAGE_FILTERS = {
 // Composant principal du module Utilisateurs.
 // Reçoit `subpage` pour appliquer le filtre de navigation automatique.
 export default function UsersAdminView({ subpage }) {
+    const [currentUser, setCurrentUser] = useState(() => {
+        const payload = getTokenPayload();
+        return payload ? { role: payload.role, employeeRole: payload.employeeRole || "" } : null;
+    });
+    const isModerator = canModeratePlatform(currentUser) && currentUser?.role !== "admin";
+
     // ── Données ───────────────────────────────────────────────────────────────
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -66,6 +72,7 @@ export default function UsersAdminView({ subpage }) {
             // Si la sous-page impose un filtre, il prend la priorité
             if (pageFilter.role) filters.role = pageFilter.role;
             if (pageFilter.status) filters.status = pageFilter.status;
+            if (isModerator) filters.role = "professionnel";
 
             const items = await listUsers(filters);
             setUsers(items);
@@ -74,7 +81,27 @@ export default function UsersAdminView({ subpage }) {
         } finally {
             setLoading(false);
         }
-    }, [query, role, status, subpage]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [query, role, status, subpage, isModerator]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        let cancelled = false;
+        const refreshUser = async () => {
+            try {
+                const res = await fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelled && data?.user) {
+                    setCurrentUser({ role: data.user.role, employeeRole: data.user.employeeRole || "" });
+                }
+            } catch {
+                // Le layout gère déjà l'expiration de session.
+            }
+        };
+        refreshUser();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const loadPlanning = useCallback(async (targetEmployeeId = "") => {
         setPlanningLoading(true);
@@ -112,12 +139,12 @@ export default function UsersAdminView({ subpage }) {
     }, [subpage]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
-        if (subpage === "planning-equipe") {
+        if (subpage === "planning-equipe" && !isModerator) {
             loadPlanning();
         } else {
             load();
         }
-    }, [subpage, load, loadPlanning]);
+    }, [subpage, isModerator, load, loadPlanning]);
 
     // ── Actions ───────────────────────────────────────────────────────────────
     const handleCreate = async (payload) => {
@@ -189,9 +216,10 @@ export default function UsersAdminView({ subpage }) {
     // Le filtre texte est aussi envoyé à l'API, mais on garde le filtre local
     // pour rendre la recherche instantanée sans requête supplémentaire.
     const visibleUsers = users.filter((u) => {
-        // Sécurité supplémentaire : Si la sous-page impose un rôle (ex: Salariés), 
+        // Sécurité supplémentaire : Si la sous-page impose un rôle (ex: Salariés),
         // on ignore tout utilisateur qui ne correspond pas, même si l'API l'a renvoyé.
         if (pageFilter.role && u.role !== pageFilter.role) return false;
+        if (isModerator && u.role !== "professionnel") return false;
 
         if (!query.trim()) return true;
         const q = query.trim().toLowerCase();
@@ -207,7 +235,7 @@ export default function UsersAdminView({ subpage }) {
         "tous-utilisateurs": "Tous les utilisateurs",
         "planning-equipe": "Planning Équipe",
     };
-    const sectionTitle = SUBPAGE_TITLES[subpage] ?? "Utilisateurs";
+    const sectionTitle = isModerator ? "Comptes professionnels" : (SUBPAGE_TITLES[subpage] ?? "Utilisateurs");
 
     return (
         <>
@@ -217,7 +245,7 @@ export default function UsersAdminView({ subpage }) {
                     <span className="activities-label">Administration</span>
                     <h1>Utilisateurs</h1>
                 </div>
-                {subpage === "planning-equipe" ? (
+                {subpage === "planning-equipe" && !isModerator ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", background: "rgb(248, 251, 251)", padding: "0.5rem 1rem", borderRadius: "12px", border: "1px solid rgb(215, 224, 225)", marginBottom: "0.4rem" }}>
                         <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#333" }}>Filtrer par salarié :</span>
                         
@@ -301,11 +329,11 @@ export default function UsersAdminView({ subpage }) {
                             )}
                         </div>
                     </div>
-                ) : (
+                ) : !isModerator ? (
                     <button className="action-btn primary" onClick={openCreate} type="button" style={{ marginBottom: "0.4rem" }}>
                         + Ajouter un utilisateur
                     </button>
-                )}
+                ) : null}
             </div>
 
             {/* Panneau principal */}
@@ -322,12 +350,12 @@ export default function UsersAdminView({ subpage }) {
                     <div style={{ display: "flex", gap: "0.6rem", marginBottom: "1rem", flexWrap: "wrap", alignItems: "center" }}>
                         <UserFilters
                             query={query}
-                            role={role}
+                            role={isModerator ? "professionnel" : role}
                             status={status}
                             onQueryChange={setQuery}
-                            onRoleChange={setRole}
+                            onRoleChange={isModerator ? undefined : setRole}
                             onStatusChange={setStatus}
-                            hideRole={false}
+                            hideRole={isModerator}
                         />
                     </div>
                 )}
@@ -338,8 +366,8 @@ export default function UsersAdminView({ subpage }) {
                 )}
 
                 {/* Tableau ou Planning */}
-                {subpage === "planning-equipe" ? (
-                    <PlanningAdminView 
+                {subpage === "planning-equipe" && !isModerator ? (
+                    <PlanningAdminView
                         key={planningKey}
                         events={planningEvents}
                         slots={planningSlots}
@@ -360,6 +388,7 @@ export default function UsersAdminView({ subpage }) {
                         onToggleStatus={handleToggleStatus}
                         onValidate={handleValidate}
                         onResetPassword={handleResetPassword}
+                        moderatorMode={isModerator}
                     />
                 )}
             </div>
@@ -378,7 +407,7 @@ export default function UsersAdminView({ subpage }) {
                 open={detailOpen}
                 user={detailUser}
                 onClose={() => setDetailOpen(false)}
-                onEdit={openEdit}
+                onEdit={isModerator ? undefined : openEdit}
             />
 
             {/* Modale réinitialisation mot de passe */}

@@ -55,8 +55,7 @@ export const buildAuthHeaders = (extra = {}) => {
     return { Authorization: `Bearer ${token}`, ...extra };
 };
 
-/** Rôle JWT (`particulier`, `professionnel`, etc.) ou null si absent / illisible. */
-export const getRoleFromToken = () => {
+export const getTokenPayload = () => {
     if (typeof window === "undefined") return null;
     try {
         const t = window.localStorage.getItem(TOKEN_KEY);
@@ -65,12 +64,30 @@ export const getRoleFromToken = () => {
         if (parts.length < 2) return null;
         const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
         const padded = b64 + "===".slice((b64.length + 3) % 4);
-        const payload = JSON.parse(atob(padded));
-        return typeof payload.role === "string" ? payload.role : null;
+        return JSON.parse(atob(padded));
     } catch {
         return null;
     }
 };
+
+/** Rôle JWT (`particulier`, `professionnel`, etc.) ou null si absent / illisible. */
+export const getRoleFromToken = () => {
+    const payload = getTokenPayload();
+    return typeof payload?.role === "string" ? payload.role : null;
+};
+
+export const getEmployeeRoleFromToken = () => {
+    const payload = getTokenPayload();
+    return typeof payload?.employeeRole === "string" ? payload.employeeRole : "";
+};
+
+export const canModeratePlatform = (user = {}) => {
+    const role = String(user?.role || "").trim().toLowerCase();
+    const employeeRole = String(user?.employeeRole || "").trim().toLowerCase();
+    return role === "admin" || (role === "salarie" && employeeRole === "moderateur");
+};
+
+export const canModerateForum = canModeratePlatform;
 
 export const fetchWithTimeout = async (input, init = {}, timeoutMs = 10000) => {
     const controller = new AbortController();

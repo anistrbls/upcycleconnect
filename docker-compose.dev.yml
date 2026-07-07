@@ -68,6 +68,17 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL:-http://localhost:3000/annonces/mes-recuperations?stripe=success&session_id={CHECKOUT_SESSION_ID}}
       - STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL:-http://localhost:3000/annonces/mes-recuperations?stripe=cancel}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-UpcycleConnect}
+      - SMTP_REPLY_TO=${SMTP_REPLY_TO:-}
+      - SMTP_TLS=${SMTP_TLS:-false}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - SMTP_SKIP_VERIFY=${SMTP_SKIP_VERIFY:-false}
+      - SMTP_TIMEOUT_SECONDS=${SMTP_TIMEOUT_SECONDS:-15}
     depends_on:
       db:
         condition: service_healthy

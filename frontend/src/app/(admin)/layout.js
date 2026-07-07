@@ -2,11 +2,45 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { TOKEN_KEY, apiUrl } from "../lib/api";
+import { TOKEN_KEY, apiUrl, canModeratePlatform } from "../lib/api";
 import { NAV_MODULES, PRO_MODULES, PARTICULIER_MODULES, SALARIE_MODULES } from "../lib/constants";
 import { Icon } from "../components/admin/Icon";
 import TutorialOverlay from "../components/shared/TutorialOverlay";
 import LanguageSwitcher from "../components/i18n/LanguageSwitcher";
+
+const navModule = (key) => NAV_MODULES.find((module) => module.key === key);
+
+const cloneModule = (key, overrides = {}) => {
+    const module = navModule(key);
+    if (!module) return null;
+    return { ...module, ...overrides };
+};
+
+const MODERATOR_MODULES = [
+    cloneModule("annonces", {
+        subNav: [{ key: "moderation", label: "Annonces à valider", shortLabel: "Annonces" }],
+    }),
+    cloneModule("utilisateurs", {
+        label: "Comptes pro",
+        shortLabel: "Comptes pro",
+        subNav: [{ key: "tous-utilisateurs", label: "Comptes pro", shortLabel: "Comptes pro" }],
+    }),
+    cloneModule("projets", {
+        subNav: [{ key: "moderation", label: "Projets à valider", shortLabel: "Projets" }],
+    }),
+    cloneModule("forum", {
+        subNav: [{ key: "moderation", label: "Signalements", shortLabel: "Forum" }],
+    }),
+    cloneModule("mon-compte"),
+].filter(Boolean);
+
+const MODERATOR_ALLOWED_SUBROUTES = {
+    annonces: new Set(["moderation"]),
+    utilisateurs: new Set(["tous-utilisateurs"]),
+    projets: new Set(["moderation"]),
+    forum: new Set(["moderation"]),
+    "mon-compte": new Set([""]),
+};
 
 export default function AdminLayout({ children }) {
     const pathname = usePathname();
@@ -360,10 +394,23 @@ export default function AdminLayout({ children }) {
     const isAdmin = user?.role === "admin";
     const isPro = user?.role === "professionnel";
     const isParticulier = user?.role === "particulier";
+    const isModerator = canModeratePlatform(user);
+    const salarieModulesForUser = useMemo(() => {
+        if (isModerator) return MODERATOR_MODULES;
+        return SALARIE_MODULES
+            .filter((module) => module.key !== "salarie-moderation")
+            .map((module) => {
+                if (module.key !== "forum") return module;
+                return {
+                    ...module,
+                    subNav: module.subNav.filter((subItem) => subItem.key !== "moderation"),
+                };
+            });
+    }, [isModerator]);
 
     const getModulesForRole = (admin, salarie, pro, particulier) => {
         if (admin) return NAV_MODULES;
-        if (salarie) return SALARIE_MODULES;
+        if (salarie) return salarieModulesForUser;
         if (pro) return PRO_MODULES;
         if (particulier) return PARTICULIER_MODULES;
         return NAV_MODULES;
@@ -382,7 +429,7 @@ export default function AdminLayout({ children }) {
         const modules = getModulesForRole(isAdmin, isSalarie, isPro, isParticulier);
         const module = modules.find((m) => m.key === moduleKey) || modules[0] || NAV_MODULES[0];
         return { activeModule: module };
-    }, [pathname, isAdmin, isSalarie, isPro, isParticulier]);
+    }, [pathname, isAdmin, isSalarie, isPro, isParticulier, salarieModulesForUser]);
 
     useEffect(() => {
         const verifyToken = async () => {
@@ -439,6 +486,32 @@ export default function AdminLayout({ children }) {
         }
     }, [isSalarie, pathname, currentSubKey, router]);
 
+    useEffect(() => {
+        const moduleKey = pathname.split("/").filter(Boolean)[0] || "";
+        if (!isSalarie || isModerator) return;
+        if (moduleKey === "forum" && currentSubKey === "moderation") {
+            router.replace("/forum/sujets");
+        }
+        if (moduleKey === "salarie-moderation") {
+            router.replace("/salarie-tableau-de-bord/resume");
+        }
+    }, [isSalarie, isModerator, pathname, currentSubKey, router]);
+
+    useEffect(() => {
+        const moduleKey = pathname.split("/").filter(Boolean)[0] || "";
+        if (!isSalarie || !isModerator || !moduleKey) return;
+
+        const allowedSubRoutes = MODERATOR_ALLOWED_SUBROUTES[moduleKey];
+        if (!allowedSubRoutes) {
+            router.replace("/annonces/moderation");
+            return;
+        }
+        if (!allowedSubRoutes.has(currentSubKey)) {
+            const fallbackModule = MODERATOR_MODULES.find((module) => module.key === moduleKey) || MODERATOR_MODULES[0];
+            router.replace(`/${fallbackModule.key}/${fallbackModule.subNav[0].key}`);
+        }
+    }, [isSalarie, isModerator, pathname, currentSubKey, router]);
+
     const handleLogout = () => {
         window.localStorage.removeItem(TOKEN_KEY);
         router.replace("/login");
@@ -487,7 +560,7 @@ export default function AdminLayout({ children }) {
             </div>
         );
     }
-    const userRoleLabel = user?.role === "salarie" ? "Salarié" : user?.role === "particulier" ? "Particulier" : user?.role === "professionnel" ? "Professionnel" : user?.role;
+    const userRoleLabel = user?.role === "salarie" ? (isModerator ? "Modérateur" : "Salarié") : user?.role === "particulier" ? "Particulier" : user?.role === "professionnel" ? "Professionnel" : user?.role;
     const adminAnnoncesSubNav = [
         { key: "mes-annonces", label: "Annonces actives", shortLabel: "Actives" },
         { key: "moderation", label: "Modération", shortLabel: "Modération" },
@@ -541,10 +614,10 @@ export default function AdminLayout({ children }) {
         : isParticulier
         ? PARTICULIER_MODULES.map(m => m.key)
         : isSalarie
-        ? SALARIE_MODULES.map(m => m.key)
+        ? salarieModulesForUser.map(m => m.key)
         : ["vue-globale", "annonces"];
     const isSalarieModule = isSalarie
-        ? SALARIE_MODULES.some(m => m.key === activeModule.key)
+        ? salarieModulesForUser.some(m => m.key === activeModule.key)
         : activeModule.key.startsWith("salarie-");
     const isModuleAllowed = isAdmin || (isSalarie && isSalarieModule) || allowedModulesForUsers.includes(activeModule.key);
 
@@ -552,7 +625,7 @@ export default function AdminLayout({ children }) {
     const displayedModules = isAdmin
         ? NAV_MODULES
         : isSalarie
-        ? SALARIE_MODULES
+        ? salarieModulesForUser
         : isPro
         ? PRO_MODULES
         : isParticulier
