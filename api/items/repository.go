@@ -272,6 +272,9 @@ func (r *Repository) Create(userID int64, p CreatePayload) (Item, error) {
 		it.WeightUnit = p.WeightUnit
 		it.WeightGrams = p.WeightGrams
 		it.Date = it.CreatedAt.Format("02/01/2006")
+		if strings.EqualFold(strings.TrimSpace(it.Status), StatusActive) {
+			_ = r.notifyMaterialAlertSubscribers(context.Background(), it.Title, it.Material, userID)
+		}
 	}
 	return it, err
 }
@@ -304,6 +307,9 @@ func (r *Repository) UpdateStatus(id int64, status, moderationNote, moderationDe
 	if status == "actif" {
 		msg := fmt.Sprintf("Votre annonce '%s' a été validée par la modération et est désormais en ligne.", title)
 		_ = CreateNotification(ctx, r.db, userID, "Annonce validée", msg, "material")
+		var material string
+		_ = r.db.QueryRow(`SELECT COALESCE(material, '') FROM items WHERE id = $1`, id).Scan(&material)
+		_ = r.notifyMaterialAlertSubscribers(ctx, title, material, userID)
 	} else if status == "refusee" || status == "desactivee" || status == "desactive" {
 		reason := moderationNote
 		if reason == "" {
@@ -708,6 +714,26 @@ func (r *Repository) SyncRefundFromStripeWebhook(ctx context.Context, paymentInt
 		`, rid, amountCents, pi); err != nil {
 			return err
 		}
+
+		// NOTIFICATIONS: Refund Issued
+		var buyerID int64
+		_ = r.db.QueryRowContext(ctx, `
+			SELECT reserved_by_user_id FROM item_logistics WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
+			UNION ALL
+			SELECT user_id FROM service_bookings WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
+			UNION ALL
+			SELECT user_id FROM event_registrations WHERE NULLIF(TRIM(stripe_payment_intent_id), '') = $1
+			LIMIT 1
+		`, pi).Scan(&buyerID)
+
+		if buyerID > 0 {
+			var appFinanceRefundIssued bool
+			_ = r.db.QueryRowContext(ctx, `SELECT app_finance_refund_issued FROM user_notification_settings WHERE user_id = $1`, buyerID).Scan(&appFinanceRefundIssued)
+			if appFinanceRefundIssued {
+				_ = CreateNotification(ctx, r.db, buyerID, "Remboursement effectué", "Un remboursement a été traité sur votre compte.", "finance_refund_issued")
+			}
+		}
+
 		return nil
 	case "failed", "canceled":
 		errMsg := fmt.Sprintf("stripe refund %s: %s", rid, status)

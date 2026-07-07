@@ -1,12 +1,15 @@
 package projects
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"upcycleconnect/api/items"
 )
 
 // Handler regroupe les handlers HTTP du module projects.
@@ -17,6 +20,48 @@ type Handler struct {
 // NewHandler crée un nouveau Handler.
 func NewHandler(repo *Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+func (h *Handler) userDisplayName(userID int64) string {
+	if userID <= 0 {
+		return ""
+	}
+	var firstName, lastName string
+	err := h.repo.db.QueryRow(`SELECT COALESCE(firstname, ''), COALESCE(lastname, '') FROM users WHERE id = $1`, userID).Scan(&firstName, &lastName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(firstName + " " + lastName)
+}
+
+func (h *Handler) notifyAdminsModerationRequired(title, message string) {
+	t := strings.TrimSpace(title)
+	m := strings.TrimSpace(message)
+	if t == "" || m == "" {
+		return
+	}
+
+	rows, err := h.repo.db.Query(`
+		SELECT u.id
+		FROM users u
+		LEFT JOIN user_notification_settings s ON s.user_id = u.id
+		WHERE u.role = 'admin'
+		  AND COALESCE(u.status, 'active') = 'active'
+		  AND COALESCE(s.app_enabled, true) = true
+		  AND COALESCE(s.app_moderation, true) = true
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	ctx := context.Background()
+	for rows.Next() {
+		var adminID int64
+		if rows.Scan(&adminID) == nil && adminID > 0 {
+			_ = items.CreateNotification(ctx, h.repo.db, adminID, t, m, "admin_moderation")
+		}
+	}
 }
 
 // getProUserID extrait l'ID du professionnel depuis les claims JWT.
@@ -277,6 +322,14 @@ func (h *Handler) PublishHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	authorName := h.userDisplayName(proUserID)
+	if authorName == "" {
+		authorName = "un professionnel"
+	}
+	h.notifyAdminsModerationRequired(
+		"Nouveau projet à modérer",
+		fmt.Sprintf("Le projet \"%s\" a été soumis à modération par %s.", strings.TrimSpace(p.Title), authorName),
+	)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "brouillon", "moderationStatus": "pending"})
 }
 
@@ -695,6 +748,10 @@ func (h *Handler) LikeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isLiked {
+		h.notifyProjectEngagement(projectID, userID, "like")
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"isLiked":   isLiked,
 		"likeCount": count,
@@ -723,6 +780,10 @@ func (h *Handler) BookmarkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isBookmarked {
+		h.notifyProjectEngagement(projectID, userID, "favorite")
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"isBookmarked":  isBookmarked,
 		"bookmarkCount": count,
@@ -745,4 +806,56 @@ func (h *Handler) FavoritesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
+}
+
+// notifyProjectEngagement envoie une notification au propriétaire du projet.
+func (h *Handler) notifyProjectEngagement(projectID, engagerID int64, engType string) {
+	go func() {
+		var authorID int64
+		var title string
+		err := h.repo.db.QueryRow(`SELECT pro_user_id, title FROM upcycling_projects WHERE id = $1`, projectID).Scan(&authorID, &title)
+		if err != nil {
+			fmt.Printf("notifyProjectEngagement error getting project: %v\n", err)
+			return
+		}
+		if authorID == engagerID {
+			fmt.Printf("notifyProjectEngagement: author is engager\n")
+			return
+		}
+
+		// Check notification settings
+		var enabled bool
+		errSet := h.repo.db.QueryRow(`SELECT app_project_engagement FROM user_notification_settings WHERE user_id = $1`, authorID).Scan(&enabled)
+		if errSet == nil && !enabled {
+			fmt.Printf("notifyProjectEngagement: setting disabled for user %d\n", authorID)
+			return
+		}
+		if errSet != nil {
+			fmt.Printf("notifyProjectEngagement: setting not found, assuming enabled (%v)\n", errSet)
+		}
+		
+		var fname, lname string
+		errUser := h.repo.db.QueryRow(`SELECT firstname, lastname FROM users WHERE id = $1`, engagerID).Scan(&fname, &lname)
+		if errUser != nil {
+			fmt.Printf("notifyProjectEngagement error getting user: %v\n", errUser)
+			return
+		}
+
+		engagerName := strings.TrimSpace(fname + " " + lname)
+		
+		var action string
+		if engType == "like" {
+			action = "aimé"
+		} else {
+			action = "ajouté aux favoris"
+		}
+		msg := fmt.Sprintf("%s a %s votre projet %q.", engagerName, action, title)
+		
+		errNotif := items.CreateNotification(context.Background(), h.repo.db, authorID, "Interaction sur votre projet", msg, "project_engagement")
+		if errNotif != nil {
+			fmt.Printf("notifyProjectEngagement error creating notif: %v\n", errNotif)
+		} else {
+			fmt.Printf("notifyProjectEngagement success: sent to %d for project %d\n", authorID, projectID)
+		}
+	}()
 }

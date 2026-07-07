@@ -25,6 +25,42 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+func financeNotificationColumn(notifType string) string {
+	switch strings.TrimSpace(notifType) {
+	case "finance_payment_confirmed":
+		return "app_finance_payment_confirmed"
+	case "finance_payment_received":
+		return "app_finance_payment_received"
+	case "finance_payment_failed":
+		return "app_finance_payment_failed"
+	case "finance_refund_issued":
+		return "app_finance_refund_issued"
+	case "finance_subscription_active":
+		return "app_finance_subscription_active"
+	default:
+		return ""
+	}
+}
+
+func (r *Repository) createFinanceNotification(ctx context.Context, userID int64, title, message, notifType string) {
+	if userID <= 0 {
+		return
+	}
+	column := financeNotificationColumn(notifType)
+	if column == "" {
+		return
+	}
+
+	var enabled bool
+	query := fmt.Sprintf(`SELECT COALESCE(app_enabled, true) AND COALESCE(%s, true) FROM user_notification_settings WHERE user_id = $1`, column)
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(&enabled)
+	if err == nil && !enabled {
+		return
+	}
+
+	_ = items.CreateNotification(ctx, r.db, userID, title, message, notifType)
+}
+
 // EnsureSchema crée/migre la table service_bookings.
 func (r *Repository) EnsureSchema() error {
 	statements := []string{
@@ -60,7 +96,6 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE service_bookings ADD COLUMN IF NOT EXISTS cancelled_by TEXT NOT NULL DEFAULT ''`,
 		// service_reminder_sent : évite d'envoyer plusieurs rappels pour le même rendez-vous
 		`ALTER TABLE service_bookings ADD COLUMN IF NOT EXISTS service_reminder_sent BOOLEAN NOT NULL DEFAULT false`,
-		// Conseils notifications
 		`CREATE TABLE IF NOT EXISTS user_notification_settings (
 			user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 			app_enabled BOOLEAN NOT NULL DEFAULT true,
@@ -83,6 +118,7 @@ func (r *Repository) EnsureSchema() error {
 			email_booking_expired BOOLEAN NOT NULL DEFAULT true,
 			app_deposit_reminder BOOLEAN NOT NULL DEFAULT true,
 			email_deposit_reminder BOOLEAN NOT NULL DEFAULT true,
+			app_material_alerts BOOLEAN NOT NULL DEFAULT true,
 			display_mode TEXT NOT NULL DEFAULT 'light',
 			language TEXT NOT NULL DEFAULT 'fr',
 			map_type TEXT NOT NULL DEFAULT 'plan',
@@ -94,8 +130,50 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_conseil_engagement BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_project_engagement BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_admin_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_admin_new_conseil BOOLEAN NOT NULL DEFAULT true`,
+		// Prestations — notification de prestation terminée
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_service_completed BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_service_completed BOOLEAN NOT NULL DEFAULT true`,
+		// Prestations — clés manquantes
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_booking_confirmed BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_booking_confirmed BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_booking_request_received BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_booking_request_received BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_prestation_booking_cancelled BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_prestation_booking_cancelled BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_service_reminder BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_service_reminder BOOLEAN NOT NULL DEFAULT true`,
+		// Événements — clés manquantes
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_event_registration BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_event_registration BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_event_cancellation BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_event_cancellation BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_event_reminder BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_event_reminder BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_event_moderation BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_event_moderation BOOLEAN NOT NULL DEFAULT true`,
+		// Forum — clés manquantes
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_forum_new_reply BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_forum_new_reply BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_forum_mention BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_forum_mention BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_forum_moderation BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_forum_moderation BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_admin_forum_report BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_admin_forum_report BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_finance_payment_confirmed BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_finance_payment_confirmed BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_finance_payment_received BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_finance_payment_received BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_finance_payment_failed BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_finance_payment_failed BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_finance_refund_issued BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_finance_refund_issued BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_finance_subscription_active BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_finance_subscription_active BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_material_alerts BOOLEAN NOT NULL DEFAULT true`,
 		// Réservations payées mais encore « pending » (ancien comportement) → confirmées
 		`UPDATE service_bookings
 		 SET status = 'confirmed'
@@ -319,6 +397,36 @@ func (r *Repository) UpdateStatus(id int64, p UpdateStatusPayload) (Booking, err
 		} else if p.Status == BookingCancelled {
 			msg := fmt.Sprintf("Votre réservation pour \"%s\" le %s a été annulée. Un remboursement a été initié le cas échéant.", booking.ServiceName, dateStr)
 			_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation annulée", msg, "booking_cancelled")
+		} else if p.Status == BookingCompleted {
+			// Vérifier que le client a activé cette notification
+			var enabled bool
+			err := r.db.QueryRowContext(ctx,
+				`SELECT COALESCE(app_service_completed, true) FROM user_notification_settings WHERE user_id = $1`,
+				booking.UserID,
+			).Scan(&enabled)
+			if err != nil {
+				// Ligne absente = préférence par défaut = activé
+				enabled = true
+			}
+			if enabled {
+				msg := fmt.Sprintf(
+					"Votre prestation \"%s\" du %s est terminée. Merci de votre confiance !",
+					booking.ServiceName, dateStr,
+				)
+				_ = items.CreateNotification(ctx, r.db, booking.UserID, "Prestation terminée", msg, "service_completed")
+			}
+		}
+
+		if p.PaymentStatus == PaymentPaid {
+			msg := fmt.Sprintf("Le paiement de votre réservation pour \"%s\" le %s est confirmé.", booking.ServiceName, dateStr)
+			r.createFinanceNotification(ctx, booking.UserID, "Paiement confirmé", msg, "finance_payment_confirmed")
+			if booking.EmployeeID != nil && *booking.EmployeeID > 0 && *booking.EmployeeID != booking.UserID {
+				receivedMsg := fmt.Sprintf("Paiement reçu pour la prestation \"%s\" du %s.", booking.ServiceName, dateStr)
+				r.createFinanceNotification(ctx, *booking.EmployeeID, "Paiement reçu", receivedMsg, "finance_payment_received")
+			}
+		} else if p.PaymentStatus == PaymentRefunded {
+			msg := fmt.Sprintf("Le remboursement de votre réservation pour \"%s\" a été traité.", booking.ServiceName)
+			r.createFinanceNotification(ctx, booking.UserID, "Remboursement effectué", msg, "finance_refund_issued")
 		}
 	}
 
@@ -439,6 +547,11 @@ func (r *Repository) ConfirmPayment(bookingID int64, sessionID, paymentIntentID 
 		dateStr := booking.BookingDate.Format("02/01/2006 à 15h04")
 		msg := fmt.Sprintf("Votre réservation pour la prestation \"%s\" le %s a été confirmée !", booking.ServiceName, dateStr)
 		_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation confirmée", msg, "booking_confirmed")
+		r.createFinanceNotification(ctx, booking.UserID, "Paiement confirmé", msg, "finance_payment_confirmed")
+		if booking.EmployeeID != nil && *booking.EmployeeID > 0 && *booking.EmployeeID != booking.UserID {
+			receivedMsg := fmt.Sprintf("Paiement reçu pour la prestation \"%s\" du %s.", booking.ServiceName, dateStr)
+			r.createFinanceNotification(ctx, *booking.EmployeeID, "Paiement reçu", receivedMsg, "finance_payment_received")
+		}
 	}
 	return booking, nil
 }
@@ -539,8 +652,46 @@ type NotificationSettings struct {
     AppNewConseil         bool  `json:"app_new_conseil"`
     EmailNewConseil       bool  `json:"email_new_conseil"`
     AppConseilEngagement  bool  `json:"app_conseil_engagement"`
+    AppProjectEngagement  bool  `json:"app_project_engagement"`
     AppAdminNewConseil    bool  `json:"app_admin_new_conseil"`
     EmailAdminNewConseil  bool  `json:"email_admin_new_conseil"`
+    AppServiceCompleted              bool  `json:"app_service_completed"`
+    EmailServiceCompleted            bool  `json:"email_service_completed"`
+    AppBookingConfirmed              bool  `json:"app_booking_confirmed"`
+    EmailBookingConfirmed            bool  `json:"email_booking_confirmed"`
+    AppBookingRequestReceived        bool  `json:"app_booking_request_received"`
+    EmailBookingRequestReceived      bool  `json:"email_booking_request_received"`
+    AppPrestationBookingCancelled    bool  `json:"app_prestation_booking_cancelled"`
+    EmailPrestationBookingCancelled  bool  `json:"email_prestation_booking_cancelled"`
+    AppServiceReminder               bool  `json:"app_service_reminder"`
+    EmailServiceReminder             bool  `json:"email_service_reminder"`
+    AppEventRegistration             bool  `json:"app_event_registration"`
+    EmailEventRegistration           bool  `json:"email_event_registration"`
+    AppEventCancellation             bool  `json:"app_event_cancellation"`
+    EmailEventCancellation           bool  `json:"email_event_cancellation"`
+    AppEventReminder                 bool  `json:"app_event_reminder"`
+    EmailEventReminder               bool  `json:"email_event_reminder"`
+    AppEventModeration               bool  `json:"app_event_moderation"`
+    EmailEventModeration             bool  `json:"email_event_moderation"`
+    AppForumNewReply                 bool  `json:"app_forum_new_reply"`
+    EmailForumNewReply               bool  `json:"email_forum_new_reply"`
+    AppForumMention                  bool  `json:"app_forum_mention"`
+    EmailForumMention                bool  `json:"email_forum_mention"`
+    AppForumModeration               bool  `json:"app_forum_moderation"`
+    EmailForumModeration             bool  `json:"email_forum_moderation"`
+    AppAdminForumReport              bool  `json:"app_admin_forum_report"`
+    EmailAdminForumReport            bool  `json:"email_admin_forum_report"`
+    AppFinancePaymentConfirmed       bool  `json:"app_finance_payment_confirmed"`
+    EmailFinancePaymentConfirmed     bool  `json:"email_finance_payment_confirmed"`
+    AppFinancePaymentReceived        bool  `json:"app_finance_payment_received"`
+    EmailFinancePaymentReceived      bool  `json:"email_finance_payment_received"`
+    AppFinancePaymentFailed          bool  `json:"app_finance_payment_failed"`
+    EmailFinancePaymentFailed        bool  `json:"email_finance_payment_failed"`
+    AppFinanceRefundIssued           bool  `json:"app_finance_refund_issued"`
+    EmailFinanceRefundIssued         bool  `json:"email_finance_refund_issued"`
+	AppFinanceSubscriptionActive     bool  `json:"app_finance_subscription_active"`
+	EmailFinanceSubscriptionActive   bool  `json:"email_finance_subscription_active"`
+	AppMaterialAlerts                bool  `json:"app_material_alerts"`
     DisplayMode           string `json:"displayMode"`
     Language              string `json:"language"`
     MapType               string `json:"mapType"`
@@ -557,7 +708,26 @@ func (r *Repository) GetUserNotificationSettings(userID int64) (NotificationSett
         app_rating_received, email_rating_received, app_booking_cancelled, email_booking_cancelled,
         app_booking_expired, email_booking_expired, app_deposit_reminder, email_deposit_reminder,
         app_conseil_moderation, email_conseil_moderation, app_new_conseil, email_new_conseil,
-        app_conseil_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        app_conseil_engagement, app_project_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        COALESCE(app_service_completed, true), COALESCE(email_service_completed, true),
+        COALESCE(app_booking_confirmed, true), COALESCE(email_booking_confirmed, true),
+        COALESCE(app_booking_request_received, true), COALESCE(email_booking_request_received, true),
+        COALESCE(app_prestation_booking_cancelled, true), COALESCE(email_prestation_booking_cancelled, true),
+        COALESCE(app_service_reminder, true), COALESCE(email_service_reminder, true),
+        COALESCE(app_event_registration, true), COALESCE(email_event_registration, true),
+        COALESCE(app_event_cancellation, true), COALESCE(email_event_cancellation, true),
+        COALESCE(app_event_reminder, true), COALESCE(email_event_reminder, true),
+        COALESCE(app_event_moderation, true), COALESCE(email_event_moderation, true),
+        COALESCE(app_forum_new_reply, true), COALESCE(email_forum_new_reply, true),
+        COALESCE(app_forum_mention, true), COALESCE(email_forum_mention, true),
+        COALESCE(app_forum_moderation, true), COALESCE(email_forum_moderation, true),
+        COALESCE(app_admin_forum_report, true), COALESCE(email_admin_forum_report, true),
+        COALESCE(app_finance_payment_confirmed, true), COALESCE(email_finance_payment_confirmed, true),
+        COALESCE(app_finance_payment_received, true), COALESCE(email_finance_payment_received, true),
+        COALESCE(app_finance_payment_failed, true), COALESCE(email_finance_payment_failed, true),
+		COALESCE(app_finance_refund_issued, true), COALESCE(email_finance_refund_issued, true),
+		COALESCE(app_finance_subscription_active, true), COALESCE(email_finance_subscription_active, true),
+		COALESCE(app_material_alerts, true),
         display_mode, language, map_type, show_phone_publicly, show_email_publicly
         FROM user_notification_settings WHERE user_id = $1`, userID)
     err := row.Scan(&s.UserID, &s.AppEnabled, &s.EmailEnabled, &s.AppModeration, &s.EmailModeration,
@@ -566,15 +736,52 @@ func (r *Repository) GetUserNotificationSettings(userID int64) (NotificationSett
         &s.AppRatingReceived, &s.EmailRatingReceived, &s.AppBookingCancelled, &s.EmailBookingCancelled,
         &s.AppBookingExpired, &s.EmailBookingExpired, &s.AppDepositReminder, &s.EmailDepositReminder,
         &s.AppConseilModeration, &s.EmailConseilModeration, &s.AppNewConseil, &s.EmailNewConseil,
-        &s.AppConseilEngagement, &s.AppAdminNewConseil, &s.EmailAdminNewConseil,
+        &s.AppConseilEngagement, &s.AppProjectEngagement, &s.AppAdminNewConseil, &s.EmailAdminNewConseil,
+        &s.AppServiceCompleted, &s.EmailServiceCompleted,
+        &s.AppBookingConfirmed, &s.EmailBookingConfirmed,
+        &s.AppBookingRequestReceived, &s.EmailBookingRequestReceived,
+        &s.AppPrestationBookingCancelled, &s.EmailPrestationBookingCancelled,
+        &s.AppServiceReminder, &s.EmailServiceReminder,
+        &s.AppEventRegistration, &s.EmailEventRegistration,
+        &s.AppEventCancellation, &s.EmailEventCancellation,
+        &s.AppEventReminder, &s.EmailEventReminder,
+        &s.AppEventModeration, &s.EmailEventModeration,
+        &s.AppForumNewReply, &s.EmailForumNewReply,
+        &s.AppForumMention, &s.EmailForumMention,
+        &s.AppForumModeration, &s.EmailForumModeration,
+        &s.AppAdminForumReport, &s.EmailAdminForumReport,
+        &s.AppFinancePaymentConfirmed, &s.EmailFinancePaymentConfirmed,
+        &s.AppFinancePaymentReceived, &s.EmailFinancePaymentReceived,
+        &s.AppFinancePaymentFailed, &s.EmailFinancePaymentFailed,
+		&s.AppFinanceRefundIssued, &s.EmailFinanceRefundIssued,
+		&s.AppFinanceSubscriptionActive, &s.EmailFinanceSubscriptionActive,
+		&s.AppMaterialAlerts,
         &s.DisplayMode, &s.Language, &s.MapType, &s.ShowPhonePublicly, &s.ShowEmailPublicly)
     if err != nil {
         if err == sql.ErrNoRows {
-            // Return default settings if none exist
             return NotificationSettings{
                 UserID: userID, AppEnabled: true, EmailEnabled: true, DisplayMode: "light", Language: "fr", MapType: "plan",
                 AppConseilModeration: true, EmailConseilModeration: true, AppNewConseil: true, EmailNewConseil: true,
-                AppConseilEngagement: true, AppAdminNewConseil: true, EmailAdminNewConseil: true,
+                AppConseilEngagement: true, AppProjectEngagement: true, AppAdminNewConseil: true, EmailAdminNewConseil: true,
+                AppServiceCompleted: true, EmailServiceCompleted: true,
+                AppBookingConfirmed: true, EmailBookingConfirmed: true,
+                AppBookingRequestReceived: true, EmailBookingRequestReceived: true,
+                AppPrestationBookingCancelled: true, EmailPrestationBookingCancelled: true,
+                AppServiceReminder: true, EmailServiceReminder: true,
+                AppEventRegistration: true, EmailEventRegistration: true,
+                AppEventCancellation: true, EmailEventCancellation: true,
+                AppEventReminder: true, EmailEventReminder: true,
+                AppEventModeration: true, EmailEventModeration: true,
+                AppForumNewReply: true, EmailForumNewReply: true,
+                AppForumMention: true, EmailForumMention: true,
+                AppForumModeration: true, EmailForumModeration: true,
+                AppAdminForumReport: true, EmailAdminForumReport: true,
+                AppFinancePaymentConfirmed: true, EmailFinancePaymentConfirmed: true,
+                AppFinancePaymentReceived: true, EmailFinancePaymentReceived: true,
+                AppFinancePaymentFailed: true, EmailFinancePaymentFailed: true,
+                AppFinanceRefundIssued: true, EmailFinanceRefundIssued: true,
+				AppFinanceSubscriptionActive: true, EmailFinanceSubscriptionActive: true,
+				AppMaterialAlerts: true,
             }, nil
         }
         return NotificationSettings{}, err
@@ -591,10 +798,32 @@ func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) erro
         app_rating_received, email_rating_received, app_booking_cancelled, email_booking_cancelled,
         app_booking_expired, email_booking_expired, app_deposit_reminder, email_deposit_reminder,
         app_conseil_moderation, email_conseil_moderation, app_new_conseil, email_new_conseil,
-        app_conseil_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        app_conseil_engagement, app_project_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        app_service_completed, email_service_completed,
+        app_booking_confirmed, email_booking_confirmed,
+        app_booking_request_received, email_booking_request_received,
+        app_prestation_booking_cancelled, email_prestation_booking_cancelled,
+        app_service_reminder, email_service_reminder,
+        app_event_registration, email_event_registration,
+        app_event_cancellation, email_event_cancellation,
+        app_event_reminder, email_event_reminder,
+        app_event_moderation, email_event_moderation,
+        app_forum_new_reply, email_forum_new_reply,
+        app_forum_mention, email_forum_mention,
+        app_forum_moderation, email_forum_moderation,
+        app_admin_forum_report, email_admin_forum_report,
+        app_finance_payment_confirmed, email_finance_payment_confirmed,
+        app_finance_payment_received, email_finance_payment_received,
+        app_finance_payment_failed, email_finance_payment_failed,
+        app_finance_refund_issued, email_finance_refund_issued,
+        app_finance_subscription_active, email_finance_subscription_active,
+		app_material_alerts,
         display_mode, language, map_type, show_phone_publicly, show_email_publicly
     ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+        $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
+        $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
+		$61,$62,$63,$64,$65,$66,$67,$68,$69,$70,$71
     ) ON CONFLICT (user_id) DO UPDATE SET
         app_enabled = EXCLUDED.app_enabled,
         email_enabled = EXCLUDED.email_enabled,
@@ -621,8 +850,46 @@ func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) erro
         app_new_conseil = EXCLUDED.app_new_conseil,
         email_new_conseil = EXCLUDED.email_new_conseil,
         app_conseil_engagement = EXCLUDED.app_conseil_engagement,
+        app_project_engagement = EXCLUDED.app_project_engagement,
         app_admin_new_conseil = EXCLUDED.app_admin_new_conseil,
         email_admin_new_conseil = EXCLUDED.email_admin_new_conseil,
+        app_service_completed = EXCLUDED.app_service_completed,
+        email_service_completed = EXCLUDED.email_service_completed,
+        app_booking_confirmed = EXCLUDED.app_booking_confirmed,
+        email_booking_confirmed = EXCLUDED.email_booking_confirmed,
+        app_booking_request_received = EXCLUDED.app_booking_request_received,
+        email_booking_request_received = EXCLUDED.email_booking_request_received,
+        app_prestation_booking_cancelled = EXCLUDED.app_prestation_booking_cancelled,
+        email_prestation_booking_cancelled = EXCLUDED.email_prestation_booking_cancelled,
+        app_service_reminder = EXCLUDED.app_service_reminder,
+        email_service_reminder = EXCLUDED.email_service_reminder,
+        app_event_registration = EXCLUDED.app_event_registration,
+        email_event_registration = EXCLUDED.email_event_registration,
+        app_event_cancellation = EXCLUDED.app_event_cancellation,
+        email_event_cancellation = EXCLUDED.email_event_cancellation,
+        app_event_reminder = EXCLUDED.app_event_reminder,
+        email_event_reminder = EXCLUDED.email_event_reminder,
+        app_event_moderation = EXCLUDED.app_event_moderation,
+        email_event_moderation = EXCLUDED.email_event_moderation,
+        app_forum_new_reply = EXCLUDED.app_forum_new_reply,
+        email_forum_new_reply = EXCLUDED.email_forum_new_reply,
+        app_forum_mention = EXCLUDED.app_forum_mention,
+        email_forum_mention = EXCLUDED.email_forum_mention,
+        app_forum_moderation = EXCLUDED.app_forum_moderation,
+        email_forum_moderation = EXCLUDED.email_forum_moderation,
+        app_admin_forum_report = EXCLUDED.app_admin_forum_report,
+        email_admin_forum_report = EXCLUDED.email_admin_forum_report,
+        app_finance_payment_confirmed = EXCLUDED.app_finance_payment_confirmed,
+        email_finance_payment_confirmed = EXCLUDED.email_finance_payment_confirmed,
+        app_finance_payment_received = EXCLUDED.app_finance_payment_received,
+        email_finance_payment_received = EXCLUDED.email_finance_payment_received,
+        app_finance_payment_failed = EXCLUDED.app_finance_payment_failed,
+        email_finance_payment_failed = EXCLUDED.email_finance_payment_failed,
+        app_finance_refund_issued = EXCLUDED.app_finance_refund_issued,
+        email_finance_refund_issued = EXCLUDED.email_finance_refund_issued,
+        app_finance_subscription_active = EXCLUDED.app_finance_subscription_active,
+        email_finance_subscription_active = EXCLUDED.email_finance_subscription_active,
+		app_material_alerts = EXCLUDED.app_material_alerts,
         display_mode = EXCLUDED.display_mode,
         language = EXCLUDED.language,
         map_type = EXCLUDED.map_type,
@@ -635,7 +902,26 @@ func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) erro
         s.AppRatingReceived, s.EmailRatingReceived, s.AppBookingCancelled, s.EmailBookingCancelled,
         s.AppBookingExpired, s.EmailBookingExpired, s.AppDepositReminder, s.EmailDepositReminder,
         s.AppConseilModeration, s.EmailConseilModeration, s.AppNewConseil, s.EmailNewConseil,
-        s.AppConseilEngagement, s.AppAdminNewConseil, s.EmailAdminNewConseil,
+        s.AppConseilEngagement, s.AppProjectEngagement, s.AppAdminNewConseil, s.EmailAdminNewConseil,
+        s.AppServiceCompleted, s.EmailServiceCompleted,
+        s.AppBookingConfirmed, s.EmailBookingConfirmed,
+        s.AppBookingRequestReceived, s.EmailBookingRequestReceived,
+        s.AppPrestationBookingCancelled, s.EmailPrestationBookingCancelled,
+        s.AppServiceReminder, s.EmailServiceReminder,
+        s.AppEventRegistration, s.EmailEventRegistration,
+        s.AppEventCancellation, s.EmailEventCancellation,
+        s.AppEventReminder, s.EmailEventReminder,
+        s.AppEventModeration, s.EmailEventModeration,
+        s.AppForumNewReply, s.EmailForumNewReply,
+        s.AppForumMention, s.EmailForumMention,
+        s.AppForumModeration, s.EmailForumModeration,
+        s.AppAdminForumReport, s.EmailAdminForumReport,
+        s.AppFinancePaymentConfirmed, s.EmailFinancePaymentConfirmed,
+        s.AppFinancePaymentReceived, s.EmailFinancePaymentReceived,
+        s.AppFinancePaymentFailed, s.EmailFinancePaymentFailed,
+        s.AppFinanceRefundIssued, s.EmailFinanceRefundIssued,
+        s.AppFinanceSubscriptionActive, s.EmailFinanceSubscriptionActive,
+		s.AppMaterialAlerts,
         s.DisplayMode, s.Language, s.MapType, s.ShowPhonePublicly, s.ShowEmailPublicly)
     return err
 }

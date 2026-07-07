@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { apiUrl, buildAuthHeaders } from "../../../lib/api";
 import { DISTINCT, FLUX_DISTINCT, LEVEL_COLORS } from "../../../lib/constants";
 import { Icon, SearchIcon } from "../Icon";
+import { Gift, Tag, Calendar, CalendarDays, Hammer, CheckCircle, Trash2 } from "lucide-react";
 
 function ProVueGlobaleHome({ title }) {
     const tiles = [
@@ -481,14 +482,61 @@ export default function DashboardModuleView({ subpage, title }) {
                                 <span className="section-title">Répartition des activités</span>
                                 <span className="db-badge">Ce mois</span>
                             </div>
-                            <div className="stat-list">
-                                <div className="stat-row"><span className="stat-label">Annonces de don</span><span className="stat-value">{safe("donItems")}</span><div className="stat-bar"><div className="stat-bar-fill" style={{ width: "68%", background: DISTINCT.blue }}></div></div></div>
-                                <div className="stat-row"><span className="stat-label">Annonces de vente</span><span className="stat-value">{safe("venteItems")}</span><div className="stat-bar"><div className="stat-bar-fill" style={{ width: "59%", background: DISTINCT.orange }}></div></div></div>
-                                <div className="stat-row"><span className="stat-label">Réservations formations</span><span className="stat-value">0</span><div className="stat-bar"><div className="stat-bar-fill" style={{ width: "0%", background: DISTINCT.emerald }}></div></div></div>
-                                <div className="stat-row"><span className="stat-label">Événements à venir</span><span className="stat-value">0</span><div className="stat-bar"><div className="stat-bar-fill" style={{ width: "0%", background: DISTINCT.violet }}></div></div></div>
-                                <div className="stat-row"><span className="stat-label">Projets d'upcycling suivis</span><span className="stat-value">{safe("upcyclingProjects")}</span><div className="stat-bar"><div className="stat-bar-fill" style={{ width: "43%", background: DISTINCT.cyan }}></div></div></div>
-                                <div className="stat-row"><span className="stat-label">Taux de validation annonces</span><span className="stat-value stat-highlight">-- %</span><div className="stat-bar"><div className="stat-bar-fill" style={{ width: "0%", background: DISTINCT.magenta }}></div></div></div>
-                                <div className="stat-row"><span className="stat-label">Remplissage moyen conteneurs</span><span className="stat-value stat-warn">-- %</span><div className="stat-bar"><div className="stat-bar-fill" style={{ width: "0%", background: DISTINCT.red }}></div></div></div>
+                            <div className="activity-grid" style={{
+                                display: "grid",
+                                gridTemplateColumns: "1fr 1fr",
+                                gap: "1rem",
+                                marginTop: "1rem"
+                            }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                                    <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(59, 130, 246, 0.1)", color: DISTINCT.blue }}><Gift size={18} /></div>
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "500" }}>Annonces de don</span>
+                                        <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "var(--text-main)" }}>{safe("donItems")}</span>
+                                    </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                                    <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(249, 115, 22, 0.1)", color: DISTINCT.orange }}><Tag size={18} /></div>
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "500" }}>Annonces de vente</span>
+                                        <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "var(--text-main)" }}>{safe("venteItems")}</span>
+                                    </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                                    <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(16, 185, 129, 0.1)", color: DISTINCT.emerald }}><Calendar size={18} /></div>
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "500" }}>Résev. formations</span>
+                                        <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "var(--text-main)" }}>{safe("resFormations")}</span>
+                                    </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                                    <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(139, 92, 246, 0.1)", color: DISTINCT.violet }}><CalendarDays size={18} /></div>
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "500" }}>Événements à venir</span>
+                                        <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "var(--text-main)" }}>{safe("evtAvenir")}</span>
+                                    </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                                    <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(6, 182, 212, 0.1)", color: DISTINCT.cyan }}><Hammer size={18} /></div>
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "500" }}>Projets upcycling</span>
+                                        <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "var(--text-main)" }}>{safe("upcyclingProjects")}</span>
+                                    </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                                    <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(217, 70, 239, 0.1)", color: DISTINCT.magenta }}><CheckCircle size={18} /></div>
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "500" }}>Validation annonces</span>
+                                        <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "var(--text-main)" }}>{stats?.tauxValidation?.toFixed(1) || "0.0"} %</span>
+                                    </div>
+                                </div>
+                                <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                                    <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(239, 68, 68, 0.1)", color: DISTINCT.red }}><Trash2 size={18} /></div>
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "500" }}>Remplissage moyen conteneurs</span>
+                                        <span style={{ fontSize: "1.1rem", fontWeight: "700", color: "var(--text-main)" }}>{stats?.containerRemplissage?.toFixed(1) || "0.0"} %</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -498,14 +546,14 @@ export default function DashboardModuleView({ subpage, title }) {
                                 <span className="db-badge">Ce mois</span>
                             </div>
                             <div className="finance-grid">
-                                <div className="finance-block"><span className="finance-label">Abonnements</span><span className="finance-amount">0 €</span></div>
-                                <div className="finance-block"><span className="finance-label">Commissions</span><span className="finance-amount">0 €</span></div>
-                                <div className="finance-block"><span className="finance-label">Ateliers / Formations</span><span className="finance-amount">0 €</span></div>
-                                <div className="finance-block"><span className="finance-label">Publicités / Partenariats</span><span className="finance-amount">0 €</span></div>
+                                <div className="finance-block"><span className="finance-label">Abonnements</span><span className="finance-amount">{stats?.finance?.abonnements?.toFixed(2) || "0.00"} €</span></div>
+                                <div className="finance-block"><span className="finance-label">Commissions</span><span className="finance-amount">{stats?.finance?.commissions?.toFixed(2) || "0.00"} €</span></div>
+                                <div className="finance-block"><span className="finance-label">Ateliers / Formations</span><span className="finance-amount">{stats?.finance?.ateliers?.toFixed(2) || "0.00"} €</span></div>
+                                <div className="finance-block"><span className="finance-label">Publicités / Partenariats</span><span className="finance-amount">{stats?.finance?.pubs?.toFixed(2) || "0.00"} €</span></div>
                             </div>
                             <div className="finance-total">
                                 <span>Total mensuel</span>
-                                <span className="finance-total-amount">0 €</span>
+                                <span className="finance-total-amount">{stats?.finance?.total?.toFixed(2) || "0.00"} €</span>
                             </div>
                         </div>
                     </div>
@@ -629,38 +677,6 @@ export default function DashboardModuleView({ subpage, title }) {
                                 <span className="section-title">Alertes administratives</span>
                             </div>
                             <div style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.85rem", textAlign: "center" }}>Aucune alerte administrative.</div>
-                        </div>
-                    </div>
-
-                    <div className="db-section-label" style={{ marginTop: "2rem" }}>Synthèse opérationnelle</div>
-
-                    <div className="bottom-grid">
-                        <div className="panel">
-                            <div className="section-header">
-                                <span className="section-title">À traiter rapidement</span>
-                            </div>
-                            <div style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.85rem", textAlign: "center" }}>Aucune tâche à traiter.</div>
-                        </div>
-
-                        <div className="panel">
-                            <div className="section-header">
-                                <span className="section-title">Planning rapide</span>
-                            </div>
-                            <div style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.85rem", textAlign: "center" }}>Aucun événement planifié.</div>
-                        </div>
-
-                        <div className="panel">
-                            <div className="section-header">
-                                <span className="section-title">Top zones actives</span>
-                            </div>
-                            <div style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.85rem", textAlign: "center" }}>Données insuffisantes pour les zones.</div>
-                        </div>
-
-                        <div className="panel">
-                            <div className="section-header">
-                                <span className="section-title">Top artisans / partenaires</span>
-                            </div>
-                            <div style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.85rem", textAlign: "center" }}>Données insuffisantes pour les artisans.</div>
                         </div>
                     </div>
                 </>

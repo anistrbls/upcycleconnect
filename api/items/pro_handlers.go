@@ -682,6 +682,92 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}))
 
+	mux.Handle("GET /api/pro/material-alerts", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		userID, _, _, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		subs, err := repo.ListMaterialAlertSubscriptions(r.Context(), userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load material alerts")
+			return
+		}
+		subType, _ := repo.GetUserSubscriptionType(r.Context(), userID)
+		limit := materialAlertLimitForPlan(subType)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"subscriptions": subs,
+			"limit":         limit,
+			"count":         len(subs),
+		})
+	}))
+
+	mux.Handle("POST /api/pro/material-alerts", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		userID, _, _, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		var payload struct {
+			MaterialLabel      string `json:"materialLabel"`
+			MaterialLabelSnake string `json:"material_label"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		label := strings.TrimSpace(payload.MaterialLabel)
+		if label == "" {
+			label = strings.TrimSpace(payload.MaterialLabelSnake)
+		}
+		subType, _ := repo.GetUserSubscriptionType(r.Context(), userID)
+		limit := materialAlertLimitForPlan(subType)
+		if limit == 0 {
+			writeError(w, http.StatusForbidden, "Les alertes matériaux nécessitent un abonnement Pro Essentiel ou supérieur")
+			return
+		}
+		count, err := repo.CountMaterialAlertSubscriptions(r.Context(), userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not check alert count")
+			return
+		}
+		if count >= limit {
+			planLabels := map[string]string{"pro_essentiel": "Pro Essentiel", "premium_atelier": "Premium Atelier"}
+			writeError(w, http.StatusForbidden, fmt.Sprintf("Limite atteinte : le plan %s permet %d alerte(s) au maximum.", planLabels[subType], limit))
+			return
+		}
+		if err := repo.UpsertMaterialAlertSubscription(r.Context(), userID, label); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	}))
+
+	mux.Handle("DELETE /api/pro/material-alerts", professionalOnly(func(w http.ResponseWriter, r *http.Request) {
+		userID, _, _, err := getProfessionalUser(r)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+		var payload struct {
+			MaterialLabel      string `json:"materialLabel"`
+			MaterialLabelSnake string `json:"material_label"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		label := strings.TrimSpace(payload.MaterialLabel)
+		if label == "" {
+			label = strings.TrimSpace(payload.MaterialLabelSnake)
+		}
+		if err := repo.DeleteMaterialAlertSubscription(r.Context(), userID, label); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	}))
+
 	mux.HandleFunc("POST /api/webhooks/stripe", func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := getStripeConfig()
 		if err != nil {
@@ -815,6 +901,13 @@ func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEve
 					plan, userID, strings.TrimSpace(session.Customer), subscriptionID, billingCycle, timeOrNilArg(currentPeriodEnd))
 				if err != nil {
 					return false, err
+				}
+
+				// NOTIFICATIONS: Subscription Active (Pro)
+				var appSubscriptionActive bool
+				_ = repo.db.QueryRowContext(ctx, `SELECT app_finance_subscription_active FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&appSubscriptionActive)
+				if appSubscriptionActive {
+					_ = CreateNotification(ctx, repo.db, userID, "Abonnement activé", "Votre abonnement Pro a été activé avec succès.", "finance_subscription_active")
 				}
 			}
 			return true, nil

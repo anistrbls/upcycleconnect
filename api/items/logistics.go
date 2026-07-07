@@ -1520,14 +1520,16 @@ func (r *Repository) ValidateStripePaymentByProfessional(ctx context.Context, it
 	var status string
 	var itemType string
 	var price float64
+	var title string
+	var ownerID int64
 	var reservedByUserID *int64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT l.workflow_status, l.reserved_by_user_id, i.type
+		`SELECT l.workflow_status, l.reserved_by_user_id, i.type, i.price, i.title, i.user_id
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 WHERE l.item_id = $1`,
 		itemID,
-	).Scan(&status, &reservedByUserID, &itemType)
+	).Scan(&status, &reservedByUserID, &itemType, &price, &title, &ownerID)
 	if err != nil {
 		return "", fmt.Errorf("item not in logistics: %w", err)
 	}
@@ -1536,10 +1538,6 @@ func (r *Repository) ValidateStripePaymentByProfessional(ctx context.Context, it
 	}
 	if reservedByUserID == nil || *reservedByUserID != userID {
 		return "", fmt.Errorf("reservation does not belong to this user")
-	}
-	err = r.db.QueryRowContext(ctx, `SELECT price FROM items WHERE id = $1`, itemID).Scan(&price)
-	if err != nil {
-		return "", fmt.Errorf("item price not found: %w", err)
 	}
 	if !requiresPayment(itemType, price) {
 		return "", fmt.Errorf("payment is only required for sale items")
@@ -1572,6 +1570,31 @@ func (r *Repository) ValidateStripePaymentByProfessional(ctx context.Context, it
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return "", fmt.Errorf("payment validation conflict")
 	}
+
+	// NOTIFICATIONS: Payment Confirmed (Buyer)
+	appBuyerConfirmed := true
+	err = r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(app_enabled, true) AND COALESCE(app_finance_payment_confirmed, true)
+		FROM user_notification_settings
+		WHERE user_id = $1
+	`, userID).Scan(&appBuyerConfirmed)
+	if err == sql.ErrNoRows || (err == nil && appBuyerConfirmed) {
+		msg := fmt.Sprintf("Votre paiement pour '%s' a été confirmé.", title)
+		_ = CreateNotification(ctx, r.db, userID, "Confirmation de paiement", msg, "finance_payment_confirmed")
+	}
+
+	// NOTIFICATIONS: Payment Received (Seller)
+	appSellerReceived := true
+	err = r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(app_enabled, true) AND COALESCE(app_finance_payment_received, true)
+		FROM user_notification_settings
+		WHERE user_id = $1
+	`, ownerID).Scan(&appSellerReceived)
+	if err == sql.ErrNoRows || (err == nil && appSellerReceived) {
+		msg := fmt.Sprintf("Vous avez reçu un paiement pour '%s'.", title)
+		_ = CreateNotification(ctx, r.db, ownerID, "Paiement reçu", msg, "finance_payment_received")
+	}
+
 	return pickupCode, nil
 }
 
@@ -1583,14 +1606,15 @@ func (r *Repository) FailStripePaymentByProfessional(ctx context.Context, itemID
 	var status string
 	var itemType string
 	var price float64
+	var title string
 	var reservedByUserID *int64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT l.workflow_status, l.reserved_by_user_id, i.type, i.price
+		`SELECT l.workflow_status, l.reserved_by_user_id, i.type, i.price, i.title
 		 FROM item_logistics l
 		 JOIN items i ON i.id = l.item_id
 		 WHERE l.item_id = $1`,
 		itemID,
-	).Scan(&status, &reservedByUserID, &itemType, &price)
+	).Scan(&status, &reservedByUserID, &itemType, &price, &title)
 	if err != nil {
 		return fmt.Errorf("item not in logistics: %w", err)
 	}
@@ -1626,7 +1650,23 @@ func (r *Repository) FailStripePaymentByProfessional(ctx context.Context, itemID
 		 WHERE item_id = $1`,
 		itemID, checkoutSessionID, paymentIntentID, reason,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// NOTIFICATIONS: Payment Failed (Buyer)
+	appBuyerFailed := true
+	err = r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(app_enabled, true) AND COALESCE(app_finance_payment_failed, true)
+		FROM user_notification_settings
+		WHERE user_id = $1
+	`, userID).Scan(&appBuyerFailed)
+	if err == sql.ErrNoRows || (err == nil && appBuyerFailed) {
+		msg := fmt.Sprintf("Votre paiement pour '%s' a échoué ou a expiré.", title)
+		_ = CreateNotification(ctx, r.db, userID, "Échec de paiement", msg, "finance_payment_failed")
+	}
+
+	return nil
 }
 
 type StripeCheckoutReservation struct {

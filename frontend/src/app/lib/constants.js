@@ -154,7 +154,7 @@ export const NAV_MODULES = [
         icon: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
         subNav: [
             { key: "general", label: "Général", shortLabel: "Général" },
-            { key: "roles-permissions", label: "Rôles & permissions", shortLabel: "Rôles" },
+            { key: "roles-permissions", label: "Notifications", shortLabel: "Notifs" },
             { key: "configuration", label: "Configuration", shortLabel: "Config" },
             { key: "integrations", label: "Intégrations", shortLabel: "Intégrations" },
             { key: "journal-systeme", label: "Journal système", shortLabel: "Journal" },

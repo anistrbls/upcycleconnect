@@ -1,5 +1,6 @@
 import "./globals.css";
 import I18nProvider from "./components/i18n/I18nProvider";
+import { ToastProvider } from "./components/shared/ToastContext";
 
 export const metadata = {
     title: "UpcycleConnect – Admin",
@@ -13,7 +14,11 @@ export default function RootLayout({ children }) {
                 <meta charSet="utf-8" />
             </head>
             <body>
-                <I18nProvider>{children}</I18nProvider>
+                <I18nProvider>
+                    <ToastProvider>
+                        {children}
+                    </ToastProvider>
+                </I18nProvider>
             </body>
         </html>
     );

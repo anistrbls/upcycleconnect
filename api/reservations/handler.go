@@ -369,6 +369,13 @@ func (h *Handler) ConfirmPaymentHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.TrimSpace(details.PaymentStatus) != "paid" {
+		h.repo.createFinanceNotification(
+			r.Context(),
+			userID,
+			"Paiement échoué",
+			"Le paiement de votre réservation n'a pas été validé. Vous pouvez réessayer depuis votre espace paiements.",
+			"finance_payment_failed",
+		)
 		writeError(w, http.StatusBadRequest, "payment not completed")
 		return
 	}

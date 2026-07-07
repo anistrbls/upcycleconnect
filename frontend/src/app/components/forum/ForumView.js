@@ -5,6 +5,7 @@ import { apiUrl, buildAuthHeaders, canModerateForum } from "../../lib/api";
 import { formatDateFR } from "../../lib/formatters";
 import AdminModal from "../admin/AdminModal";
 import { ForumPhotoPicker, ForumPhotosGrid } from "./ForumPhotoAttachments";
+import MentionTextarea from "../shared/MentionTextarea";
 
 /* ── Icônes ─────────────────────────────────────────────────────────────── */
 const IcMsg = () => (
@@ -387,7 +388,7 @@ function ForumTopicDetail({ topicId, role, employeeRole = "", callerUserId, onBa
                             </div>
                             {editReplyId === r.id ? (
                                 <div>
-                                    <textarea
+                                    <MentionTextarea
                                         value={editContent}
                                         onChange={e => setEditContent(e.target.value)}
                                         rows={3}
@@ -466,20 +467,24 @@ function ForumTopicDetail({ topicId, role, employeeRole = "", callerUserId, onBa
             {/* Formulaire de réponse */}
             {topic.status === "open" && (
                 <div className="panel" style={{ marginTop: "1.25rem" }}>
-                    <p style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.75rem" }}>Répondre</p>
-                    <textarea
-                        value={replyContent}
-                        onChange={e => setReplyContent(e.target.value)}
-                        placeholder="Votre réponse…"
-                        rows={4}
-                        style={{ width: "100%", borderRadius: "12px", border: "1px solid #e0e0e0", padding: "0.75rem", fontSize: "0.9rem", fontFamily: "inherit", resize: "vertical", outline: "none", boxSizing: "border-box" }}
-                    />
-                    <ForumPhotoPicker photos={replyPhotos} onChange={setReplyPhotos} disabled={sending} />
-                    {error && <p style={{ color: "#a23b3b", fontSize: "0.83rem", margin: "0.4rem 0 0" }}>{error}</p>}
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.65rem" }}>
-                        <button className="action-cta task-action-btn" onClick={handleSendReply} disabled={sending || (!replyContent.trim() && replyPhotos.length === 0)}>
-                            {sending ? "Envoi…" : "Répondre"}
-                        </button>
+                    <div style={{ display: "flex", gap: "0.85rem", alignItems: "flex-start" }}>
+                        <Avatar name="Vous" size={36} />
+                        <div style={{ flex: 1 }}>
+                            <MentionTextarea
+                                value={replyContent}
+                                onChange={e => setReplyContent(e.target.value)}
+                                placeholder="Votre réponse (utilisez @ pour mentionner quelqu'un)…"
+                                rows={3}
+                                style={{ width: "100%", borderRadius: "10px", border: "1px solid #e0e0e0", padding: "0.65rem", fontSize: "0.9rem", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
+                            />
+                            <ForumPhotoPicker photos={replyPhotos} onChange={setReplyPhotos} disabled={sending} />
+                            {error && <p style={{ color: "#a23b3b", fontSize: "0.83rem", margin: "0.4rem 0 0" }}>{error}</p>}
+                            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.65rem" }}>
+                                <button className="action-cta task-action-btn" onClick={handleSendReply} disabled={sending || (!replyContent.trim() && replyPhotos.length === 0)}>
+                                    {sending ? "Envoi…" : "Répondre"}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -514,7 +519,7 @@ function ForumTopicDetail({ topicId, role, employeeRole = "", callerUserId, onBa
                     style={{ width: "100%", borderRadius: "10px", border: "1px solid #e0e0e0", padding: "0.6rem 0.8rem", fontSize: "0.9rem", fontFamily: "inherit", marginBottom: "0.75rem", boxSizing: "border-box" }}
                 />
                 <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.3rem" }}>Contenu</label>
-                <textarea
+                <MentionTextarea
                     value={editTopicForm.content}
                     onChange={e => setEditTopicForm(p => ({ ...p, content: e.target.value }))}
                     rows={5}
@@ -611,10 +616,10 @@ export default function ForumView({ role = "particulier", employeeRole = "", cal
                     autoFocus
                 />
                 <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.3rem" }}>Message</label>
-                <textarea
+                <MentionTextarea
                     value={newForm.content}
                     onChange={e => setNewForm(p => ({ ...p, content: e.target.value }))}
-                    placeholder="Décrivez votre sujet…"
+                    placeholder="Décrivez votre sujet (utilisez @ pour mentionner quelqu'un)…"
                     rows={5}
                     style={{ width: "100%", borderRadius: "10px", border: "1px solid #e0e0e0", padding: "0.6rem 0.8rem", fontSize: "0.9rem", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
                 />

@@ -10,6 +10,7 @@ import { previewLooksLikeVideo } from "../../../lib/mediaUploadLimits";
 import { useI18n } from "../../../components/i18n/I18nProvider";
 
 const SELECT_ARROW_BG = "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='292.4' height='292.4'%3E%3Cpath fill='%232b4548' d='M287 69.4a17.6 17.6 0 0 0-13-5.4H18.4c-5 0-9.3 1.8-12.9 5.4A17.6 17.6 0 0 0 0 82.2c0 5 1.8 9.3 5.4 12.9l128 127.9c3.6 3.6 7.8 5.4 12.8 5.4s9.2-1.8 12.8-5.4L287 95c3.5-3.5 5.4-7.8 5.4-12.8 0-5-1.9-9.2-5.5-12.8z'/%3E%3C/svg%3E\")";
+const SELECT_ARROW_BG_LIGHT = "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='292.4' height='292.4'%3E%3Cpath fill='%23e6ffc0' d='M287 69.4a17.6 17.6 0 0 0-13-5.4H18.4c-5 0-9.3 1.8-12.9 5.4A17.6 17.6 0 0 0 0 82.2c0 5 1.8 9.3 5.4 12.9l128 127.9c3.6 3.6 7.8 5.4 12.8 5.4s9.2-1.8 12.8-5.4L287 95c3.5-3.5 5.4-7.8 5.4-12.8 0-5-1.9-9.2-5.5-12.8z'/%3E%3C/svg%3E\")";
 
 /** Valeur du select « matériau » pour le mode recherche hors catalogue affiché. */
 const MATERIAL_FILTER_OTHER = "__autre__";
@@ -129,6 +130,56 @@ const styles = {
         display: "flex",
         alignItems: "center",
         gap: "0.45rem",
+    },
+    advancedPanel: {
+        marginBottom: "1.35rem",
+        padding: "0.95rem 1rem",
+        borderRadius: "16px",
+        border: "1px solid rgba(230, 255, 192, 0.2)",
+        background: "linear-gradient(180deg, #0f1112 0%, #14181a 100%)",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "0.7rem",
+        alignItems: "center",
+    },
+    advancedField: {
+        border: "1px solid rgba(230, 255, 192, 0.24)",
+        borderRadius: "999px",
+        padding: "0.6rem 2.4rem 0.6rem 1.2rem",
+        background: `${SELECT_ARROW_BG_LIGHT} right 0.9rem center / 0.65rem auto no-repeat #11171a`,
+        color: "#eaf7d1",
+        fontFamily: "inherit",
+        fontSize: "0.88rem",
+        outline: "none",
+        cursor: "pointer",
+        appearance: "none",
+    },
+    advancedNumberInput: {
+        width: "100%",
+        color: "#eaf7d1",
+        padding: "0.6rem 1.1rem",
+        fontSize: "0.88rem",
+        fontFamily: "inherit",
+        outline: "none",
+        maxWidth: "145px",
+        background: "#11171a",
+        borderRadius: "999px",
+        border: "1px solid rgba(230, 255, 192, 0.24)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+    },
+    advancedSortField: {
+        border: "1px solid rgba(230, 255, 192, 0.24)",
+        borderRadius: "999px",
+        padding: "0.6rem 2.4rem 0.6rem 1.2rem",
+        background: `${SELECT_ARROW_BG_LIGHT} right 0.9rem center / 0.65rem auto no-repeat #11171a`,
+        color: "#eaf7d1",
+        fontFamily: "inherit",
+        fontSize: "0.88rem",
+        outline: "none",
+        cursor: "pointer",
+        appearance: "none",
+        minWidth: "180px",
     },
     grid: {
         display: "grid",
@@ -330,9 +381,17 @@ function formatPublishDate(item, locale = "fr") {
     });
 }
 
+function getItemTimestamp(item) {
+    const raw = item?.createdAt || item?.created_at || item?.publishedAt || item?.published_at;
+    if (!raw) return 0;
+    const ts = new Date(raw).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+}
+
 export default function ProfessionalAvailablePage() {
     const router = useRouter();
     const { locale } = useI18n();
+    const [user, setUser] = useState(null);
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -346,12 +405,25 @@ export default function ProfessionalAvailablePage() {
     const [watchlistOnly, setWatchlistOnly] = useState(false);
     const [watchlistIds, setWatchlistIds] = useState([]);
     const [watchBusyId, setWatchBusyId] = useState(0);
+    const [materialAlertSubscriptions, setMaterialAlertSubscriptions] = useState([]);
+    const [materialAlertLimit, setMaterialAlertLimit] = useState(0);
+    const [materialAlertBusy, setMaterialAlertBusy] = useState(false);
+    const [showAlertManagerModal, setShowAlertManagerModal] = useState(false);
+    const [deletingAlertLabel, setDeletingAlertLabel] = useState(null);
     /** Libellés issus de `item_materials` (référentiel complet). */
     const [catalogMaterialLabels, setCatalogMaterialLabels] = useState([]);
     /** Recherche dans le référentiel lorsque le filtre « Autre » est actif. */
     const [otherMaterialSearch, setOtherMaterialSearch] = useState("");
+    const [itemTypeFilter, setItemTypeFilter] = useState("");
+    const [publishedWithinDays, setPublishedWithinDays] = useState("");
+    const [priceMinFilter, setPriceMinFilter] = useState("");
+    const [priceMaxFilter, setPriceMaxFilter] = useState("");
+    const [mediaOnlyFilter, setMediaOnlyFilter] = useState(false);
+    const [sortBy, setSortBy] = useState("recent");
 
     const normalize = (value) => String(value || "").toLowerCase().trim();
+    const subscriptionType = String(user?.subscriptionType || "decouverte").toLowerCase();
+    const canUseAdvancedFilters = subscriptionType === "pro_essentiel" || subscriptionType === "premium_atelier";
 
     const fetchWatchlist = async () => {
         const res = await fetch(apiUrl("/pro/watchlist"), {
@@ -369,17 +441,21 @@ export default function ProfessionalAvailablePage() {
         setLoading(true);
         setError("");
         try {
-            const [itemsRes, watchlistRes] = await Promise.all([
+            const [itemsRes, watchlistRes, materialAlertsRes] = await Promise.all([
                 fetch(apiUrl("/pro/items"), {
                     headers: buildAuthHeaders(),
                 }),
                 fetch(apiUrl("/pro/watchlist"), {
                     headers: buildAuthHeaders(),
                 }),
+                fetch(apiUrl("/pro/material-alerts"), {
+                    headers: buildAuthHeaders(),
+                }),
             ]);
 
             const itemsData = await itemsRes.json();
             const watchlistData = await watchlistRes.json();
+            const materialAlertsData = await materialAlertsRes.json();
 
             if (!itemsRes.ok) {
                 throw new Error(itemsData.error || "Erreur chargement annonces professionnelles");
@@ -387,12 +463,20 @@ export default function ProfessionalAvailablePage() {
             if (!watchlistRes.ok) {
                 throw new Error(watchlistData.error || "Erreur chargement watchlist");
             }
+            if (!materialAlertsRes.ok) {
+                throw new Error(materialAlertsData.error || "Erreur chargement alertes matériaux");
+            }
 
             setItems(itemsData.items || []);
             const ids = Array.isArray(watchlistData.item_ids)
                 ? watchlistData.item_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
                 : [];
             setWatchlistIds(ids);
+            const subs = Array.isArray(materialAlertsData.subscriptions)
+                ? materialAlertsData.subscriptions.map((entry) => String(entry.materialLabel || entry.material_label || "").trim()).filter(Boolean)
+                : [];
+            setMaterialAlertSubscriptions(Array.from(new Set(subs)));
+            setMaterialAlertLimit(Number(materialAlertsData.limit) || 0);
         } catch (err) {
             setError(err.message || "Erreur inattendue");
         } finally {
@@ -402,6 +486,13 @@ export default function ProfessionalAvailablePage() {
 
     useEffect(() => {
         fetchItems();
+    }, []);
+
+    useEffect(() => {
+        fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() })
+            .then((r) => r.json())
+            .then((d) => setUser(d.user || null))
+            .catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -448,7 +539,8 @@ export default function ProfessionalAvailablePage() {
     const filteredItems = useMemo(() => {
         const search = normalize(searchText);
         const watchSet = new Set(watchlistIds);
-        return items.filter((item) => {
+        const nowTs = Date.now();
+        const filtered = items.filter((item) => {
             const material = normalize(item.material);
             const condition = normalize(item.condition);
             const container = normalize(item.containerName);
@@ -487,8 +579,55 @@ export default function ProfessionalAvailablePage() {
             if (conditionFilter && condition !== normalize(conditionFilter)) return false;
             if (containerFilter && container !== normalize(containerFilter)) return false;
             if (watchlistOnly && !watchSet.has(item.id)) return false;
+
+            if (canUseAdvancedFilters) {
+                const itemType = normalize(item.type);
+                if (itemTypeFilter && itemType !== normalize(itemTypeFilter)) return false;
+
+                const minPrice = Number(String(priceMinFilter).replace(",", "."));
+                const maxPrice = Number(String(priceMaxFilter).replace(",", "."));
+                const itemPrice = Number(item.price || 0);
+
+                if (Number.isFinite(minPrice) && String(priceMinFilter).trim() !== "" && itemPrice < minPrice) return false;
+                if (Number.isFinite(maxPrice) && String(priceMaxFilter).trim() !== "" && itemPrice > maxPrice) return false;
+
+                if (mediaOnlyFilter) {
+                    const medias = [item.image, ...(Array.isArray(item.photos) ? item.photos : [])]
+                        .map((m) => String(m || "").trim())
+                        .filter(Boolean);
+                    if (medias.length === 0) return false;
+                }
+
+                const days = Number(publishedWithinDays);
+                if (Number.isFinite(days) && days > 0 && String(publishedWithinDays).trim() !== "") {
+                    const ts = getItemTimestamp(item);
+                    if (!ts) return false;
+                    const maxAgeMs = days * 24 * 60 * 60 * 1000;
+                    if (nowTs - ts > maxAgeMs) return false;
+                }
+            }
+
             return true;
         });
+
+        if (!canUseAdvancedFilters) {
+            return filtered;
+        }
+
+        const sorted = [...filtered];
+        if (sortBy === "oldest") {
+            sorted.sort((a, b) => getItemTimestamp(a) - getItemTimestamp(b));
+        } else if (sortBy === "price_asc") {
+            sorted.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+        } else if (sortBy === "price_desc") {
+            sorted.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+        } else if (sortBy === "title_asc") {
+            sorted.sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), "fr"));
+        } else {
+            sorted.sort((a, b) => getItemTimestamp(b) - getItemTimestamp(a));
+        }
+
+        return sorted;
     }, [
         items,
         searchText,
@@ -499,6 +638,13 @@ export default function ProfessionalAvailablePage() {
         containerFilter,
         watchlistOnly,
         watchlistIds,
+        canUseAdvancedFilters,
+        itemTypeFilter,
+        publishedWithinDays,
+        priceMinFilter,
+        priceMaxFilter,
+        mediaOnlyFilter,
+        sortBy,
     ]);
 
     const materialAlertContext = useMemo(() => {
@@ -549,13 +695,31 @@ export default function ProfessionalAvailablePage() {
         return { show: false, label: "", message: "" };
     }, [items, materialFilter, otherMaterialSearch, catalogMatchesForOtherSearch]);
 
+    const materialAlertLabel = useMemo(() => {
+        if (materialFilter && materialFilter !== MATERIAL_FILTER_OTHER) {
+            return materialFilter.trim();
+        }
+        const q = otherMaterialSearch.trim();
+        if (materialFilter === MATERIAL_FILTER_OTHER && q.length >= 2) {
+            return catalogMatchesForOtherSearch.length === 1 ? catalogMatchesForOtherSearch[0] : q;
+        }
+        return "";
+    }, [materialFilter, otherMaterialSearch, catalogMatchesForOtherSearch]);
+
+    const isMaterialAlertSubscribed = useMemo(() => {
+        const normalized = normalize(materialAlertLabel);
+        if (!normalized) return false;
+        return materialAlertSubscriptions.some((label) => normalize(label) === normalized);
+    }, [materialAlertLabel, materialAlertSubscriptions]);
+
     const hasActiveFilters = Boolean(
         searchText ||
             materialFilter ||
             (materialFilter === MATERIAL_FILTER_OTHER && otherMaterialSearch.trim()) ||
             conditionFilter ||
             containerFilter ||
-            watchlistOnly,
+            watchlistOnly ||
+            (canUseAdvancedFilters && (itemTypeFilter || publishedWithinDays || priceMinFilter || priceMaxFilter || mediaOnlyFilter || sortBy !== "recent")),
     );
 
     const clearFilters = () => {
@@ -565,6 +729,12 @@ export default function ProfessionalAvailablePage() {
         setConditionFilter("");
         setContainerFilter("");
         setWatchlistOnly(false);
+        setItemTypeFilter("");
+        setPublishedWithinDays("");
+        setPriceMinFilter("");
+        setPriceMaxFilter("");
+        setMediaOnlyFilter(false);
+        setSortBy("recent");
     };
 
     const toggleWatchlist = async (itemId) => {
@@ -586,6 +756,54 @@ export default function ProfessionalAvailablePage() {
             setError(err.message || "Erreur watchlist");
         } finally {
             setWatchBusyId(0);
+        }
+    };
+
+    const toggleMaterialAlert = async () => {
+        const label = materialAlertLabel;
+        if (!label) return;
+
+        setMaterialAlertBusy(true);
+        setError("");
+        try {
+            const isActive = isMaterialAlertSubscribed;
+            const res = await fetch(apiUrl("/pro/material-alerts"), {
+                method: isActive ? "DELETE" : "POST",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ materialLabel: label }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || "Erreur mise à jour alerte matériau");
+            }
+
+            await fetchItems();
+            setToast(isActive ? `Alerte supprimée pour « ${label} ».` : `Alerte activée pour « ${label} ».`);
+            setTimeout(() => setToast(null), 3500);
+        } catch (err) {
+            setError(err.message || "Erreur alerte matériau");
+        } finally {
+            setMaterialAlertBusy(false);
+        }
+    };
+
+    const removeAlertSubscription = async (label) => {
+        setDeletingAlertLabel(label);
+        try {
+            const res = await fetch(apiUrl("/pro/material-alerts"), {
+                method: "DELETE",
+                headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ materialLabel: label }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Erreur suppression alerte");
+            await fetchItems();
+            setToast(`Alerte supprimée pour « ${label} ».`);
+            setTimeout(() => setToast(null), 3000);
+        } catch (err) {
+            setError(err.message || "Erreur suppression alerte");
+        } finally {
+            setDeletingAlertLabel(null);
         }
     };
 
@@ -619,8 +837,10 @@ export default function ProfessionalAvailablePage() {
                 if (!checkoutRes.ok || !checkoutData.checkout_url) {
                     throw new Error(checkoutData.error || "Impossible de creer la session de paiement");
                 }
+                let validatedCheckoutUrl;
+                try { validatedCheckoutUrl = new URL(String(checkoutData.checkout_url)).toString(); } catch { throw new Error("URL de paiement invalide"); }
                 setReserveConfirmItem(null);
-                window.location.assign(checkoutData.checkout_url);
+                window.location.assign(validatedCheckoutUrl);
                 return;
             } else {
                 setReserveConfirmItem(null);
@@ -762,15 +982,23 @@ export default function ProfessionalAvailablePage() {
                         ))}
                         <option value={MATERIAL_FILTER_OTHER}>Autre</option>
                     </select>
-                    {materialAlertContext.show && (
-                        <button
-                            type="button"
-                            title={materialAlertContext.message}
-                            style={styles.materialAlertBtn}
-                        >
-                            Être alerté
-                        </button>
-                    )}
+                    {materialAlertLabel && (() => {
+                        const atLimit = !isMaterialAlertSubscribed && materialAlertLimit > 0 && materialAlertSubscriptions.length >= materialAlertLimit;
+                        const alertTitle = atLimit
+                            ? `Limite atteinte (${materialAlertLimit}/${materialAlertLimit}). Cliquez pour gérer vos alertes.`
+                            : materialAlertContext.message || `Recevoir une notification dès qu'une annonce pour « ${materialAlertLabel} » est publiée.`;
+                        return (
+                            <button
+                                type="button"
+                                title={alertTitle}
+                                onClick={atLimit ? () => setShowAlertManagerModal(true) : toggleMaterialAlert}
+                                disabled={materialAlertBusy}
+                                style={{ ...styles.materialAlertBtn, opacity: materialAlertBusy ? 0.7 : 1 }}
+                            >
+                                {isMaterialAlertSubscribed ? "Alerte activée" : atLimit ? `Limite ${materialAlertSubscriptions.length}/${materialAlertLimit}` : "Être alerté"}
+                            </button>
+                        );
+                    })()}
                 </div>
 
                 <select value={conditionFilter} onChange={(e) => setConditionFilter(e.target.value)} style={styles.filterField}>
@@ -800,6 +1028,62 @@ export default function ProfessionalAvailablePage() {
                     Reinitialiser
                 </button>
             </section>
+
+            {canUseAdvancedFilters && (
+                <section style={styles.advancedPanel}>
+                    <span style={styles.advancedLabel}>
+                        Filtres avancés
+                    </span>
+                    <select value={itemTypeFilter} onChange={(e) => setItemTypeFilter(e.target.value)} style={styles.advancedField}>
+                        <option value="">Type annonce</option>
+                        <option value="don">Don</option>
+                        <option value="vente">Vente</option>
+                    </select>
+                    <select value={publishedWithinDays} onChange={(e) => setPublishedWithinDays(e.target.value)} style={styles.advancedField}>
+                        <option value="">Date publication</option>
+                        <option value="7">7 derniers jours</option>
+                        <option value="30">30 derniers jours</option>
+                        <option value="90">90 derniers jours</option>
+                    </select>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={priceMinFilter}
+                        onChange={(e) => setPriceMinFilter(e.target.value)}
+                        placeholder="Prix min (€)"
+                        style={styles.advancedNumberInput}
+                    />
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={priceMaxFilter}
+                        onChange={(e) => setPriceMaxFilter(e.target.value)}
+                        placeholder="Prix max (€)"
+                        style={styles.advancedNumberInput}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => setMediaOnlyFilter((v) => !v)}
+                        style={{
+                            ...styles.toggleBtn(mediaOnlyFilter),
+                            border: "1px solid rgba(230, 255, 192, 0.24)",
+                            background: mediaOnlyFilter ? "#e6ffc0" : "#11171a",
+                            color: mediaOnlyFilter ? "#101711" : "#eaf7d1",
+                        }}
+                    >
+                        Médias uniquement
+                    </button>
+                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={styles.advancedSortField}>
+                        <option value="recent">Tri: plus récent</option>
+                        <option value="oldest">Tri: plus ancien</option>
+                        <option value="price_asc">Tri: prix croissant</option>
+                        <option value="price_desc">Tri: prix décroissant</option>
+                        <option value="title_asc">Tri: titre A-Z</option>
+                    </select>
+                </section>
+            )}
 
             {materialFilter === MATERIAL_FILTER_OTHER && (
                 <div
@@ -888,6 +1172,62 @@ export default function ProfessionalAvailablePage() {
 
             {error && <p style={styles.error}>{error}</p>}
             {content}
+
+            <AdminModal
+                open={showAlertManagerModal}
+                title={`Mes alertes matériaux (${materialAlertSubscriptions.length}${materialAlertLimit > 0 ? `/${materialAlertLimit}` : ""})`}
+                onClose={() => setShowAlertManagerModal(false)}
+            >
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", paddingTop: "0.2rem" }}>
+                    {materialAlertSubscriptions.length === 0 ? (
+                        <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>Aucune alerte active.</p>
+                    ) : (
+                        materialAlertSubscriptions.map((label) => (
+                            <div
+                                key={label}
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    padding: "0.62rem 0.85rem",
+                                    borderRadius: "12px",
+                                    background: "rgba(229,255,188,0.35)",
+                                    border: "1px solid rgba(0,0,0,0.07)",
+                                    gap: "0.75rem",
+                                }}
+                            >
+                                <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text-main)" }} data-i18n-user-content="true">
+                                    🌿 {label}
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={deletingAlertLabel === label}
+                                    onClick={() => removeAlertSubscription(label)}
+                                    style={{
+                                        border: "none",
+                                        borderRadius: "8px",
+                                        padding: "0.35rem 0.75rem",
+                                        background: deletingAlertLabel === label ? "#e8ecee" : "#fee2e2",
+                                        color: deletingAlertLabel === label ? "var(--text-muted)" : "#b91c1c",
+                                        fontSize: "0.78rem",
+                                        fontWeight: 700,
+                                        cursor: deletingAlertLabel === label ? "not-allowed" : "pointer",
+                                        fontFamily: "inherit",
+                                        flexShrink: 0,
+                                    }}
+                                >
+                                    {deletingAlertLabel === label ? "Suppression…" : "Supprimer"}
+                                </button>
+                            </div>
+                        ))
+                    )}
+                    {materialAlertLimit > 0 && (
+                        <p style={{ margin: "0.15rem 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                            Supprimez une alerte pour en ajouter une nouvelle.
+                        </p>
+                    )}
+                </div>
+            </AdminModal>
 
             <AdminModal
                 open={Boolean(reserveConfirmItem)}

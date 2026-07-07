@@ -172,6 +172,44 @@ L'équipe UpcycleConnect`, greeting, message)
 
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Handler) http.Handler) {
 	repo := NewRepository(db)
+	userDisplayName := func(userID int64) string {
+		if userID <= 0 {
+			return ""
+		}
+		var firstName, lastName string
+		err := db.QueryRow(`SELECT COALESCE(firstname, ''), COALESCE(lastname, '') FROM users WHERE id = $1`, userID).Scan(&firstName, &lastName)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(firstName + " " + lastName)
+	}
+	notifyAdminsModerationRequired := func(title, message string) {
+		t := strings.TrimSpace(title)
+		m := strings.TrimSpace(message)
+		if t == "" || m == "" {
+			return
+		}
+		rows, err := db.Query(`
+			SELECT u.id
+			FROM users u
+			LEFT JOIN user_notification_settings s ON s.user_id = u.id
+			WHERE u.role = 'admin'
+			  AND COALESCE(u.status, 'active') = 'active'
+			  AND COALESCE(s.app_enabled, true) = true
+			  AND COALESCE(s.app_moderation, true) = true
+		`)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		ctx := context.Background()
+		for rows.Next() {
+			var adminID int64
+			if rows.Scan(&adminID) == nil && adminID > 0 {
+				_ = CreateNotification(ctx, db, adminID, t, m, "admin_moderation")
+			}
+		}
+	}
 	if err := repo.EnsureSchema(); err != nil {
 		log.Fatalf("Items schema error: %v", err)
 	}
@@ -183,6 +221,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	}
 	if err := repo.EnsureSubscriptionPlansSchema(); err != nil {
 		log.Fatalf("SubscriptionPlans schema error: %v", err)
+	}
+	if err := repo.EnsureMaterialAlertSubscriptionsSchema(); err != nil {
+		log.Fatalf("Material alert subscriptions schema error: %v", err)
 	}
 	if err := EnsureNotificationsSchema(db); err != nil {
 		log.Fatalf("Notifications schema error: %v", err)
@@ -304,6 +345,17 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			log.Printf("Error creating item: %v", err)
 			writeError(w, http.StatusInternalServerError, "could not create item")
 			return
+		}
+		statusNorm := strings.ToLower(strings.TrimSpace(item.Status))
+		if statusNorm == "en attente" || statusNorm == "pending" {
+			authorName := userDisplayName(userID)
+			if authorName == "" {
+				authorName = "un utilisateur"
+			}
+			notifyAdminsModerationRequired(
+				"Nouvelle annonce à modérer",
+				fmt.Sprintf("L'annonce \"%s\" a été soumise à modération par %s.", strings.TrimSpace(item.Title), authorName),
+			)
 		}
 		writeJSON(w, http.StatusCreated, item)
 	})))
@@ -516,6 +568,14 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			if err := repo.ResetLogisticsForModeration(r.Context(), itemID); err != nil {
 				log.Printf("Info: could not clear logistics for item %d after user edit: %v", itemID, err)
 			}
+			authorName := userDisplayName(userID)
+			if authorName == "" {
+				authorName = "un utilisateur"
+			}
+			notifyAdminsModerationRequired(
+				"Annonce mise à jour à modérer",
+				fmt.Sprintf("La mise à jour de l'annonce \"%s\" a été soumise à modération par %s.", strings.TrimSpace(item.Title), authorName),
+			)
 		}
 
 		writeJSON(w, http.StatusOK, item)

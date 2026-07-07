@@ -211,7 +211,9 @@ export default function ProfessionalAvailableDetailPage() {
                 if (!checkoutRes.ok || !checkoutData.checkout_url) {
                     throw new Error(checkoutData.error || "Impossible de créer la session de paiement");
                 }
-                window.location.assign(checkoutData.checkout_url);
+                let validatedCheckoutUrl;
+                try { validatedCheckoutUrl = new URL(String(checkoutData.checkout_url)).toString(); } catch { throw new Error("URL de paiement invalide"); }
+                window.location.assign(validatedCheckoutUrl);
                 return;
             } else {
                 window.alert(`Le matériau "${item.title}" a bien été réservé.`);

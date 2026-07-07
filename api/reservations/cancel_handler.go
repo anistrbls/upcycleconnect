@@ -219,6 +219,13 @@ func (h *Handler) CancelHandler(w http.ResponseWriter, r *http.Request) {
 	`, refundID, recordEUR, id, userID)
 
 	h.notifyCancellationToProviderAndAdmins(r, id)
+	h.repo.createFinanceNotification(
+		r.Context(),
+		userID,
+		"Remboursement effectué",
+		fmt.Sprintf("Le remboursement de votre réservation a été effectué (%.2f EUR).", recordEUR),
+		"finance_refund_issued",
+	)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"cancelled":    true,
 		"refunded":     true,

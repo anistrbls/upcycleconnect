@@ -91,6 +91,14 @@ export default function AdminLayout({ children }) {
                 let appEventUpdate = true;
                 let appEventReminder = true;
                 let appEventRefund = true;
+                let appConseilEngagement = true;
+                let appProjectEngagement = true;
+                let appFinancePaymentConfirmed = true;
+                let appFinancePaymentReceived = true;
+                let appFinancePaymentFailed = true;
+                let appFinanceRefundIssued = true;
+                let appFinanceSubscriptionActive = true;
+                let appMaterialAlerts = true;
 
                 if (user?.id) {
                     const savedSettings = window.localStorage.getItem(`upcycle_settings_${user.id}`);
@@ -114,6 +122,14 @@ export default function AdminLayout({ children }) {
                             if (parsed.app_event_update !== undefined) appEventUpdate = parsed.app_event_update;
                             if (parsed.app_event_reminder !== undefined) appEventReminder = parsed.app_event_reminder;
                             if (parsed.app_event_refund !== undefined) appEventRefund = parsed.app_event_refund;
+                            if (parsed.app_conseil_engagement !== undefined) appConseilEngagement = parsed.app_conseil_engagement;
+                            if (parsed.app_project_engagement !== undefined) appProjectEngagement = parsed.app_project_engagement;
+                            if (parsed.app_finance_payment_confirmed !== undefined) appFinancePaymentConfirmed = parsed.app_finance_payment_confirmed;
+                            if (parsed.app_finance_payment_received !== undefined) appFinancePaymentReceived = parsed.app_finance_payment_received;
+                            if (parsed.app_finance_payment_failed !== undefined) appFinancePaymentFailed = parsed.app_finance_payment_failed;
+                            if (parsed.app_finance_refund_issued !== undefined) appFinanceRefundIssued = parsed.app_finance_refund_issued;
+                            if (parsed.app_finance_subscription_active !== undefined) appFinanceSubscriptionActive = parsed.app_finance_subscription_active;
+                            if (parsed.app_material_alerts !== undefined) appMaterialAlerts = parsed.app_material_alerts;
                         } catch (e) {
                             console.error("Failed to parse settings in layout", e);
                         }
@@ -162,6 +178,22 @@ export default function AdminLayout({ children }) {
                                 isDisabled = !appEventReminder;
                             } else if (n.type === "event_refund") {
                                 isDisabled = !appEventRefund;
+                            } else if (n.type === "conseil_engagement") {
+                                isDisabled = !appConseilEngagement;
+                            } else if (n.type === "project_engagement") {
+                                isDisabled = !appProjectEngagement;
+                            } else if (n.type === "finance_payment_confirmed") {
+                                isDisabled = !appFinancePaymentConfirmed;
+                            } else if (n.type === "finance_payment_received") {
+                                isDisabled = !appFinancePaymentReceived;
+                            } else if (n.type === "finance_payment_failed") {
+                                isDisabled = !appFinancePaymentFailed;
+                            } else if (n.type === "finance_refund_issued") {
+                                isDisabled = !appFinanceRefundIssued;
+                            } else if (n.type === "finance_subscription_active") {
+                                isDisabled = !appFinanceSubscriptionActive;
+                            } else if (n.type === "material_alert") {
+                                isDisabled = !appMaterialAlerts;
                             }
                         }
                         if (isDisabled) {
@@ -244,6 +276,30 @@ export default function AdminLayout({ children }) {
                         }
                         if (n.type === "event_refund") {
                             return appEventRefund;
+                        }
+                        if (n.type === "conseil_engagement") {
+                            return appConseilEngagement;
+                        }
+                        if (n.type === "project_engagement") {
+                            return appProjectEngagement;
+                        }
+                        if (n.type === "finance_payment_confirmed") {
+                            return appFinancePaymentConfirmed;
+                        }
+                        if (n.type === "finance_payment_received") {
+                            return appFinancePaymentReceived;
+                        }
+                        if (n.type === "finance_payment_failed") {
+                            return appFinancePaymentFailed;
+                        }
+                        if (n.type === "finance_refund_issued") {
+                            return appFinanceRefundIssued;
+                        }
+                        if (n.type === "finance_subscription_active") {
+                            return appFinanceSubscriptionActive;
+                        }
+                        if (n.type === "material_alert") {
+                            return appMaterialAlerts;
                         }
                         return true;
                     });
@@ -944,6 +1000,38 @@ export default function AdminLayout({ children }) {
                                     typeBg = "rgba(202, 214, 216, 0.3)";
                                     typeColor = "#4F6163";
                                     indicator = "💡";
+                                } else if (n.type === "conseil_engagement") {
+                                    typeBg = "rgba(251, 191, 36, 0.15)";
+                                    typeColor = "#d97706";
+                                    indicator = "👍";
+                                } else if (n.type === "project_engagement") {
+                                    typeBg = "rgba(236, 72, 153, 0.15)";
+                                    typeColor = "#be185d";
+                                    indicator = "❤️";
+                                } else if (n.type === "finance_payment_confirmed") {
+                                    typeBg = "rgba(34, 197, 94, 0.15)";
+                                    typeColor = "#15803d";
+                                    indicator = "💳";
+                                } else if (n.type === "finance_payment_received") {
+                                    typeBg = "rgba(20, 184, 166, 0.15)";
+                                    typeColor = "#0f766e";
+                                    indicator = "💶";
+                                } else if (n.type === "finance_payment_failed") {
+                                    typeBg = "rgba(239, 68, 68, 0.15)";
+                                    typeColor = "#b91c1c";
+                                    indicator = "⚠️";
+                                } else if (n.type === "finance_refund_issued") {
+                                    typeBg = "rgba(14, 165, 233, 0.15)";
+                                    typeColor = "#0369a1";
+                                    indicator = "↩️";
+                                } else if (n.type === "finance_subscription_active") {
+                                    typeBg = "rgba(124, 58, 237, 0.15)";
+                                    typeColor = "#6d28d9";
+                                    indicator = "🧾";
+                                } else if (n.type === "material_alert") {
+                                    typeBg = "rgba(34, 197, 94, 0.14)";
+                                    typeColor = "#15803d";
+                                    indicator = "🌿";
                                 }
 
                                 return (
