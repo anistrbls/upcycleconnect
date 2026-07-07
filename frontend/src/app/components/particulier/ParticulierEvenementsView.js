@@ -60,10 +60,11 @@ function isEventPast(item) {
 }
 
 /* ── Card événement style photo plein fond ── */
-function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout, registeredIds, loadingIds }) {
+function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout, registeredIds, loadingIds, isPremiumAtelier }) {
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
     const start = new Date(item.dateDebut);
     const isFull = (() => { const r = placesRestantes(item); return r !== null && r <= 0; })();
+    const canRegisterDespiteFull = isFull && isPremiumAtelier;
     const isRegistered = registeredIds.has(item.id);
     const isLoading = loadingIds.has(item.id);
     const isPaid = item.pricingType === "payant" && item.price > 0;
@@ -105,8 +106,8 @@ function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout
                         {TYPE_LABELS[item.type] || item.type}
                     </span>
                     {(() => { const r = placesRestantes(item); return r !== null ? (
-                        <span style={{ padding: "3px 10px", borderRadius: "999px", background: r <= 0 ? "rgba(220,38,38,0.2)" : "rgba(255,255,255,0.12)", fontSize: "0.73rem", color: r <= 0 ? "#fca5a5" : "rgba(255,255,255,0.85)", fontWeight: 500, border: r <= 0 ? "1px solid rgba(220,38,38,0.4)" : "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(4px)" }}>
-                            {r <= 0 ? "Complet" : `${r} place${r > 1 ? "s" : ""} restante${r > 1 ? "s" : ""}`}
+                        <span style={{ padding: "3px 10px", borderRadius: "999px", background: r <= 0 ? (canRegisterDespiteFull ? "rgba(124,58,237,0.25)" : "rgba(220,38,38,0.2)") : "rgba(255,255,255,0.12)", fontSize: "0.73rem", color: r <= 0 ? (canRegisterDespiteFull ? "#c4b5fd" : "#fca5a5") : "rgba(255,255,255,0.85)", fontWeight: 500, border: r <= 0 ? (canRegisterDespiteFull ? "1px solid rgba(124,58,237,0.45)" : "1px solid rgba(220,38,38,0.4)") : "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(4px)" }}>
+                            {r <= 0 ? (canRegisterDespiteFull ? "★ Accès prioritaire" : "Complet") : `${r} place${r > 1 ? "s" : ""} restante${r > 1 ? "s" : ""}`}
                         </span>
                     ) : null; })()}
                 </div>
@@ -125,7 +126,7 @@ function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout
                             cursor: "pointer",
                             fontSize: "0.82rem",
                             fontWeight: 600,
-                            ...(isFull && !isRegistered ? { flex: 1 } : {}),
+                            ...(isFull && !isRegistered && !canRegisterDespiteFull ? { flex: 1 } : {}),
                         }}
                     >
                         Voir le détail
@@ -151,6 +152,10 @@ function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout
                         >
                             {isLoading ? "…" : "Se désinscrire"}
                         </button>
+                    ) : canRegisterDespiteFull ? (
+                        <button type="button" disabled={isLoading} onClick={() => isPaid ? onCheckout(item) : onRegister(item)} style={{ flex: 1, padding: "9px 14px", borderRadius: "999px", border: "none", background: "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)", color: "white", cursor: "pointer", fontFamily: "inherit", fontSize: "0.82rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: "5px" }}>
+                            {isLoading ? "…" : <>★ {isPaid ? "Réserver (prioritaire)" : "S'inscrire (prioritaire)"}</>}
+                        </button>
                     ) : isFull ? null : isPaid ? (
                         <button type="button" disabled={isLoading} onClick={() => onCheckout(item)} style={{ flex: 1, padding: "9px 14px", borderRadius: "999px", border: "none", background: "white", color: "#111", cursor: "pointer", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: "0.35rem" }}>
                             {isLoading ? "…" : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> Réserver</>}
@@ -167,10 +172,11 @@ function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout
 }
 
 /* ── Modale détail ── */
-function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onCheckout, isRegistered, isLoading }) {
+function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onCheckout, isRegistered, isLoading, isPremiumAtelier }) {
     if (!item) return null;
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
     const isFull = (() => { const r = placesRestantes(item); return r !== null && r <= 0; })();
+    const canRegisterDespiteFull = isFull && isPremiumAtelier;
     const isPaid = item.pricingType === "payant" && item.price > 0;
     const restantes = placesRestantes(item);
     const start = new Date(item.dateDebut);
@@ -184,7 +190,8 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
                 )}
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                     <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.78rem", fontWeight: 700, background: tc.bg, color: tc.color }}>{TYPE_LABELS[item.type] || item.type}</span>
-                    {isFull && <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.78rem", fontWeight: 700, background: "#FDE8E8", color: "#B24A4A" }}>Complet</span>}
+                    {isFull && !canRegisterDespiteFull && <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.78rem", fontWeight: 700, background: "#FDE8E8", color: "#B24A4A" }}>Complet</span>}
+                    {isFull && canRegisterDespiteFull && <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.78rem", fontWeight: 700, background: "#EDE9FE", color: "#6D28D9" }}>★ Accès prioritaire Premium</span>}
                     {isRegistered && <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.78rem", fontWeight: 700, background: "#E5FFBC", color: "#166534" }}>Inscrit</span>}
                 </div>
                 {item.description && <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.65 }}>{item.description}</p>}
@@ -197,8 +204,8 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
                     {restantes !== null && (
                         <div style={{ display: "flex", gap: "0.5rem" }}>
                             <span style={{ color: "var(--text-muted)", flexShrink: 0 }}>Places</span>
-                            <span style={{ color: restantes <= 0 ? "#B24A4A" : "inherit" }}>
-                                {item.participantCount ?? 0}/{item.capaciteMax ?? item.capacite} inscrits{restantes > 0 ? ` · ${restantes} restante${restantes > 1 ? "s" : ""}` : " · Complet"}
+                            <span style={{ color: restantes <= 0 && !canRegisterDespiteFull ? "#B24A4A" : restantes <= 0 ? "#6D28D9" : "inherit" }}>
+                                {item.participantCount ?? 0}/{item.capaciteMax ?? item.capacite} inscrits{restantes > 0 ? ` · ${restantes} restante${restantes > 1 ? "s" : ""}` : canRegisterDespiteFull ? " · Complet (accès prioritaire activé)" : " · Complet"}
                             </span>
                         </div>
                     )}
@@ -224,6 +231,10 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
                         >
                             {isLoading ? "…" : "Se désinscrire"}
                         </button>
+                    ) : canRegisterDespiteFull ? (
+                        <button type="button" disabled={isLoading} onClick={() => { if (isPaid) { onCheckout(item); } else { onRegister(item); } onClose(); }} style={{ flex: 1, padding: "0.75rem", borderRadius: "16px", border: "none", background: "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)", color: "white", fontFamily: "inherit", fontSize: "0.9rem", fontWeight: 700, cursor: "pointer" }}>
+                            {isLoading ? "…" : `★ ${isPaid ? "Réserver" : "S'inscrire"} (accès prioritaire)`}
+                        </button>
                     ) : isFull ? (
                         <div style={{ flex: 1, padding: "0.75rem", borderRadius: "16px", background: "#FDE8E8", color: "#B24A4A", fontSize: "0.9rem", fontWeight: 600, textAlign: "center" }}>Complet — inscription impossible</div>
                     ) : isPaid ? (
@@ -243,6 +254,7 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
 }
 
 /* ── Modale Confirmation Annulation ── */
+
 function CancelConfirmModal({ item, open, onClose, onConfirm, isLoading }) {
     const [refundReason, setRefundReason] = useState("");
     useEffect(() => {
@@ -448,13 +460,21 @@ export default function ParticulierEvenementsView({ events = [], registrations =
     const [cancelItem, setCancelItem] = useState(null);
     const [toast, setToast] = useState(null);
     const [loadingIds, setLoadingIds] = useState(new Set());
-    const [registeredIds, setRegisteredIds] = useState(() => new Set((registrations || []).filter(r => r.paymentStatus !== "pending" && r.registrationStatus !== "cancelled").map(r => r.id ?? r.eventId)));
+    const [registeredIds, setRegisteredIds] = useState(() => new Set((registrations || []).filter(r => r.paymentStatus !== "pending" && r.registrationStatus !== "cancelled" && r.refundStatus !== "refunded").map(r => r.id ?? r.eventId)));
+    const [isPremiumAtelier, setIsPremiumAtelier] = useState(false);
     const toastTimerRef = useRef(null);
     const handledPaymentRef = useRef("");
 
+    useEffect(() => {
+        fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() })
+            .then((r) => r.json())
+            .then((d) => setIsPremiumAtelier(String(d.user?.subscriptionType || "").toLowerCase() === "premium_atelier"))
+            .catch(() => {});
+    }, []);
+
     // Sync registeredIds when registrations prop changes
     const syncRegistrations = useCallback((regs) => {
-        setRegisteredIds(new Set((regs || []).filter(r => r.paymentStatus !== "pending").map(r => r.id ?? r.eventId)));
+        setRegisteredIds(new Set((regs || []).filter(r => r.paymentStatus !== "pending" && r.registrationStatus !== "cancelled" && r.refundStatus !== "refunded").map(r => r.id ?? r.eventId)));
     }, []);
 
     useEffect(() => {
@@ -690,7 +710,7 @@ export default function ParticulierEvenementsView({ events = [], registrations =
                         {visible.map((item, index) => (
                             <EventCard key={item.id} index={index} item={item} onDetail={handleDetailAction}
                                 onRegister={handleRegister} onUnregister={handleUnregisterClick} onCheckout={handleCheckout}
-                                registeredIds={registeredIds} loadingIds={loadingIds} />
+                                registeredIds={registeredIds} loadingIds={loadingIds} isPremiumAtelier={isPremiumAtelier} />
                         ))}
                     </div>
                 )}
@@ -703,7 +723,7 @@ export default function ParticulierEvenementsView({ events = [], registrations =
 
     /* ── Vue Mes inscriptions ── */
     if (subpage === "mes-inscriptions") {
-        const visibleRegistrations = (registrations || []).filter((item) => item.paymentStatus !== "pending");
+        const visibleRegistrations = (registrations || []).filter((item) => item.paymentStatus !== "pending" && item.registrationStatus !== "cancelled" && item.refundStatus !== "refunded");
 
         return (
             <>

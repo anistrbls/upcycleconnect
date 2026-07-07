@@ -54,6 +54,10 @@ function ProVueGlobaleHome({ title }) {
 
     const safe = (val) => stats ? (stats[val] || 0) : 0;
 
+    if (stats && stats.subscriptionType === "premium_atelier") {
+        return <PremiumAtelierDashboard title={title} stats={stats} />;
+    }
+
     return (
         <>
             <div className="header-section">
@@ -157,6 +161,235 @@ function ProVueGlobaleHome({ title }) {
                         <span className="sidebar-icon" style={{ alignSelf: "flex-start" }}>
                             <Icon path={tile.icon} />
                         </span>
+                        <div style={{ fontWeight: 700, fontSize: "1rem" }}>{tile.label}</div>
+                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.45 }}>{tile.desc}</div>
+                    </Link>
+                ))}
+            </div>
+        </>
+    );
+}
+
+// ─── Premium Atelier: SVG helpers ────────────────────────────────────────────
+
+function SvgLineChart({ data, color = "#15803d" }) {
+    const W = 580; const H = 128;
+    const PAD = { top: 22, right: 12, bottom: 28, left: 12 };
+    const iW = W - PAD.left - PAD.right;
+    const iH = H - PAD.top - PAD.bottom;
+
+    if (!data || data.length === 0) {
+        return (
+            <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "#475569", fontSize: "0.8rem" }}>
+                Aucune récupération enregistrée sur les 8 dernières semaines
+            </div>
+        );
+    }
+
+    const maxVal = Math.max(...data.map((d) => d.count), 1);
+    const n = data.length;
+    const xPos = (i) => PAD.left + (n === 1 ? iW / 2 : (i / (n - 1)) * iW);
+    const yPos = (v) => PAD.top + iH - (v / maxVal) * iH;
+    const pts = data.map((d, i) => `${xPos(i)},${yPos(d.count)}`).join(" ");
+    const area = [
+        `M ${xPos(0)},${PAD.top + iH}`,
+        ...data.map((d, i) => `L ${xPos(i)},${yPos(d.count)}`),
+        `L ${xPos(n - 1)},${PAD.top + iH}`,
+        "Z",
+    ].join(" ");
+
+    return (
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, overflow: "visible" }}>
+            <defs>
+                <linearGradient id="prem-lg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+                    <stop offset="100%" stopColor={color} stopOpacity="0" />
+                </linearGradient>
+            </defs>
+                {[0.25, 0.5, 0.75, 1].map((p) => (
+                <line key={p} x1={PAD.left} y1={PAD.top + iH * (1 - p)} x2={W - PAD.right} y2={PAD.top + iH * (1 - p)}
+                    stroke="rgba(35,59,61,0.12)" strokeWidth="1" />
+            ))}
+            <path d={area} fill="url(#prem-lg)" />
+            <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            {data.map((d, i) => (
+                <g key={i}>
+                    <circle cx={xPos(i)} cy={yPos(d.count)} r="4" fill={color} stroke="rgba(35,59,61,0.38)" strokeWidth="1.5" />
+                    {d.count > 0 && (
+                        <text x={xPos(i)} y={yPos(d.count) - 9} textAnchor="middle" fontSize="10" fill={color} fontWeight="700">{d.count}</text>
+                    )}
+                    <text x={xPos(i)} y={H - 3} textAnchor="middle" fontSize="9" fill="var(--text-muted)">{d.weekLabel}</text>
+                </g>
+            ))}
+        </svg>
+    );
+}
+
+function HorizontalBars({ data, color = "#15803d" }) {
+    if (!data || data.length === 0)
+        return <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", padding: "0.4rem 0" }}>Aucun matériau récupéré</div>;
+    const max = Math.max(...data.map((d) => d.count), 1);
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            {data.map((d, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                    <span style={{ minWidth: "100px", fontSize: "0.76rem", color: "var(--text-muted)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.material}>{d.material}</span>
+                    <div style={{ flex: 1, height: "9px", background: "rgba(35,59,61,0.10)", borderRadius: "999px", overflow: "hidden" }}>
+                        <div style={{ width: `${(d.count / max) * 100}%`, height: "100%", background: color, borderRadius: "999px", opacity: 0.85 }} />
+                    </div>
+                    <span style={{ minWidth: "22px", fontSize: "0.78rem", color, fontWeight: 800, textAlign: "right" }}>{d.count}</span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function PremiumAtelierDashboard({ title, stats }) {
+    const totalKg = ((stats.totalWeightGrams || 0) / 1000).toFixed(1);
+    const co2Saved = ((stats.totalWeightGrams || 0) / 1000 * 2.5).toFixed(1);
+    const thisMonth = stats.thisMonthRecoveries || 0;
+    const total = stats.objetsTraites || 0;
+    const activeProjects = stats.activeProjects || 0;
+    const score = stats.userScore ? Math.round(stats.userScore) : 0;
+    const watchlist = stats.watchlistCount || 0;
+    const rbt = stats.recoveryByType || { don: 0, vente: 0 };
+    const typeTotal = rbt.don + rbt.vente;
+    const donPct = typeTotal > 0 ? Math.round((rbt.don / typeTotal) * 100) : 0;
+    const ventePct = typeTotal > 0 ? 100 - donPct : 0;
+    const dep = stats.depenses || {};
+
+    const C = {
+        green: "#15803d", cyan: "#0e7490", purple: "#7c3aed", yellow: "#ca8a04", pink: "#be185d",
+    };
+
+    const kpis = [
+        { label: "Récupérations ce mois", value: thisMonth, className: "kpi-card" },
+        { label: "Total récupérés", value: total, className: "kpi-card" },
+        { label: "Projets publiés", value: activeProjects, className: "kpi-card" },
+        { label: "Score UC Connect", value: `${score} pts`, className: "kpi-card kpi-card-accent" },
+        { label: "Poids récupéré", value: `${totalKg} kg`, className: "kpi-card" },
+        { label: "Watchlist", value: watchlist, className: "kpi-card kpi-card-warn" },
+    ];
+
+    return (
+        <>
+            <div className="header-section">
+                <div className="title-area">
+                    <span className="activities-label">Espace professionnel</span>
+                    <h1>{title}</h1>
+                    <p style={{ marginTop: "0.5rem", color: "var(--text-muted)", fontSize: "0.95rem", maxWidth: "42rem" }}>
+                        Tableau de bord Premium Atelier avec vos indicateurs avancés et vos données en temps réel.
+                    </p>
+                </div>
+            </div>
+
+            <div className="db-section-label">Mes statistiques</div>
+            <div className="kpi-grid">
+                {kpis.map((k, i) => (
+                    <div key={i} className={k.className}>
+                        <span className="kpi-title">{k.label}</span>
+                        <div className="kpi-value">{k.value}</div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="db-section-label">Analytique avancée</div>
+            <div className="stats-row">
+                <div className="panel stats-panel">
+                    <div className="section-header">
+                        <span className="section-title">Récupérations / semaine</span>
+                        <span className="db-badge">8 semaines</span>
+                    </div>
+                    <SvgLineChart data={stats.weeklyRecoveries || []} />
+                </div>
+                <div className="panel stats-panel">
+                    <div className="section-header">
+                        <span className="section-title">Top matériaux récupérés</span>
+                        <span className="db-badge">Volume</span>
+                    </div>
+                    <HorizontalBars data={stats.materialBreakdown || []} />
+                </div>
+            </div>
+
+            <div className="db-section-label">Impact et finance</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1rem", marginBottom: "1.4rem" }}>
+                <div className="panel stats-panel">
+                    <div className="section-header">
+                        <span className="section-title">Impact écologique estimé</span>
+                    </div>
+                    <div className="finance-grid" style={{ gridTemplateColumns: "1fr" }}>
+                        <div>
+                            <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 700, marginBottom: "0.2rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>Matière détournée</div>
+                            <div style={{ fontSize: "1.6rem", fontWeight: 800, color: C.green }}>{totalKg} kg</div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 700, marginBottom: "0.2rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>CO₂ évité</div>
+                            <div style={{ fontSize: "1.6rem", fontWeight: 800, color: C.cyan }}>{co2Saved} kg</div>
+                            <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>~2.5 kg CO₂ par kg recyclé</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="panel stats-panel">
+                    <div className="section-header">
+                        <span className="section-title">Répartition don / vente</span>
+                    </div>
+                    {typeTotal > 0 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                            <div style={{ height: "11px", background: "var(--surface-sunken)", borderRadius: "999px", overflow: "hidden", display: "flex", border: "1px solid var(--border-color)" }}>
+                                <div style={{ width: `${donPct}%`, background: C.green, transition: "width .6s ease" }} />
+                                <div style={{ width: `${ventePct}%`, background: C.pink, transition: "width .6s ease" }} />
+                            </div>
+                            <div style={{ display: "flex", gap: "1rem" }}>
+                                {[{ label: "Don", pct: donPct, color: C.green, val: rbt.don }, { label: "Vente", pct: ventePct, color: C.pink, val: rbt.vente }].map((x) => (
+                                    <div key={x.label} style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                                        <div style={{ width: 9, height: 9, borderRadius: "50%", background: x.color }} />
+                                        <span style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>{x.label} <strong style={{ color: x.color }}>{x.pct}%</strong></span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{typeTotal} objets au total</div>
+                        </div>
+                    ) : (
+                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Aucune donnée disponible</div>
+                    )}
+                </div>
+
+                <div className="panel stats-panel">
+                    <div className="section-header">
+                        <span className="section-title">Dépenses ce mois</span>
+                        <span className="db-badge">Ce mois</span>
+                    </div>
+                    <div className="finance-grid" style={{ gridTemplateColumns: "1fr", gap: "0.7rem" }}>
+                        {[
+                            { label: "Abonnement", val: dep.abonnement || 0, color: C.purple },
+                            { label: "Ateliers", val: dep.ateliers || 0, color: C.cyan },
+                            { label: "Événements", val: dep.evenements || 0, color: C.yellow },
+                        ].map((it) => (
+                            <div key={it.label} className="finance-block" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <span style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>{it.label}</span>
+                                <span style={{ fontSize: "0.84rem", fontWeight: 700, color: it.color }}>{it.val.toFixed(2)} €</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="finance-total" style={{ marginTop: "1rem" }}>
+                        <span>Total dépensé ce mois</span>
+                        <span className="finance-total-amount" style={{ color: C.green }}>{(dep.total || 0).toFixed(2)} €</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Quick links */}
+            <div className="db-section-label">Accès rapides</div>
+            <div className="kpi-grid">
+                {[
+                    { href: "/annonces/disponible", label: "Annonces disponibles", desc: "Parcourir et réserver des objets.", icon: "M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6 M12 12V2 M12 2l4 4 M12 2L8 6" },
+                    { href: "/projets/mes-projets", label: "Mes projets", desc: "Créer et suivre vos projets.", icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" },
+                    { href: "/annonces/mes-recuperations", label: "Mes récupérations", desc: "Suivi de vos réservations.", icon: "M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM4 7l8-4 8 4" },
+                    { href: "/forum/sujets", label: "Forum", desc: "Échanger avec la communauté.", icon: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
+                ].map((tile) => (
+                    <Link key={tile.href} href={tile.href} className="panel" style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1.25rem", textDecoration: "none", color: "inherit" }}>
+                        <span className="sidebar-icon" style={{ alignSelf: "flex-start" }}><Icon path={tile.icon} /></span>
                         <div style={{ fontWeight: 700, fontSize: "1rem" }}>{tile.label}</div>
                         <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.45 }}>{tile.desc}</div>
                     </Link>

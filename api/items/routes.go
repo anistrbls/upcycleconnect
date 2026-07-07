@@ -74,6 +74,7 @@ func validateSubscriptionPlanPayload(payload *subscriptionPlanPayload) error {
 
 func validateSubscriptionPlanPricePayload(payload *subscriptionPlanPayload) error {
 	payload.Key = NormalizeSubscriptionPlanKey(payload.Key)
+	payload.Features = cleanSubscriptionPlanFeatures(payload.Features)
 	if payload.Key == "" {
 		return fmt.Errorf("key is required")
 	}
@@ -841,7 +842,12 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 
-		plan, err := repo.UpdateSubscriptionPlanPrice(r.Context(), payload.Key, payload.PriceEuro)
+		features := previousPlan.Features
+		if payload.Features != nil {
+			features = payload.Features
+		}
+
+		plan, err := repo.UpdateSubscriptionPlan(r.Context(), payload.Key, payload.PriceEuro, features)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeError(w, http.StatusNotFound, "subscription plan not found")

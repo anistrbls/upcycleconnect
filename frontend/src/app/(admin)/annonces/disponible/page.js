@@ -1031,9 +1031,6 @@ export default function ProfessionalAvailablePage() {
 
             {canUseAdvancedFilters && (
                 <section style={styles.advancedPanel}>
-                    <span style={styles.advancedLabel}>
-                        Filtres avancés
-                    </span>
                     <select value={itemTypeFilter} onChange={(e) => setItemTypeFilter(e.target.value)} style={styles.advancedField}>
                         <option value="">Type annonce</option>
                         <option value="don">Don</option>

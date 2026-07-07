@@ -169,15 +169,16 @@ func (r *Repository) CreateSubscriptionPlan(ctx context.Context, key string, nam
 	return p, nil
 }
 
-func (r *Repository) UpdateSubscriptionPlanPrice(ctx context.Context, key string, priceEuro int) (SubscriptionPlan, error) {
+func (r *Repository) UpdateSubscriptionPlan(ctx context.Context, key string, priceEuro int, features []string) (SubscriptionPlan, error) {
 	var p SubscriptionPlan
 	var savedFeatures []string
 	err := r.db.QueryRowContext(ctx, `
 		UPDATE subscription_plans
-		SET price_euro = $1
-		WHERE key = $2
+		SET price_euro = $1,
+		    features = $2
+		WHERE key = $3
 		RETURNING key, name, price_euro, features
-	`, priceEuro, NormalizeSubscriptionPlanKey(key)).Scan(&p.Key, &p.Name, &p.PriceEuro, pq.Array(&savedFeatures))
+	`, priceEuro, pq.Array(cleanSubscriptionPlanFeatures(features)), NormalizeSubscriptionPlanKey(key)).Scan(&p.Key, &p.Name, &p.PriceEuro, pq.Array(&savedFeatures))
 	if err != nil {
 		return SubscriptionPlan{}, err
 	}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, Download } from "lucide-react";
 import { apiUrl, buildAuthHeaders } from "../../lib/api";
 import RefundPaymentDetailModal, { showRefundDetailsButton } from "./RefundPaymentDetailModal";
 import InvoicePreviewModal from "./InvoicePreviewModal";
@@ -55,6 +55,8 @@ export default function MyPaymentsView() {
     const [error, setError] = useState(null);
     const [refundDetailPayment, setRefundDetailPayment] = useState(null);
     const [invoicePayment, setInvoicePayment] = useState(null);
+    const [subscriptionType, setSubscriptionType] = useState(null);
+    const [csvExporting, setCsvExporting] = useState(false);
 
     const fetchPayments = useCallback(async () => {
         setLoading(true);
@@ -78,6 +80,48 @@ export default function MyPaymentsView() {
         fetchPayments();
     }, [fetchPayments]);
 
+    useEffect(() => {
+        fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() })
+            .then((r) => r.json())
+            .then((d) => setSubscriptionType(String(d.user?.subscriptionType || "").toLowerCase()))
+            .catch(() => {});
+    }, []);
+
+    const canExportCsv = subscriptionType === "pro_essentiel" || subscriptionType === "premium_atelier";
+
+    const exportToCsv = () => {
+        if (!canExportCsv || payments.length === 0) return;
+        setCsvExporting(true);
+
+        try {
+            const headers = ["Date", "Transaction", "Contrepartie", "Type", "Montant (€)", "Statut", "Référence"];
+            const rows = payments.map((p) => [
+                p.date ? new Date(p.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—",
+                `"${String(p.entityName || "").replace(/"/g, "\"\"")}"`,
+                `"${String(p.userName || "").replace(/"/g, "\"\"")}"`,
+                `"${String(p.source || "").replace(/"/g, "\"\"")}"`,
+                (Number(p.amount) || 0).toFixed(2).replace(".", ","),
+                `"${statusLabel(p.status)}"`,
+                `"${String(p.transactionRef || "").replace(/"/g, "\"\"")}"`
+            ]);
+
+            const csvContent = [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\n");
+            const bom = "\uFEFF";
+            const blob = new Blob([bom + csvContent], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            const dateStr = new Date().toLocaleDateString("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\//g, "-");
+            link.href = url;
+            link.download = `transactions_${dateStr}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } finally {
+            setCsvExporting(false);
+        }
+    };
+
     const formatAmount = (amount) =>
         new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(amount) || 0);
 
@@ -94,15 +138,34 @@ export default function MyPaymentsView() {
         });
     };
 
+    const thStyle = { padding: "1rem", color: "var(--text-muted)", fontWeight: "600", textTransform: "uppercase", fontSize: "0.7rem", letterSpacing: "0.05em" };
+    const tdStyle = { padding: "1rem" };
+
     return (
         <div style={{ padding: "0" }}>
             <div className="header-section">
                 <div className="title-area">
                     <span className="activities-label">Finances</span>
                     <h1>Mes paiements & transactions</h1>
-                    <p style={{ margin: "0.35rem 0 0", fontSize: "0.88rem", color: "var(--text-muted)", maxWidth: "42rem" }}>
-                        Historique de vos paiements (événements, annonces, prestations) et des statuts associés (remboursements, annulations, etc.).
-                    </p>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", marginTop: "0.35rem" }}>
+                        <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--text-muted)", maxWidth: "42rem" }}>
+                            Historique de vos paiements (événements, annonces, prestations) et des statuts associés (remboursements, annulations, etc.).
+                        </p>
+                        {canExportCsv && (
+                            <button
+                                id="export-csv-btn"
+                                type="button"
+                                className="csv-export-btn"
+                                onClick={exportToCsv}
+                                disabled={csvExporting || payments.length === 0}
+                                title={payments.length === 0 ? "Aucune transaction à exporter" : "Exporter l'historique complet en CSV"}
+                                style={{ flexShrink: 0 }}
+                            >
+                                <Download size={15} />
+                                {csvExporting ? "Export en cours…" : "Exporter CSV"}
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -268,6 +331,36 @@ export default function MyPaymentsView() {
                     to {
                         transform: rotate(360deg);
                     }
+                }
+                .csv-export-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 7px;
+                    padding: 0.55rem 1.1rem;
+                    border-radius: 10px;
+                    border: 1.5px solid var(--primary-color, #059669);
+                    background: transparent;
+                    color: var(--primary-color, #059669);
+                    font-size: 0.84rem;
+                    font-weight: 700;
+                    cursor: pointer;
+                    transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+                    white-space: nowrap;
+                }
+                .csv-export-btn:hover:not(:disabled) {
+                    background: var(--primary-color, #059669);
+                    color: #ffffff;
+                    box-shadow: 0 2px 10px rgba(5,150,105,0.18);
+                }
+                .csv-export-btn:disabled {
+                    opacity: 0.45;
+                    cursor: not-allowed;
+                }
+                .header-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.75rem;
+                    flex-shrink: 0;
                 }
             `}</style>
         </div>

@@ -236,11 +236,15 @@ export default function SubscriptionsAdminView() {
         setEditSaving(true);
         setEditError("");
         try {
+            const cleanedFeatures = (editFormData.features || [])
+                .map((f) => String(f || "").trim())
+                .filter(Boolean);
             const payload = isCreatingPlan
-                ? editFormData
+                ? { ...editFormData, features: cleanedFeatures }
                 : {
                     key: editFormData.key,
                     price_euro: editFormData.price_euro,
+                    features: cleanedFeatures,
                 };
             const res = await fetch(apiUrl("/admin/subscription-plans"), {
                 method: isCreatingPlan ? "POST" : "PUT",
@@ -263,7 +267,7 @@ export default function SubscriptionsAdminView() {
                 type: "success",
                 msg: isCreatingPlan
                     ? `L'offre "${editFormData.name}" a été créée avec succès.`
-                    : `Le tarif de l'offre "${editFormData.name}" a été mis à jour avec succès.${notificationSuffix}`,
+                    : `L'offre "${editFormData.name}" a été mise à jour avec succès.${notificationSuffix}`,
             });
             await loadPlans();
         } catch (err) {
@@ -706,7 +710,7 @@ export default function SubscriptionsAdminView() {
                                                 className="config-btn"
                                             >
                                                 <CreditCard size={16} />
-                                                Modifier le tarif
+                                                Gérer l'offre
                                             </button>
                                         </div>
                                     </div>
@@ -800,7 +804,7 @@ export default function SubscriptionsAdminView() {
             {/* Modal "Créer / modifier l'offre d'abonnement" */}
             <AdminModal
                 open={editModalOpen}
-                title={isCreatingPlan ? "Ajouter une offre" : <>Modifier le tarif : <span data-i18n-user-content="true">{editFormData.name}</span></>}
+                title={isCreatingPlan ? "Ajouter une offre" : <>Gérer l'offre : <span data-i18n-user-content="true">{editFormData.name}</span></>}
                 onClose={() => setEditModalOpen(false)}
             >
                 <form onSubmit={handleSavePlan} style={{ display: "grid", gap: "1.25rem", marginTop: "1rem" }}>
@@ -836,7 +840,7 @@ export default function SubscriptionsAdminView() {
                         <div style={{ background: "#f8fafb", padding: "1rem", borderRadius: "16px", border: "1px solid #e2eaea", fontSize: "0.85rem", color: "var(--text-muted)", display: "grid", gap: "0.35rem" }}>
                             <div><strong style={{ color: "var(--text-main)" }}>Offre :</strong> <span data-i18n-user-content="true">{editFormData.name}</span></div>
                             <div><strong style={{ color: "var(--text-main)" }}>Clé :</strong> <span data-i18n-user-content="true">{editFormData.key}</span></div>
-                            <div>Seule la tarification mensuelle est modifiable pour une offre existante.</div>
+                            <div>Vous pouvez modifier le tarif mensuel et la liste des fonctionnalités de cette offre.</div>
                         </div>
                     )}
 
@@ -852,73 +856,70 @@ export default function SubscriptionsAdminView() {
                         />
                     </label>
 
-                    {isCreatingPlan && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                            <span style={labelStyle}>Fonctionnalités incluses</span>
-                            <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "0.25rem" }}>
-                                {editFormData.features.map((feat, index) => (
-                                    <div key={index} style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.5rem" }}>
-                                        <input
-                                            type="text"
-                                            placeholder="Ex: Assistance VIP 7j/7"
-                                            style={{ ...fieldStyle, flex: 1 }}
-                                            value={feat}
-                                            onChange={(e) => {
-                                                const newFeats = [...editFormData.features];
-                                                newFeats[index] = e.target.value;
-                                                setEditFormData(prev => ({ ...prev, features: newFeats }));
-                                            }}
-                                            required
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const newFeats = editFormData.features.filter((_, idx) => idx !== index);
-                                                setEditFormData(prev => ({ ...prev, features: newFeats }));
-                                            }}
-                                            style={{
-                                                border: "1px solid #fee2e2",
-                                                background: "#fef2f2",
-                                                color: "#ef4444",
-                                                borderRadius: "12px",
-                                                padding: "0.6rem",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                justifyContent: "center"
-                                            }}
-                                            title="Supprimer cette ligne"
-                                        >
-                                            <Trash size={16} />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={() => setEditFormData(prev => ({ ...prev, features: [...prev.features, ""] }))}
-                                style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    gap: "0.4rem",
-                                    border: "1px dashed var(--border-color)",
-                                    background: "rgba(0,0,0,0.02)",
-                                    borderRadius: "12px",
-                                    padding: "0.6rem",
-                                    cursor: "pointer",
-                                    fontWeight: "600",
-                                    fontSize: "0.85rem",
-                                    color: "var(--text-main)",
-                                    marginTop: "0.25rem"
-                                }}
-                            >
-                                <Plus size={16} />
-                                Ajouter une fonctionnalité
-                            </button>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                        <span style={labelStyle}>Fonctionnalités incluses</span>
+                        <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                            {editFormData.features.map((feat, index) => (
+                                <div key={index} style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.5rem" }}>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: Assistance VIP 7j/7"
+                                        style={{ ...fieldStyle, flex: 1 }}
+                                        value={feat}
+                                        onChange={(e) => {
+                                            const newFeats = [...editFormData.features];
+                                            newFeats[index] = e.target.value;
+                                            setEditFormData(prev => ({ ...prev, features: newFeats }));
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const newFeats = editFormData.features.filter((_, idx) => idx !== index);
+                                            setEditFormData(prev => ({ ...prev, features: newFeats }));
+                                        }}
+                                        style={{
+                                            border: "1px solid #fee2e2",
+                                            background: "#fef2f2",
+                                            color: "#ef4444",
+                                            borderRadius: "12px",
+                                            padding: "0.6rem",
+                                            cursor: "pointer",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center"
+                                        }}
+                                        title="Supprimer cette ligne"
+                                    >
+                                        <Trash size={16} />
+                                    </button>
+                                </div>
+                            ))}
                         </div>
-                    )}
+
+                        <button
+                            type="button"
+                            onClick={() => setEditFormData(prev => ({ ...prev, features: [...prev.features, ""] }))}
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: "0.4rem",
+                                border: "1px dashed var(--border-color)",
+                                background: "rgba(0,0,0,0.02)",
+                                borderRadius: "12px",
+                                padding: "0.6rem",
+                                cursor: "pointer",
+                                fontWeight: "600",
+                                fontSize: "0.85rem",
+                                color: "var(--text-main)",
+                                marginTop: "0.25rem"
+                            }}
+                        >
+                            <Plus size={16} />
+                            Ajouter une fonctionnalité
+                        </button>
+                    </div>
 
                     {editError && (
                         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", color: "var(--state-critical)", background: "#fef2f2", padding: "0.75rem", borderRadius: "12px", border: "1px solid #fecaca", fontSize: "0.85rem" }}>

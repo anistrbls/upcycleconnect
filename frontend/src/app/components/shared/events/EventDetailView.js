@@ -45,6 +45,7 @@ export default function EventDetailView({ eventId, onBack }) {
     const [registering, setRegistering] = useState(false);
     const [activePhoto, setActivePhoto] = useState(0);
     const [userRole, setUserRole] = useState(null);
+    const [isPremiumAtelier, setIsPremiumAtelier] = useState(false);
     const [adminSubmitting, setAdminSubmitting] = useState("");
     const [rejectModalOpen, setRejectModalOpen] = useState(false);
     const [rejectComment, setRejectComment] = useState("");
@@ -75,7 +76,7 @@ export default function EventDetailView({ eventId, onBack }) {
             const regData = await regRes.json();
             setIsRegistered(
                 regData.items?.some(
-                    (r) => String(r.id) === String(id) && r.registrationStatus !== "cancelled"
+                    (r) => String(r.id) === String(id) && r.registrationStatus !== "cancelled" && r.refundStatus !== "refunded"
                 )
             );
         }
@@ -89,6 +90,11 @@ export default function EventDetailView({ eventId, onBack }) {
                     const parsed = JSON.parse(atob(token.split('.')[1]));
                     setUserRole(parsed.role);
                 } catch (e) {}
+
+                fetch(apiUrl("/auth/me"), { headers: { Authorization: `Bearer ${token}` } })
+                    .then((r) => r.json())
+                    .then((d) => setIsPremiumAtelier(String(d.user?.subscriptionType || "").toLowerCase() === "premium_atelier"))
+                    .catch(() => {});
             }
             try {
                 await loadEventData(eventId);
@@ -315,6 +321,7 @@ export default function EventDetailView({ eventId, onBack }) {
     const displayColor = (isPassed && event.status !== "annule") ? "#71717a" : sc.color;
 
     const isFull = event.capacite > 0 && event.participantCount >= event.capacite;
+    const canRegisterDespiteFull = isFull && isPremiumAtelier;
     const photos = event.imageUrl ? [event.imageUrl] : [];
 
     const isPaidEvent = event.pricingType === "payant" || event.paymentStatus === "paid";
@@ -607,7 +614,7 @@ export default function EventDetailView({ eventId, onBack }) {
                                                 )}
                                                 <button 
                                                     onClick={handleRegister}
-                                                    disabled={registering || (isFull && !isRegistered)}
+                                                    disabled={registering || (isFull && !isRegistered && !canRegisterDespiteFull)}
                                                     style={
                                                         isRegistered
                                                             ? {
@@ -616,11 +623,13 @@ export default function EventDetailView({ eventId, onBack }) {
                                                                   background: "rgba(220,38,38,0.1)",
                                                                   color: "#B91C1C",
                                                               }
-                                                            : actionBtn(isFull ? "disabled" : "primary")
+                                                            : actionBtn(isFull && !canRegisterDespiteFull ? "disabled" : "primary")
                                                     }
                                                 >
                                                     {isRegistered ? (
                                                         <><XCircle size={18} /> Se désinscrire</>
+                                                    ) : canRegisterDespiteFull ? (
+                                                        <><Ticket size={18} /> ★ {event.pricingType === "payant" ? `Réserver ma place prioritaire (${event.price} €)` : "S'inscrire prioritairement"}</>
                                                     ) : isFull ? (
                                                         "Événement complet"
                                                     ) : event.pricingType === "payant" ? (

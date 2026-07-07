@@ -397,8 +397,34 @@ func RegisterProfessionalRoutes(mux *http.ServeMux, repo *Repository, authMiddle
 
 		body, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode >= 400 {
-			writeError(w, http.StatusBadGateway, fmt.Sprintf("stripe subscription session creation failed: %s", strings.TrimSpace(string(body))))
-			return
+			// Si Stripe renvoie resource_missing sur le customer, l'ID est périmé:
+			// on efface l'ID en base et on réessaie sans customer.
+			if strings.Contains(string(body), `"resource_missing"`) && strings.Contains(string(body), `"customer"`) && strings.TrimSpace(stripeCustID) != "" {
+				_, _ = repo.db.Exec(`UPDATE users SET stripe_customer_id = NULL WHERE id = $1`, userID)
+				form.Del("customer")
+				req2, err2 := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(form.Encode()))
+				if err2 != nil {
+					writeError(w, http.StatusInternalServerError, err2.Error())
+					return
+				}
+				req2.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+				req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				resp2, err2 := http.DefaultClient.Do(req2)
+				if err2 != nil {
+					writeError(w, http.StatusInternalServerError, err2.Error())
+					return
+				}
+				defer resp2.Body.Close()
+				body, _ = io.ReadAll(resp2.Body)
+				if resp2.StatusCode >= 400 {
+					writeError(w, http.StatusBadGateway, fmt.Sprintf("stripe subscription session creation failed: %s", strings.TrimSpace(string(body))))
+					return
+				}
+				resp = resp2
+			} else {
+				writeError(w, http.StatusBadGateway, fmt.Sprintf("stripe subscription session creation failed: %s", strings.TrimSpace(string(body))))
+				return
+			}
 		}
 
 		var session stripeCheckoutSession

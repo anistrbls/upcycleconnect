@@ -2209,7 +2209,9 @@ func publicEventsHandler(w http.ResponseWriter, r *http.Request) {
 	typeFilter := normalizeEventType(strings.TrimSpace(r.URL.Query().Get("type")))
 
 	rows, err := db.Query(`
-		SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+		SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price,
+			(SELECT COUNT(*) FROM event_registrations er WHERE er.event_id = e.id AND er.status = 'active' AND er.payment_status <> 'pending') AS participant_count,
+			e.created_at, e.updated_at
 		FROM events e
 		WHERE e.validation_status = 'approved'
 		AND e.status = 'planifie'
@@ -2249,7 +2251,9 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		rows, err := db.Query(`
-			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price,
+				(SELECT COUNT(*) FROM event_registrations er WHERE er.event_id = e.id AND er.status = 'active' AND er.payment_status <> 'pending') AS participant_count,
+				e.created_at, e.updated_at
 			FROM events e
 			WHERE ($1 = '' OR e.name ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.lieu ILIKE '%' || $1 || '%' OR e.intervenant ILIKE '%' || $1 || '%')
 			AND ($2 = '' OR e.status = $2)
@@ -2399,7 +2403,9 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		row := db.QueryRow(`
-			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at,
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price,
+				(SELECT COUNT(*) FROM event_registrations er2 WHERE er2.event_id = e.id AND er2.status = 'active' AND er2.payment_status <> 'pending') AS participant_count,
+				e.created_at, e.updated_at,
 			       COALESCE(NULLIF(er.stripe_payment_intent_id, ''), er.stripe_session_id) AS transaction_ref,
 			       er.payment_status AS reg_payment_status
 			FROM events e
@@ -3157,7 +3163,12 @@ func eventRegisterHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if capacite.Valid && participantCount >= capacite.Int64 {
+		// Vérifier si l'utilisateur est abonné Premium Atelier (accès prioritaire aux événements complets)
+		var userSubscriptionType string
+		_ = db.QueryRow(`SELECT COALESCE(subscription_type, '') FROM users WHERE id = $1`, userID).Scan(&userSubscriptionType)
+		isPremiumAtelier := userSubscriptionType == "premium_atelier"
+
+		if capacite.Valid && participantCount >= capacite.Int64 && !isPremiumAtelier {
 			writeError(w, http.StatusBadRequest, "cet événement est complet")
 			return
 		}
@@ -3380,7 +3391,12 @@ func eventCheckoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if capacite.Valid && participantCount >= capacite.Int64 {
+	// Vérifier si l'utilisateur est abonné Premium Atelier (accès prioritaire aux événements complets)
+	var userSubscriptionType string
+	_ = db.QueryRow(`SELECT COALESCE(subscription_type, '') FROM users WHERE id = $1`, userID).Scan(&userSubscriptionType)
+	isPremiumAtelier := userSubscriptionType == "premium_atelier"
+
+	if capacite.Valid && participantCount >= capacite.Int64 && !isPremiumAtelier {
 		writeError(w, http.StatusBadRequest, "this event is full")
 		return
 	}
@@ -6223,7 +6239,9 @@ func salarieMemberEventsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		rows, err := db.Query(`
-			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price,
+				(SELECT COUNT(*) FROM event_registrations er WHERE er.event_id = e.id AND er.status = 'active' AND er.payment_status <> 'pending') AS participant_count,
+				e.created_at, e.updated_at
 			FROM events e
 			WHERE e.intervenant_id = $1
 			ORDER BY e.date_debut ASC
@@ -6317,7 +6335,9 @@ func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		row := db.QueryRow(`
-			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price, e.participant_count, e.created_at, e.updated_at
+			SELECT e.id, e.name, e.description, e.type, e.date_debut, e.date_fin, e.lieu, e.capacite, e.status, e.intervenant, e.intervenant_id, e.validation_status, e.rejection_comment, e.image_url, e.pricing_type, e.price,
+				(SELECT COUNT(*) FROM event_registrations er WHERE er.event_id = e.id AND er.status = 'active' AND er.payment_status <> 'pending') AS participant_count,
+				e.created_at, e.updated_at
 			FROM events e
 			WHERE e.id = $1
 		`, id)
@@ -7949,6 +7969,107 @@ func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 			"ateliers":   depensesAteliersPro,
 			"evenements": depensesEvenementsPro,
 			"total":      abonnementMontant + depensesAteliersPro + depensesEvenementsPro,
+		}
+
+		// ─── Premium Atelier: analytics enrichis ─────────────────────────────────
+		if subscriptionType == "premium_atelier" {
+			type weekStat struct {
+				WeekLabel string `json:"weekLabel"`
+				Count     int    `json:"count"`
+			}
+			var weeklyRecoveries []weekStat
+			wrows, werr := db.QueryContext(r.Context(), `
+				SELECT TO_CHAR(DATE_TRUNC('week', il.picked_up_at), 'DD/MM') AS lbl, COUNT(*) AS cnt
+				FROM item_logistics il
+				WHERE il.reserved_by_user_id = $1
+				  AND il.workflow_status = 'picked_up'
+				  AND il.picked_up_at >= NOW() - INTERVAL '8 weeks'
+				GROUP BY DATE_TRUNC('week', il.picked_up_at)
+				ORDER BY DATE_TRUNC('week', il.picked_up_at) ASC
+			`, id)
+			if werr == nil {
+				for wrows.Next() {
+					var ws weekStat
+					_ = wrows.Scan(&ws.WeekLabel, &ws.Count)
+					weeklyRecoveries = append(weeklyRecoveries, ws)
+				}
+				wrows.Close()
+			}
+			if weeklyRecoveries == nil {
+				weeklyRecoveries = []weekStat{}
+			}
+			stats["weeklyRecoveries"] = weeklyRecoveries
+
+			type matStat struct {
+				Material string `json:"material"`
+				Count    int    `json:"count"`
+			}
+			var materialBreakdown []matStat
+			mrows, merr := db.QueryContext(r.Context(), `
+				SELECT COALESCE(NULLIF(TRIM(i.material), ''), 'Non renseigné') AS mat, COUNT(*) AS cnt
+				FROM item_logistics il
+				JOIN items i ON i.id = il.item_id
+				WHERE il.reserved_by_user_id = $1
+				  AND il.workflow_status = 'picked_up'
+				GROUP BY COALESCE(NULLIF(TRIM(i.material), ''), 'Non renseigné')
+				ORDER BY cnt DESC
+				LIMIT 7
+			`, id)
+			if merr == nil {
+				for mrows.Next() {
+					var ms matStat
+					_ = mrows.Scan(&ms.Material, &ms.Count)
+					materialBreakdown = append(materialBreakdown, ms)
+				}
+				mrows.Close()
+			}
+			if materialBreakdown == nil {
+				materialBreakdown = []matStat{}
+			}
+			stats["materialBreakdown"] = materialBreakdown
+
+			var totalWeightGrams int64
+			_ = db.QueryRowContext(r.Context(), `
+				SELECT COALESCE(SUM(COALESCE(i.weight_grams, 0)), 0)
+				FROM item_logistics il
+				JOIN items i ON i.id = il.item_id
+				WHERE il.reserved_by_user_id = $1 AND il.workflow_status = 'picked_up'
+			`, id).Scan(&totalWeightGrams)
+			stats["totalWeightGrams"] = totalWeightGrams
+
+			var thisMonthRecoveries int
+			_ = db.QueryRowContext(r.Context(), `
+				SELECT COUNT(*) FROM item_logistics
+				WHERE reserved_by_user_id = $1
+				  AND workflow_status = 'picked_up'
+				  AND DATE_TRUNC('month', picked_up_at) = DATE_TRUNC('month', NOW())
+			`, id).Scan(&thisMonthRecoveries)
+			stats["thisMonthRecoveries"] = thisMonthRecoveries
+
+			var activeProjects int
+			_ = db.QueryRowContext(r.Context(), `
+				SELECT COUNT(*) FROM upcycling_projects WHERE user_id = $1 AND status = 'published'
+			`, id).Scan(&activeProjects)
+			stats["activeProjects"] = activeProjects
+
+			var watchlistCount int
+			_ = db.QueryRowContext(r.Context(), `
+				SELECT COUNT(*) FROM professional_item_watchlist WHERE user_id = $1
+			`, id).Scan(&watchlistCount)
+			stats["watchlistCount"] = watchlistCount
+
+			var cntDon, cntVente int
+			_ = db.QueryRowContext(r.Context(), `
+				SELECT COUNT(*) FROM item_logistics il
+				JOIN items i ON i.id = il.item_id
+				WHERE il.reserved_by_user_id = $1 AND il.workflow_status = 'picked_up' AND i.type = 'don'
+			`, id).Scan(&cntDon)
+			_ = db.QueryRowContext(r.Context(), `
+				SELECT COUNT(*) FROM item_logistics il
+				JOIN items i ON i.id = il.item_id
+				WHERE il.reserved_by_user_id = $1 AND il.workflow_status = 'picked_up' AND i.type = 'vente'
+			`, id).Scan(&cntVente)
+			stats["recoveryByType"] = map[string]int{"don": cntDon, "vente": cntVente}
 		}
 	}
 
