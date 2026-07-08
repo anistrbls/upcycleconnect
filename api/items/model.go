@@ -56,6 +56,9 @@ type Item struct {
 	ModeratedAt          string    `json:"moderatedAt,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+	Featured      bool       `json:"featured"`
+	FeaturedUntil *time.Time `json:"featuredUntil,omitempty"`
+	BumpedAt      *time.Time `json:"bumpedAt,omitempty"`
 	// Renseigné sur GET /api/items/{id} : affichage prix TTC pro (mode commission « added »).
 	SaleCommissionMode    string  `json:"saleCommissionMode,omitempty"`
 	SaleCommissionPercent float64 `json:"saleCommissionPercent,omitempty"`

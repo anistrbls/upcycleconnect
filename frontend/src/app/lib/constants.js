@@ -123,6 +123,7 @@ export const NAV_MODULES = [
             { key: "vue-financiere", label: "Vue financière", shortLabel: "Vue" },
             { key: "abonnements", label: "Abonnements", shortLabel: "Abonnements" },
             { key: "commissions", label: "Commissions", shortLabel: "Commissions" },
+            { key: "mise-en-avant", label: "Mise en avant", shortLabel: "Mise en avant" },
             { key: "paiements", label: "Paiements", shortLabel: "Paiements" },
         ],
     },

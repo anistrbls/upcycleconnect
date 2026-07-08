@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"upcycleconnect/api/items"
@@ -331,6 +333,163 @@ func (h *Handler) PublishHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Le projet \"%s\" a été soumis à modération par %s.", strings.TrimSpace(p.Title), authorName),
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "brouillon", "moderationStatus": "pending"})
+}
+
+// frontendBase retourne l'URL de base du frontend (pour les redirections Stripe), avec une valeur par défaut en dev.
+func frontendBase() string {
+	base := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	if base == "" {
+		base = "http://localhost:3000"
+	}
+	return base
+}
+
+// FeatureCheckoutHandler gère POST /api/pro/projects/{id}/feature-checkout (option payante : mise à la une).
+func (h *Handler) FeatureCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := strings.TrimSuffix(r.URL.Path, "/feature-checkout")
+	projectID, ok := parseID(path, "/api/pro/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	p, err := h.repo.GetByID(projectID, proUserID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if p.Status != StatusPublished || p.ModerationStatus != "approved" {
+		writeError(w, http.StatusBadRequest, "only published, approved projects can be featured")
+		return
+	}
+
+	pricing, err := items.GetBoostPricingConfig(r.Context(), h.repo.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load pricing")
+		return
+	}
+
+	cfg, err := items.GetStripeConfigPublic()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+		return
+	}
+	base := strings.TrimRight(frontendBase(), "/")
+	cfg.SuccessURL = fmt.Sprintf("%s/projets/mes-projets?boost=success&session_id={CHECKOUT_SESSION_ID}", base)
+	cfg.CancelURL = fmt.Sprintf("%s/projets/mes-projets?boost=cancel", base)
+
+	session, err := items.CreateStripeBoostCheckoutSessionPublic(cfg, "project_feature", projectID, proUserID, "Mise à la une : "+p.Title, pricing.ProjectFeaturePriceCents)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create stripe session")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"url": session.URL})
+}
+
+// BumpCheckoutHandler gère POST /api/pro/projects/{id}/bump-checkout (option payante : remonter le projet).
+func (h *Handler) BumpCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := strings.TrimSuffix(r.URL.Path, "/bump-checkout")
+	projectID, ok := parseID(path, "/api/pro/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	p, err := h.repo.GetByID(projectID, proUserID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if p.Status != StatusPublished || p.ModerationStatus != "approved" {
+		writeError(w, http.StatusBadRequest, "only published, approved projects can be bumped")
+		return
+	}
+
+	pricing, err := items.GetBoostPricingConfig(r.Context(), h.repo.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load pricing")
+		return
+	}
+
+	cfg, err := items.GetStripeConfigPublic()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+		return
+	}
+	base := strings.TrimRight(frontendBase(), "/")
+	cfg.SuccessURL = fmt.Sprintf("%s/projets/mes-projets?boost=success&session_id={CHECKOUT_SESSION_ID}", base)
+	cfg.CancelURL = fmt.Sprintf("%s/projets/mes-projets?boost=cancel", base)
+
+	session, err := items.CreateStripeBoostCheckoutSessionPublic(cfg, "project_bump", projectID, proUserID, "Remonter le projet : "+p.Title, pricing.ProjectBumpPriceCents)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create stripe session")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"url": session.URL})
+}
+
+// BoostConfirmHandler gère GET /api/pro/projects/boost-confirm?session_id=... (confirme le paiement d'une option payante et l'applique).
+func (h *Handler) BoostConfirmHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	cfg, err := items.GetStripeConfigPublic()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+		return
+	}
+	details, err := items.RetrieveStripeBoostSessionDetails(cfg.SecretKey, sessionID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "could not verify stripe session")
+		return
+	}
+	if details.UserID > 0 && details.UserID != proUserID {
+		writeError(w, http.StatusForbidden, "session does not belong to current user")
+		return
+	}
+	if strings.TrimSpace(details.PaymentStatus) != "paid" {
+		writeJSON(w, http.StatusOK, map[string]any{"paid": false})
+		return
+	}
+
+	pricing, err := items.GetBoostPricingConfig(r.Context(), h.repo.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load pricing")
+		return
+	}
+
+	switch details.Kind {
+	case "project_feature":
+		until := time.Now().UTC().Add(pricing.FeatureDuration())
+		if err := h.repo.SetFeatured(details.EntityID, proUserID, until); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not apply featured status")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"paid": true, "kind": details.Kind, "featuredUntil": until})
+	case "project_bump":
+		if err := h.repo.Bump(details.EntityID, proUserID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not bump project")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"paid": true, "kind": details.Kind})
+	default:
+		writeError(w, http.StatusBadRequest, "unknown boost kind")
+	}
 }
 
 // AddItemHandler gère POST /api/pro/projects/{id}/items.

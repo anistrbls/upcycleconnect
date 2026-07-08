@@ -42,6 +42,9 @@ type Project struct {
 	IsBookmarked      bool      `json:"isBookmarked"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
+	Featured          bool       `json:"featured"`
+	FeaturedUntil     *time.Time `json:"featuredUntil,omitempty"`
+	BumpedAt          *time.Time `json:"bumpedAt,omitempty"`
 }
 
 // ProjectItem représente un objet récupéré associé à un projet.

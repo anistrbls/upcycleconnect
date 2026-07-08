@@ -9,6 +9,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -111,6 +112,9 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS project_steps JSONB NOT NULL DEFAULT '[]'::jsonb`,
 		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS moderation_note TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT false`,
+		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS featured_until TIMESTAMPTZ`,
+		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS bumped_at TIMESTAMPTZ`,
 		`CREATE TABLE IF NOT EXISTS upcycling_project_items (
 			id         BIGSERIAL PRIMARY KEY,
 			project_id BIGINT NOT NULL REFERENCES upcycling_projects(id) ON DELETE CASCADE,
@@ -310,7 +314,8 @@ func (r *Repository) ListByPro(proUserID int64) ([]Project, error) {
 		         WHERE upi.project_id = p.id
 		       ), 0) AS total_weight_grams,
 		       `+sqlExprCorrelatedProjectPublishedUCScore+` AS upcycling_score,
-		       p.created_at, p.updated_at
+		       p.created_at, p.updated_at,
+		       p.featured, p.featured_until, p.bumped_at
 		FROM upcycling_projects p
 		JOIN users u ON u.id = p.pro_user_id
 		LEFT JOIN LATERAL (
@@ -326,7 +331,7 @@ func (r *Repository) ListByPro(proUserID int64) ([]Project, error) {
 			LIMIT 1
 		) preview ON TRUE
 		WHERE p.pro_user_id = $1
-		ORDER BY p.updated_at DESC
+		ORDER BY (p.featured AND (p.featured_until IS NULL OR p.featured_until > NOW())) DESC, COALESCE(p.bumped_at, p.updated_at) DESC
 	`, proUserID)
 	if err != nil {
 		return nil, err
@@ -335,12 +340,20 @@ func (r *Repository) ListByPro(proUserID int64) ([]Project, error) {
 	var projects []Project
 	for rows.Next() {
 		var p Project
+		var featuredUntil, bumpedAt sql.NullTime
 		if err := rows.Scan(&p.ID, &p.ProUserID, &p.PreviewImage, &p.Title, &p.Description, &p.Category,
 			&p.Status, &p.ModerationStatus, &p.ModerationNote,
-			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore, &p.CreatedAt, &p.UpdatedAt,
+			&p.Featured, &featuredUntil, &bumpedAt); err != nil {
 			return nil, err
 		}
 		p.TotalWeightKg = p.TotalWeightGrams / 1000.0
+		if featuredUntil.Valid {
+			p.FeaturedUntil = &featuredUntil.Time
+		}
+		if bumpedAt.Valid {
+			p.BumpedAt = &bumpedAt.Time
+		}
 		projects = append(projects, p)
 	}
 	if projects == nil {
@@ -369,6 +382,32 @@ func (r *Repository) Archive(id, proUserID int64) error {
 		SET status = 'brouillon', moderation_status = '', moderation_note = '', updated_at = NOW()
 		WHERE id = $1 AND pro_user_id = $2
 	`, id, proUserID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return errors.New("project not found or not yours")
+	}
+	return nil
+}
+
+// SetFeatured met un projet "à la une" jusqu'à la date donnée (option payante).
+func (r *Repository) SetFeatured(id, proUserID int64, until time.Time) error {
+	res, err := r.db.Exec(`UPDATE upcycling_projects SET featured = true, featured_until = $3, updated_at = NOW() WHERE id = $1 AND pro_user_id = $2`, id, proUserID, until)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return errors.New("project not found or not yours")
+	}
+	return nil
+}
+
+// Bump rafraîchit la position du projet dans le tri (option payante "remonter le projet").
+func (r *Repository) Bump(id, proUserID int64) error {
+	res, err := r.db.Exec(`UPDATE upcycling_projects SET bumped_at = NOW() WHERE id = $1 AND pro_user_id = $2`, id, proUserID)
 	if err != nil {
 		return err
 	}
@@ -445,7 +484,8 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 		       ` + sqlExprCorrelatedProjectPublishedUCScore + ` AS upcycling_score,
 		       (SELECT COUNT(*)::int FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
 		       (SELECT COUNT(*)::int FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
-		       p.created_at, p.updated_at
+		       p.created_at, p.updated_at,
+		       p.featured, p.featured_until, p.bumped_at
 		FROM upcycling_projects p
 		JOIN users u ON u.id = p.pro_user_id
 		WHERE p.id = $1
@@ -459,10 +499,12 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 
 	var p Project
 	var stepsRaw string
+	var featuredUntil, bumpedAt sql.NullTime
 	err := r.db.QueryRow(query, args...).Scan(&p.ID, &p.ProUserID, &p.ProDisplayName, &p.Title, &p.Description, &stepsRaw,
 		&p.Category, &p.Status, &p.ModerationStatus, &p.ModerationNote,
 		&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
-		&p.LikeCount, &p.BookmarkCount, &p.CreatedAt, &p.UpdatedAt)
+		&p.LikeCount, &p.BookmarkCount, &p.CreatedAt, &p.UpdatedAt,
+		&p.Featured, &featuredUntil, &bumpedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("project not found")
@@ -471,6 +513,12 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 	}
 	p.Steps = parseProjectSteps(stepsRaw)
 	p.TotalWeightKg = p.TotalWeightGrams / 1000.0
+	if featuredUntil.Valid {
+		p.FeaturedUntil = &featuredUntil.Time
+	}
+	if bumpedAt.Valid {
+		p.BumpedAt = &bumpedAt.Time
+	}
 	return &p, nil
 }
 
@@ -1061,7 +1109,8 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
 		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
 		       EXISTS(SELECT 1 FROM upcycling_project_bookmarks WHERE project_id = p.id AND user_id = $1) AS is_bookmarked,
-		       p.created_at, p.updated_at
+		       p.created_at, p.updated_at,
+		       p.featured, p.featured_until, p.bumped_at
 		FROM upcycling_projects p
 		LEFT JOIN upcycling_project_items pi ON pi.project_id = p.id
 		LEFT JOIN LATERAL (
@@ -1093,7 +1142,7 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 		JOIN users u ON u.id = p.pro_user_id
 		WHERE p.status = 'publie' AND p.moderation_status = 'approved'
 		GROUP BY p.id, preview.url, before_img.url, after_img.url, u.id, u.firstname, u.lastname, u.created_at
-		ORDER BY p.updated_at DESC
+		ORDER BY (p.featured AND (p.featured_until IS NULL OR p.featured_until > NOW())) DESC, COALESCE(p.bumped_at, p.updated_at) DESC
 	`, userID)
 	if err != nil {
 		return nil, err
@@ -1103,16 +1152,24 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 	var projects []Project
 	for rows.Next() {
 		var p Project
+		var featuredUntil, bumpedAt sql.NullTime
 		if err := rows.Scan(&p.ID, &p.ProUserID, &p.ProDisplayName, &p.ProJoinedAt, &p.ProTotalUCScore, &p.ProProjectsSinceSignup,
 			&p.PreviewImage, &p.BeforeImage, &p.AfterImage,
 			&p.Title, &p.Description, &p.Category, &p.Status,
 			&p.ModerationStatus, &p.ModerationNote,
 			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
 			&p.LikeCount, &p.BookmarkCount, &p.IsLiked, &p.IsBookmarked,
-			&p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.CreatedAt, &p.UpdatedAt,
+			&p.Featured, &featuredUntil, &bumpedAt); err != nil {
 			return nil, err
 		}
 		p.TotalWeightKg = p.TotalWeightGrams / 1000.0
+		if featuredUntil.Valid {
+			p.FeaturedUntil = &featuredUntil.Time
+		}
+		if bumpedAt.Valid {
+			p.BumpedAt = &bumpedAt.Time
+		}
 		projects = append(projects, p)
 	}
 	if projects == nil {

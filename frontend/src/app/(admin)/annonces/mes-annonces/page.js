@@ -15,7 +15,9 @@ import {
     Trash2,
     Search,
     Plus,
-    Check
+    Check,
+    Sparkles,
+    ArrowUpCircle
 } from "lucide-react";
 
 // Styles locaux
@@ -137,6 +139,38 @@ const styles = {
         letterSpacing: "0.04em",
         zIndex: 2,
     }),
+    featuredBadge: {
+        position: "absolute",
+        top: "14px",
+        left: "14px",
+        padding: "4px 12px",
+        borderRadius: "20px",
+        fontSize: "0.72rem",
+        fontWeight: "700",
+        background: "linear-gradient(135deg, #f59e0b, #f97316)",
+        color: "white",
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        letterSpacing: "0.04em",
+        zIndex: 2,
+        boxShadow: "0 2px 10px rgba(245,158,11,0.4)",
+    },
+    boostBtn: {
+        padding: "9px",
+        borderRadius: "50%",
+        border: "1px solid rgba(255,255,255,0.25)",
+        background: "rgba(255,255,255,0.12)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        color: "white",
+        cursor: "pointer",
+        transition: "all 0.2s ease",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+    },
     cardOverlay: {
         position: "absolute",
         bottom: 0,
@@ -360,6 +394,12 @@ const STATUS_FILTER_OPTIONS_ADMIN = [
     { value: "refusee", label: "Refusées" },
 ];
 
+const isFeaturedNow = (annonce) => {
+    if (!annonce?.featured) return false;
+    if (!annonce.featuredUntil) return true;
+    return new Date(annonce.featuredUntil).getTime() > Date.now();
+};
+
 const getAnnonceAuthor = (annonce) => {
     return (
         annonce?.authorName ||
@@ -386,6 +426,22 @@ function MesAnnoncesContent() {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deleteTargetId, setDeleteTargetId] = useState(null);
     const [tokenChecked, setTokenChecked] = useState(false);
+    const [boostPricing, setBoostPricing] = useState(null);
+
+    useEffect(() => {
+        fetch(apiUrl("/boost-pricing"))
+            .then((r) => r.json())
+            .then((d) => setBoostPricing(d))
+            .catch(() => {});
+    }, []);
+
+    const formatEuro = (cents) => (Number(cents) / 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const featureTitle = boostPricing
+        ? `Mettre à la une (${formatEuro(boostPricing.itemFeaturePriceCents)} € / ${boostPricing.featureDurationDays} jours)`
+        : "Mettre à la une";
+    const bumpTitle = boostPricing
+        ? `Remonter l'annonce (${formatEuro(boostPricing.itemBumpPriceCents)} €)`
+        : "Remonter l'annonce";
 
     const loadUserRole = async () => {
         const token = window.localStorage.getItem(TOKEN_KEY);
@@ -455,7 +511,92 @@ function MesAnnoncesContent() {
             }, 4000);
             return () => clearTimeout(timer);
         }
+
+        const boostParam = searchParams.get("boost");
+        const sessionId = searchParams.get("session_id");
+        if (boostParam === "success" && sessionId) {
+            confirmBoostPayment(sessionId);
+        } else if (boostParam === "cancel") {
+            setToastVariant("info");
+            setToastMessage("Paiement annulé.");
+            setShowToast(true);
+            const timer = setTimeout(() => {
+                setShowToast(false);
+                router.replace("/annonces/mes-annonces");
+            }, 4000);
+            return () => clearTimeout(timer);
+        }
     }, [searchParams, router]);
+
+    const confirmBoostPayment = async (sessionId) => {
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        try {
+            const response = await fetch(apiUrl(`/items/boost-confirm?session_id=${encodeURIComponent(sessionId)}`), {
+                method: "GET",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.paid) {
+                setToastVariant("success");
+                setToastMessage(
+                    data.kind === "item_feature"
+                        ? "Votre annonce est maintenant à la une !"
+                        : "Votre annonce a été remontée en tête de liste !"
+                );
+                await fetchAnnonces();
+            } else {
+                setToastVariant("info");
+                setToastMessage("Le paiement n'a pas pu être confirmé.");
+            }
+        } catch (err) {
+            setToastVariant("info");
+            setToastMessage("Erreur lors de la confirmation du paiement.");
+        }
+        setShowToast(true);
+        setTimeout(() => {
+            setShowToast(false);
+            router.replace("/annonces/mes-annonces");
+        }, 5000);
+    };
+
+    const handleFeatureCheckout = async (id) => {
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        try {
+            const response = await fetch(apiUrl(`/items/${id}/feature-checkout`), {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.url) {
+                window.location.href = data.url;
+            } else {
+                alert(data.error || "Impossible de créer le paiement pour la mise à la une.");
+            }
+        } catch (err) {
+            alert("Erreur réseau : " + err.message);
+        }
+    };
+
+    const handleBumpCheckout = async (id) => {
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        try {
+            const response = await fetch(apiUrl(`/items/${id}/bump-checkout`), {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.url) {
+                window.location.href = data.url;
+            } else {
+                alert(data.error || "Impossible de créer le paiement pour remonter l'annonce.");
+            }
+        } catch (err) {
+            alert("Erreur réseau : " + err.message);
+        }
+    };
 
     useEffect(() => {
         if (tokenChecked) {
@@ -673,6 +814,7 @@ function MesAnnoncesContent() {
                     const isCancelled = workflowKey === "cancelled";
                     const canEdit = !isAdmin && !isCancelled && statusKey !== "vendu" && !isAfterDeposit;
                     const canDelete = !isAdmin && ["brouillon", "refusee", "desactivee", "desactive"].includes(statusKey) && !isCancelled;
+                    const canBoost = !isAdmin && statusKey === "actif" && !isCancelled;
 
                     return (
                     <div
@@ -700,6 +842,12 @@ function MesAnnoncesContent() {
                         <div style={styles.statusBadge(annonce.status)}>
                             {annonce.status.toUpperCase()}
                         </div>
+                        {isFeaturedNow(annonce) && (
+                            <div style={styles.featuredBadge}>
+                                <Sparkles size={12} />
+                                À LA UNE
+                            </div>
+                        )}
                         <div style={styles.cardOverlay}>
                             <div style={styles.titlePriceRow}>
                                 <h3 style={styles.cardTitle} data-i18n-user-content="true">{annonce.title}</h3>
@@ -767,6 +915,26 @@ function MesAnnoncesContent() {
                             )}
 
                             <div style={styles.cardActions}>
+                                {canBoost && !isFeaturedNow(annonce) && (
+                                    <button
+                                        className="action-btn-card"
+                                        style={styles.boostBtn}
+                                        title={featureTitle}
+                                        onClick={(e) => { e.stopPropagation(); handleFeatureCheckout(annonce.id); }}
+                                    >
+                                        <Sparkles size={16} />
+                                    </button>
+                                )}
+                                {canBoost && (
+                                    <button
+                                        className="action-btn-card"
+                                        style={styles.boostBtn}
+                                        title={bumpTitle}
+                                        onClick={(e) => { e.stopPropagation(); handleBumpCheckout(annonce.id); }}
+                                    >
+                                        <ArrowUpCircle size={16} />
+                                    </button>
+                                )}
                                 {canEdit && (
                                     <button
                                         className="action-btn-card"

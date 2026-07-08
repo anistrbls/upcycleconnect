@@ -88,6 +88,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	// GET /api/pro/projects/recovered-items
 	mux.Handle("GET /api/pro/projects/recovered-items", proOnly(h.RecoveredItemsHandler))
 
+	// GET /api/pro/projects/boost-confirm?session_id=... (confirme une option payante : mise en avant / bump)
+	mux.Handle("GET /api/pro/projects/boost-confirm", proOnly(h.BoostConfirmHandler))
+
 	// GET /api/pro/projects  — liste
 	// POST /api/pro/projects — création
 	mux.Handle("/api/pro/projects", proOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +117,18 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		// POST /api/pro/projects/{id}/archive
 		if strings.HasSuffix(path, "/archive") && r.Method == http.MethodPost {
 			h.ArchiveHandler(w, r)
+			return
+		}
+
+		// POST /api/pro/projects/{id}/feature-checkout (option payante : mise à la une)
+		if strings.HasSuffix(path, "/feature-checkout") && r.Method == http.MethodPost {
+			h.FeatureCheckoutHandler(w, r)
+			return
+		}
+
+		// POST /api/pro/projects/{id}/bump-checkout (option payante : remonter le projet)
+		if strings.HasSuffix(path, "/bump-checkout") && r.Method == http.MethodPost {
+			h.BumpCheckoutHandler(w, r)
 			return
 		}
 

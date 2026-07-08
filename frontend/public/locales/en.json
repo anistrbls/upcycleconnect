@@ -1849,7 +1849,38 @@
     "Vues": "Views",
     "Watchlist": "Watchlist",
     "Zone d'intervention": "Service area",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Erreur réseau : ": "Network error: ",
+    "Un problème est survenu lors de l'enregistrement. Réessayez dans un instant.": "Something went wrong while saving. Please try again in a moment.",
+    "Enregistrement…": "Saving…",
+    "À LA UNE": "FEATURED",
+    "Paiement annulé.": "Payment cancelled.",
+    "Votre annonce est maintenant à la une !": "Your listing is now featured!",
+    "Votre annonce a été remontée en tête de liste !": "Your listing has been bumped to the top!",
+    "Le paiement n'a pas pu être confirmé.": "The payment could not be confirmed.",
+    "Erreur lors de la confirmation du paiement.": "An error occurred while confirming the payment.",
+    "Impossible de créer le paiement pour la mise à la une.": "Could not create the payment to feature this listing.",
+    "Impossible de créer le paiement pour remonter l'annonce.": "Could not create the payment to bump this listing.",
+    "Votre projet est maintenant à la une !": "Your project is now featured!",
+    "Votre projet a été remonté en tête de liste !": "Your project has been bumped to the top!",
+    "Impossible de créer le paiement pour remonter le projet.": "Could not create the payment to bump this project.",
+    "Mise en avant des annonces et projets": "Featured listings & projects",
+    "Annonces d'objets": "Object listings",
+    "Mise à la une (€)": "Featured (€)",
+    "Remonter l'annonce (€)": "Bump the listing (€)",
+    "Remonter le projet (€)": "Bump the project (€)",
+    "Durée de la mise à la une": "Featured duration",
+    "Nombre de jours": "Number of days",
+    "Les tarifs ont bien été enregistrés.": "The prices have been saved.",
+    "Indiquez des tarifs valides et positifs (ex: 4,99).": "Enter valid, positive prices (e.g. 4.99).",
+    "La durée de mise à la une doit être comprise entre 1 et 90 jours.": "The featured duration must be between 1 and 90 days.",
+    "Annonce à la une : ": "Featured listing: ",
+    " pendant ": " for ",
+    "Remonter une annonce : ": "Bump a listing: ",
+    "Projet à la une : ": "Featured project: ",
+    "Remonter un projet : ": "Bump a project: ",
+    "Définissez les tarifs et la durée des options payantes « Mise à la une » et « Remonter » proposées aux utilisateurs sur leurs annonces et leurs projets d'upcycling.": "Set the prices and duration for the paid “Featured” and “Bump” options offered to users on their listings and upcycling projects.",
+    "S'applique aux deux options « Mise à la une » (annonces et projets). L'option « Remonter » n'a pas de durée : elle rafraîchit juste la position dans la liste.": "Applies to both “Featured” options (listings and projects). The “Bump” option has no duration: it just refreshes the position in the list."
   },
   "patterns": [
     {
@@ -2019,6 +2050,26 @@
     {
       "match": "Supprimer la langue « {{language}} » ?",
       "replace": "Delete language \"{{language}}\"?"
+    },
+    {
+      "match": "Mettre à la une ({{price}} € / {{days}} jours)",
+      "replace": "Feature it ({{price}} € / {{days}} days)"
+    },
+    {
+      "match": "Remonter l'annonce ({{price}} €)",
+      "replace": "Bump the listing ({{price}} €)"
+    },
+    {
+      "match": "Remonter le projet ({{price}} €)",
+      "replace": "Bump the project ({{price}} €)"
+    },
+    {
+      "match": "{{n}} jour",
+      "replace": "{{n}} day"
+    },
+    {
+      "match": "{{n}} jours",
+      "replace": "{{n}} days"
     }
   ]
 }

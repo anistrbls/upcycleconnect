@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"upcycleconnect/api/mailer"
 
@@ -229,6 +230,16 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 	if err := EnsureNotificationsSchema(db); err != nil {
 		log.Fatalf("Notifications schema error: %v", err)
 	}
+
+	// GET /api/boost-pricing (public : tarifs courants des options "mise à la une" / "remonter")
+	mux.HandleFunc("GET /api/boost-pricing", func(w http.ResponseWriter, r *http.Request) {
+		cfg, err := GetBoostPricingConfig(r.Context(), db)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load pricing")
+			return
+		}
+		writeJSON(w, http.StatusOK, cfg)
+	})
 
 	// GET /api/items (public viewing of active items)
 	mux.HandleFunc("GET /api/items", func(w http.ResponseWriter, r *http.Request) {
@@ -628,6 +639,165 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		}
 
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	})))
+
+	// POST /api/items/{item_id}/feature-checkout (option payante : mise à la une)
+	mux.Handle("POST /api/items/{item_id}/feature-checkout", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		email := claims["sub"].(string)
+		var userID int64
+		if err := db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil || itemID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+
+		item, err := repo.GetByID(itemID)
+		if err != nil || item.UserID != userID {
+			writeError(w, http.StatusNotFound, "item not found or unauthorized")
+			return
+		}
+		if strings.ToLower(strings.TrimSpace(item.Status)) != StatusActive {
+			writeError(w, http.StatusBadRequest, "only active listings can be featured")
+			return
+		}
+
+		pricing, err := GetBoostPricingConfig(r.Context(), db)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load pricing")
+			return
+		}
+
+		cfg, err := getStripeConfig()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+			return
+		}
+		frontendBase := strings.TrimRight(frontendBaseURL(), "/")
+		cfg.SuccessURL = fmt.Sprintf("%s/annonces/mes-annonces?boost=success&session_id={CHECKOUT_SESSION_ID}", frontendBase)
+		cfg.CancelURL = fmt.Sprintf("%s/annonces/mes-annonces?boost=cancel", frontendBase)
+
+		session, err := CreateStripeBoostCheckoutSessionPublic(cfg, "item_feature", itemID, userID, "Mise à la une : "+item.Title, pricing.ItemFeaturePriceCents)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create stripe session")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"url": session.URL})
+	})))
+
+	// POST /api/items/{item_id}/bump-checkout (option payante : remonter l'annonce)
+	mux.Handle("POST /api/items/{item_id}/bump-checkout", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		email := claims["sub"].(string)
+		var userID int64
+		if err := db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+
+		itemID, err := strconv.ParseInt(r.PathValue("item_id"), 10, 64)
+		if err != nil || itemID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+
+		item, err := repo.GetByID(itemID)
+		if err != nil || item.UserID != userID {
+			writeError(w, http.StatusNotFound, "item not found or unauthorized")
+			return
+		}
+		if strings.ToLower(strings.TrimSpace(item.Status)) != StatusActive {
+			writeError(w, http.StatusBadRequest, "only active listings can be bumped")
+			return
+		}
+
+		pricing, err := GetBoostPricingConfig(r.Context(), db)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load pricing")
+			return
+		}
+
+		cfg, err := getStripeConfig()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+			return
+		}
+		frontendBase := strings.TrimRight(frontendBaseURL(), "/")
+		cfg.SuccessURL = fmt.Sprintf("%s/annonces/mes-annonces?boost=success&session_id={CHECKOUT_SESSION_ID}", frontendBase)
+		cfg.CancelURL = fmt.Sprintf("%s/annonces/mes-annonces?boost=cancel", frontendBase)
+
+		session, err := CreateStripeBoostCheckoutSessionPublic(cfg, "item_bump", itemID, userID, "Remonter l'annonce : "+item.Title, pricing.ItemBumpPriceCents)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create stripe session")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"url": session.URL})
+	})))
+
+	// GET /api/items/boost-confirm?session_id=... (confirme le paiement d'une option payante et l'applique)
+	mux.Handle("GET /api/items/boost-confirm", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := r.Context().Value("authClaims").(jwt.MapClaims)
+		email := claims["sub"].(string)
+		var userID int64
+		if err := db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "user not found")
+			return
+		}
+
+		sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+		if sessionID == "" {
+			writeError(w, http.StatusBadRequest, "session_id is required")
+			return
+		}
+
+		cfg, err := getStripeConfig()
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "stripe is not configured")
+			return
+		}
+
+		details, err := RetrieveStripeBoostSessionDetails(cfg.SecretKey, sessionID)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "could not verify stripe session")
+			return
+		}
+		if details.UserID > 0 && details.UserID != userID {
+			writeError(w, http.StatusForbidden, "session does not belong to current user")
+			return
+		}
+		if strings.TrimSpace(details.PaymentStatus) != "paid" {
+			writeJSON(w, http.StatusOK, map[string]any{"paid": false})
+			return
+		}
+
+		pricing, err := GetBoostPricingConfig(r.Context(), db)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load pricing")
+			return
+		}
+
+		switch details.Kind {
+		case "item_feature":
+			until := time.Now().UTC().Add(pricing.FeatureDuration())
+			if err := repo.SetFeatured(details.EntityID, userID, until); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not apply featured status")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"paid": true, "kind": details.Kind, "featuredUntil": until})
+		case "item_bump":
+			if err := repo.BumpItem(details.EntityID, userID); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not bump item")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"paid": true, "kind": details.Kind})
+		default:
+			writeError(w, http.StatusBadRequest, "unknown boost kind")
+		}
 	})))
 
 	// Moderation routes (admin + moderator employees)

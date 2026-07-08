@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -96,6 +97,19 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMPTZ`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS user_cancel_previous_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE items ADD COLUMN IF NOT EXISTS deleted_by_user BOOLEAN NOT NULL DEFAULT false`,
+		`ALTER TABLE items ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT false`,
+		`ALTER TABLE items ADD COLUMN IF NOT EXISTS featured_until TIMESTAMPTZ`,
+		`ALTER TABLE items ADD COLUMN IF NOT EXISTS bumped_at TIMESTAMPTZ`,
+		`CREATE TABLE IF NOT EXISTS boost_pricing_config (
+			id                           BIGINT PRIMARY KEY DEFAULT 1,
+			item_feature_price_cents    INT NOT NULL DEFAULT 499,
+			item_bump_price_cents       INT NOT NULL DEFAULT 149,
+			project_feature_price_cents INT NOT NULL DEFAULT 499,
+			project_bump_price_cents    INT NOT NULL DEFAULT 149,
+			feature_duration_days       INT NOT NULL DEFAULT 7,
+			CONSTRAINT boost_pricing_config_single_row CHECK (id = 1)
+		)`,
+		`INSERT INTO boost_pricing_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
 		`CREATE INDEX IF NOT EXISTS idx_items_status ON items(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id)`,
 		`CREATE TABLE IF NOT EXISTS deposit_points (
@@ -149,13 +163,14 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		COALESCE(l.pickup_code, ''),
 		i.moderation_note,
 		i.moderation_details,
-		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit
+		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit,
+		i.featured, i.featured_until, i.bumped_at
 		FROM items i
 		JOIN users u ON u.id = i.user_id
 		LEFT JOIN item_logistics l ON l.item_id = i.id
 		WHERE ($1 = '' OR i.status = $1)
 		AND ($2 = '' OR i.title ILIKE '%' || $2 || '%' OR i.description ILIKE '%' || $2 || '%' OR i.city ILIKE '%' || $2 || '%')
-		ORDER BY i.created_at DESC`
+		ORDER BY (i.featured AND (i.featured_until IS NULL OR i.featured_until > NOW())) DESC, COALESCE(i.bumped_at, i.created_at) DESC`
 
 	rows, err := r.db.Query(q, status, strings.TrimSpace(query))
 	if err != nil {
@@ -169,6 +184,7 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		var userRegistrationTS sql.NullTime
 		var weightValue sql.NullFloat64
 		var weightGrams sql.NullFloat64
+		var featuredUntil, bumpedAt sql.NullTime
 		err := rows.Scan(
 			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity, &weightValue, &it.WeightUnit, &weightGrams,
 			&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.Views, &it.Saves, &it.Interested,
@@ -176,6 +192,7 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 			&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
 			&it.ModerationNote, &it.ModerationDetails,
 			&it.AfterDeposit,
+			&it.Featured, &featuredUntil, &bumpedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -187,6 +204,12 @@ func (r *Repository) List(status, query string) ([]Item, error) {
 		if weightGrams.Valid {
 			g := weightGrams.Float64
 			it.WeightGrams = &g
+		}
+		if featuredUntil.Valid {
+			it.FeaturedUntil = &featuredUntil.Time
+		}
+		if bumpedAt.Valid {
+			it.BumpedAt = &bumpedAt.Time
 		}
 		it.Date = it.CreatedAt.Format("02/01/2006")
 		if userRegistrationTS.Valid {
@@ -208,11 +231,12 @@ func (r *Repository) ListByUser(userID int64) ([]Item, error) {
 		COALESCE(l.workflow_status, ''),
 		COALESCE(l.deposit_code, ''),
 		COALESCE(l.pickup_code, ''),
-		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit
+		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit,
+		i.featured, i.featured_until, i.bumped_at
 		FROM items i
 		LEFT JOIN item_logistics l ON l.item_id = i.id
 		WHERE i.user_id = $1 AND i.deleted_by_user = false
-		ORDER BY i.created_at DESC`
+		ORDER BY (i.featured AND (i.featured_until IS NULL OR i.featured_until > NOW())) DESC, COALESCE(i.bumped_at, i.created_at) DESC`
 	rows, err := r.db.Query(q, userID)
 	if err != nil {
 		return nil, err
@@ -224,12 +248,14 @@ func (r *Repository) ListByUser(userID int64) ([]Item, error) {
 		var it Item
 		var weightValue sql.NullFloat64
 		var weightGrams sql.NullFloat64
+		var featuredUntil, bumpedAt sql.NullTime
 		err := rows.Scan(
 			&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity, &weightValue, &it.WeightUnit, &weightGrams,
 			&it.City, &it.Country, &it.Zip, &it.DeliveryMode, &it.Dimensions, &it.Image, pq.Array(&it.Photos), &it.Reference, &it.Status, &it.Views, &it.Saves, &it.Interested,
 			&it.UserID, &it.CreatedAt, &it.UpdatedAt,
 			&it.WorkflowStatus, &it.DepositCode, &it.PickupCode,
 			&it.AfterDeposit,
+			&it.Featured, &featuredUntil, &bumpedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -241,6 +267,12 @@ func (r *Repository) ListByUser(userID int64) ([]Item, error) {
 		if weightGrams.Valid {
 			g := weightGrams.Float64
 			it.WeightGrams = &g
+		}
+		if featuredUntil.Valid {
+			it.FeaturedUntil = &featuredUntil.Time
+		}
+		if bumpedAt.Valid {
+			it.BumpedAt = &bumpedAt.Time
 		}
 		it.Date = it.CreatedAt.Format("02/01/2006")
 		result = append(result, it)
@@ -332,6 +364,38 @@ func (r *Repository) HideByUser(id, userID int64) error {
 	return err
 }
 
+// SetFeatured met une annonce "à la une" jusqu'à la date donnée (option payante).
+func (r *Repository) SetFeatured(itemID, userID int64, until time.Time) error {
+	res, err := r.db.Exec(`UPDATE items SET featured = true, featured_until = $3, updated_at = NOW() WHERE id = $1 AND user_id = $2`, itemID, userID, until)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// BumpItem rafraîchit la position de l'annonce dans le tri chronologique (option payante "remonter l'annonce").
+func (r *Repository) BumpItem(itemID, userID int64) error {
+	res, err := r.db.Exec(`UPDATE items SET bumped_at = NOW() WHERE id = $1 AND user_id = $2`, itemID, userID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *Repository) GetByID(id int64) (Item, error) {
 	log.Printf("Repository details: GetByID called for id=%d", id)
 	var it Item
@@ -355,7 +419,8 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 		i.moderation_note,
 		i.moderation_details,
 		i.moderated_at,
-		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit
+		COALESCE(l.deposited_at IS NOT NULL OR l.workflow_status IN ('deposited', 'picked_up'), false) as after_deposit,
+		i.featured, i.featured_until, i.bumped_at
 		FROM items i
 		JOIN users u ON u.id = i.user_id
 		LEFT JOIN item_logistics l ON l.item_id = i.id
@@ -363,13 +428,14 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 		LEFT JOIN containers ct ON ct.id = l.container_id
 		WHERE i.id = $1
 	`
-	
+
 	var depExp, pickExp, modAt sql.NullTime
 	var weightValue sql.NullFloat64
 	var weightGrams sql.NullFloat64
 	var sellerRatingAvg sql.NullFloat64
 	var sellerRatingCount sql.NullInt64
 	var sellerItemsCount sql.NullInt64
+	var featuredUntil, bumpedAt sql.NullTime
 
 	err := r.db.QueryRow(query, id).Scan(
 		&it.ID, &it.Title, &it.Description, &it.Type, &it.Price, &it.Category, &it.Condition, &it.Material, &it.Quantity, &weightValue, &it.WeightUnit, &weightGrams,
@@ -381,8 +447,9 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 		&depExp, &pickExp,
 		&it.ModerationNote, &it.ModerationDetails, &modAt,
 		&it.AfterDeposit,
+		&it.Featured, &featuredUntil, &bumpedAt,
 	)
-	
+
 	if err != nil {
 		log.Printf("Repository details error for id=%d: %v", id, err)
 		return it, err
@@ -395,7 +462,13 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 		g := weightGrams.Float64
 		it.WeightGrams = &g
 	}
-	
+	if featuredUntil.Valid {
+		it.FeaturedUntil = &featuredUntil.Time
+	}
+	if bumpedAt.Valid {
+		it.BumpedAt = &bumpedAt.Time
+	}
+
 	it.Date = it.CreatedAt.Format("02/01/2006")
 	if userRegistrationTS.Valid {
 		it.UserRegistrationDate = userRegistrationTS.Time.Format("02/01/2006")

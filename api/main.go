@@ -159,6 +159,7 @@ func main() {
 	mux.Handle("/api/admin/event-refund-requests", authMiddleware(http.HandlerFunc(adminEventRefundRequestsHandler)))
 	mux.Handle("/api/admin/event-registrations/", authMiddleware(http.HandlerFunc(adminEventRegistrationRefundRoutes)))
 	mux.Handle("/api/admin/finances/sale-commission", authMiddleware(http.HandlerFunc(adminSaleCommissionHandler)))
+	mux.Handle("/api/admin/finances/boost-pricing", authMiddleware(http.HandlerFunc(adminBoostPricingHandler)))
 	mux.Handle("/api/admin/offers/overview", authMiddleware(http.HandlerFunc(offersOverviewHandler)))
 	mux.Handle("/api/admin/events", authMiddleware(http.HandlerFunc(eventsHandler)))
 	mux.Handle("/api/admin/events/", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -7027,6 +7028,48 @@ func adminSaleCommissionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"percent": body.Percent, "mode": m})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func adminBoostPricingHandler(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(authClaimsKey).(jwt.MapClaims)
+	role, _ := claims["role"].(string)
+	if role != "admin" {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		cfg, err := items.GetBoostPricingConfig(r.Context(), db)
+		if err != nil {
+			log.Printf("[Finances] boost-pricing get: %v", err)
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		writeJSON(w, http.StatusOK, cfg)
+	case http.MethodPut, http.MethodPatch:
+		var body items.BoostPricingConfig
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid payload")
+			return
+		}
+		if body.ItemFeaturePriceCents <= 0 || body.ItemBumpPriceCents <= 0 || body.ProjectFeaturePriceCents <= 0 || body.ProjectBumpPriceCents <= 0 {
+			writeError(w, http.StatusBadRequest, "les tarifs doivent être positifs")
+			return
+		}
+		if body.FeatureDurationDays <= 0 || body.FeatureDurationDays > 90 {
+			writeError(w, http.StatusBadRequest, "la durée doit être comprise entre 1 et 90 jours")
+			return
+		}
+		if err := items.SetBoostPricingConfig(r.Context(), db, body); err != nil {
+			log.Printf("[Finances] boost-pricing put: %v", err)
+			writeError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		writeJSON(w, http.StatusOK, body)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}

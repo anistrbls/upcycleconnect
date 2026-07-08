@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { apiUrl, buildAuthHeaders } from "../../../lib/api";
-import { Plus, Tag, Calendar, Box, ChevronRight, Search, Filter, FileText, Pencil, Trash2 } from "lucide-react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { apiUrl, buildAuthHeaders, TOKEN_KEY } from "../../../lib/api";
+import { Plus, Tag, Calendar, Box, ChevronRight, Search, Filter, FileText, Pencil, Trash2, Sparkles, ArrowUpCircle } from "lucide-react";
 
 const STATUS_LABELS = { brouillon: "Brouillon", publie: "Publié" };
 const MODERATION_LABELS = { pending: "En validation", approved: "Validé", rejected: "Refusé" };
@@ -141,6 +141,37 @@ const styles = {
             border: rejected ? "none" : draft ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(43, 69, 72, 0.08)",
         };
     },
+    featuredBadge: {
+        position: "absolute",
+        top: "14px",
+        left: "14px",
+        padding: "4px 12px",
+        borderRadius: "20px",
+        fontSize: "0.72rem",
+        fontWeight: "700",
+        background: "linear-gradient(135deg, #f59e0b, #f97316)",
+        color: "white",
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        letterSpacing: "0.04em",
+        zIndex: 15,
+        boxShadow: "0 2px 10px rgba(245,158,11,0.4)",
+    },
+    boostBtn: {
+        padding: "9px",
+        borderRadius: "50%",
+        border: "1px solid rgba(255,255,255,0.25)",
+        background: "rgba(255,255,255,0.12)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        color: "white",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+    },
     cardOverlay: {
         position: "absolute",
         bottom: 0,
@@ -226,20 +257,132 @@ const styles = {
     },
 };
 
-export default function ProjetsList() {
+const isFeaturedNow = (project) => {
+    if (!project?.featured) return false;
+    if (!project.featuredUntil) return true;
+    return new Date(project.featuredUntil).getTime() > Date.now();
+};
+
+function ProjetsListContent() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [toastMessage, setToastMessage] = useState("");
+    const [showToast, setShowToast] = useState(false);
+    const [boostPricing, setBoostPricing] = useState(null);
 
-    useEffect(() => {
-        fetch(apiUrl("/pro/projects"), { headers: buildAuthHeaders() })
+    const fetchProjects = () => {
+        return fetch(apiUrl("/pro/projects"), { headers: buildAuthHeaders() })
             .then((r) => r.json())
             .then((d) => { setProjects(d.projects || []); setLoading(false); })
             .catch(() => { setError("Impossible de charger les projets"); setLoading(false); });
+    };
+
+    useEffect(() => {
+        fetchProjects();
     }, []);
+
+    useEffect(() => {
+        fetch(apiUrl("/boost-pricing"))
+            .then((r) => r.json())
+            .then((d) => setBoostPricing(d))
+            .catch(() => {});
+    }, []);
+
+    const formatEuro = (cents) => (Number(cents) / 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const featureTitle = boostPricing
+        ? `Mettre à la une (${formatEuro(boostPricing.projectFeaturePriceCents)} € / ${boostPricing.featureDurationDays} jours)`
+        : "Mettre à la une";
+    const bumpTitle = boostPricing
+        ? `Remonter le projet (${formatEuro(boostPricing.projectBumpPriceCents)} €)`
+        : "Remonter le projet";
+
+    useEffect(() => {
+        const boostParam = searchParams.get("boost");
+        const sessionId = searchParams.get("session_id");
+        if (boostParam === "success" && sessionId) {
+            confirmBoostPayment(sessionId);
+        } else if (boostParam === "cancel") {
+            setToastMessage("Paiement annulé.");
+            setShowToast(true);
+            const timer = setTimeout(() => {
+                setShowToast(false);
+                router.replace("/projets/mes-projets");
+            }, 4000);
+            return () => clearTimeout(timer);
+        }
+    }, [searchParams, router]);
+
+    const confirmBoostPayment = async (sessionId) => {
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        try {
+            const response = await fetch(apiUrl(`/pro/projects/boost-confirm?session_id=${encodeURIComponent(sessionId)}`), {
+                method: "GET",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.paid) {
+                setToastMessage(
+                    data.kind === "project_feature"
+                        ? "Votre projet est maintenant à la une !"
+                        : "Votre projet a été remonté en tête de liste !"
+                );
+                await fetchProjects();
+            } else {
+                setToastMessage("Le paiement n'a pas pu être confirmé.");
+            }
+        } catch (err) {
+            setToastMessage("Erreur lors de la confirmation du paiement.");
+        }
+        setShowToast(true);
+        setTimeout(() => {
+            setShowToast(false);
+            router.replace("/projets/mes-projets");
+        }, 5000);
+    };
+
+    const handleFeatureCheckout = async (id) => {
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        try {
+            const response = await fetch(apiUrl(`/pro/projects/${id}/feature-checkout`), {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.url) {
+                window.location.href = data.url;
+            } else {
+                alert(data.error || "Impossible de créer le paiement pour la mise à la une.");
+            }
+        } catch (err) {
+            alert("Erreur réseau : " + err.message);
+        }
+    };
+
+    const handleBumpCheckout = async (id) => {
+        const token = window.localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        try {
+            const response = await fetch(apiUrl(`/pro/projects/${id}/bump-checkout`), {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.url) {
+                window.location.href = data.url;
+            } else {
+                alert(data.error || "Impossible de créer le paiement pour remonter le projet.");
+            }
+        } catch (err) {
+            alert("Erreur réseau : " + err.message);
+        }
+    };
 
     const deleteProject = async (projectId, title) => {
         const ok = window.confirm(`Supprimer le projet "${title || "sans titre"}" ? Cette action est irreversible.`);
@@ -286,6 +429,17 @@ export default function ProjetsList() {
 
     return (
         <div style={styles.container}>
+            {showToast && (
+                <div style={{
+                    position: "fixed", bottom: "2rem", right: "2rem",
+                    background: "var(--black)", color: "white",
+                    padding: "1rem 1.5rem", borderRadius: "16px",
+                    boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 1000,
+                    fontWeight: 500, fontSize: "0.95rem",
+                }}>
+                    {toastMessage}
+                </div>
+            )}
             <div style={styles.header}>
                 <p className="activities-label">Espace Professionnel</p>
                 <div style={styles.headerTop}>
@@ -355,6 +509,12 @@ export default function ProjetsList() {
                             <div style={styles.blurLayer} />
                             <div style={styles.gradientLayer} />
                             <span style={styles.statusBadge(p.status, String(p.moderationStatus || "").toLowerCase())}>{getDisplayStatus(p)}</span>
+                            {isFeaturedNow(p) && (
+                                <div style={styles.featuredBadge}>
+                                    <Sparkles size={12} />
+                                    À LA UNE
+                                </div>
+                            )}
 
                             <div style={styles.cardOverlay}>
                                 <div style={styles.cardTop}>
@@ -374,6 +534,24 @@ export default function ProjetsList() {
                                 </div>
 
                                 <div style={styles.cardActions}>
+                                    {p.status === "publie" && String(p.moderationStatus || "").toLowerCase() === "approved" && !isFeaturedNow(p) && (
+                                        <button
+                                            style={styles.boostBtn}
+                                            title={featureTitle}
+                                            onClick={(e) => { e.stopPropagation(); handleFeatureCheckout(p.id); }}
+                                        >
+                                            <Sparkles size={15} />
+                                        </button>
+                                    )}
+                                    {p.status === "publie" && String(p.moderationStatus || "").toLowerCase() === "approved" && (
+                                        <button
+                                            style={styles.boostBtn}
+                                            title={bumpTitle}
+                                            onClick={(e) => { e.stopPropagation(); handleBumpCheckout(p.id); }}
+                                        >
+                                            <ArrowUpCircle size={15} />
+                                        </button>
+                                    )}
                                     <button
                                         style={styles.viewBtn}
                                         onClick={(e) => {
@@ -410,5 +588,13 @@ export default function ProjetsList() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function ProjetsList() {
+    return (
+        <Suspense fallback={<div>Chargement...</div>}>
+            <ProjetsListContent />
+        </Suspense>
     );
 }

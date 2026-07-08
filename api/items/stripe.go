@@ -602,6 +602,113 @@ func RetrieveStripeBookingSessionDetails(secretKey, sessionID string) (*StripeBo
 	return details, nil
 }
 
+// StripeBoostSessionDetails détails d'une session Checkout pour une mise en avant / remontée d'annonce ou de projet.
+type StripeBoostSessionDetails struct {
+	PaymentStatus string
+	Kind          string
+	EntityID      int64
+	UserID        int64
+	PaymentIntent string
+}
+
+// CreateStripeBoostCheckoutSessionPublic crée une session Stripe pour une option payante (mise en avant / bump)
+// appliquée à une annonce ou un projet. `kind` identifie l'option (ex: "item_feature", "item_bump",
+// "project_feature", "project_bump") et est reporté tel quel dans les métadonnées de la session.
+func CreateStripeBoostCheckoutSessionPublic(cfg *StripeConfig, kind string, entityID, userID int64, title string, amountCents int64) (*StripeCheckoutSessionPublic, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("invalid amount")
+	}
+	cleanKind := strings.TrimSpace(kind)
+	if cleanKind == "" {
+		return nil, fmt.Errorf("missing boost kind")
+	}
+
+	form := url.Values{}
+	form.Set("mode", "payment")
+	form.Set("success_url", cfg.SuccessURL)
+	form.Set("cancel_url", cfg.CancelURL)
+	form.Set("metadata[type]", cleanKind)
+	form.Set("metadata[entity_id]", strconv.FormatInt(entityID, 10))
+	form.Set("metadata[user_id]", strconv.FormatInt(userID, 10))
+	form.Set("line_items[0][quantity]", "1")
+	form.Set("line_items[0][price_data][currency]", "eur")
+	form.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(amountCents, 10))
+	form.Set("line_items[0][price_data][product_data][name]", title)
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.SecretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe checkout creation failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session stripeCheckoutSession
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.URL) == "" {
+		return nil, fmt.Errorf("invalid stripe session response")
+	}
+	return &StripeCheckoutSessionPublic{ID: session.ID, URL: session.URL}, nil
+}
+
+// RetrieveStripeBoostSessionDetails récupère les métadonnées d'une session Checkout de mise en avant / bump.
+func RetrieveStripeBoostSessionDetails(secretKey, sessionID string) (*StripeBoostSessionDetails, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.stripe.com/v1/checkout/sessions/"+url.PathEscape(sessionID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("stripe retrieve session failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var session struct {
+		PaymentStatus string            `json:"payment_status"`
+		PaymentIntent string            `json:"payment_intent"`
+		Metadata      map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+
+	details := &StripeBoostSessionDetails{
+		PaymentStatus: session.PaymentStatus,
+		PaymentIntent: session.PaymentIntent,
+		Kind:          strings.TrimSpace(session.Metadata["type"]),
+	}
+	if raw := strings.TrimSpace(session.Metadata["entity_id"]); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			details.EntityID = parsed
+		}
+	}
+	if raw := strings.TrimSpace(session.Metadata["user_id"]); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			details.UserID = parsed
+		}
+	}
+	return details, nil
+}
+
 // GetStripePaymentIntentFromSessionPublic retrieves the payment intent ID for a given session
 func GetStripePaymentIntentFromSessionPublic(cfg *StripeConfig, sessionID string) (string, error) {
 	session, err := fetchStripeCheckoutSession(cfg, sessionID)

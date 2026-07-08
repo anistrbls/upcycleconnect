@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import PaymentsAdminView from "../../../components/admin/finances/PaymentsAdminView";
 import CommissionsAdminView from "../../../components/admin/finances/CommissionsAdminView";
+import BoostPricingAdminView from "../../../components/admin/finances/BoostPricingAdminView";
 import SubscriptionsAdminView from "../../../components/admin/finances/SubscriptionsAdminView";
 import FinancialOverviewView from "../../../components/admin/finances/FinancialOverviewView";
 import MyPaymentsView from "../../../components/finances/MyPaymentsView";
@@ -27,7 +28,7 @@ export default function FinancesSubPage() {
         if (subpage === "factures") {
             router.replace("/finances/paiements");
         }
-        if ((subpage === "commissions" || subpage === "abonnements" || subpage === "vue-financiere") && role !== "admin") {
+        if ((subpage === "commissions" || subpage === "mise-en-avant" || subpage === "abonnements" || subpage === "vue-financiere") && role !== "admin") {
             router.replace("/finances/paiements");
         }
         if (subpage === "abonnement" && role !== "professionnel") {
@@ -49,6 +50,10 @@ export default function FinancesSubPage() {
 
     if (subpage === "commissions") {
         return <CommissionsAdminView />;
+    }
+
+    if (subpage === "mise-en-avant") {
+        return <BoostPricingAdminView />;
     }
 
     if (subpage === "abonnements") {
