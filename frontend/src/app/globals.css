@@ -386,17 +386,7 @@ body {
   }
 }
 
-@media (max-width: 760px) {
-  .topbar-left .slash,
-  .topbar-left span:last-child {
-    display: none;
-  }
 
-  .topbar-right {
-    gap: 0.5rem;
-  }
-
-}
 
 
 
@@ -3070,3 +3060,196 @@ input::-ms-clear {
 @keyframes tutorialSpin {
   to { transform: rotate(360deg); }
 }
+
+/* ==========================================
+   MOBILE & RESPONSIVE ADAPTATIONS
+   ========================================== */
+@media (max-width: 768px) {
+  /* Layout changes */
+  body {
+    overflow-y: auto !important;
+    height: auto !important;
+  }
+
+  .app-wrapper {
+    padding: 0 0.5rem 0 0.5rem !important;
+    overflow-y: visible !important;
+  }
+
+  /* Make sidebar horizontal and place it at the bottom */
+  .sidebar {
+    width: 100% !important;
+    height: 60px !important;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    background-color: var(--black) !important;
+    flex-direction: row !important;
+    justify-content: space-around !important;
+    padding: 0.5rem 1rem !important;
+    z-index: 9999 !important;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15) !important;
+    border-radius: 20px 20px 0 0 !important;
+  }
+
+  .sidebar-nav {
+    flex-direction: row !important;
+    width: 100% !important;
+    justify-content: space-around !important;
+    gap: 0.5rem !important;
+  }
+
+  .sidebar-icon {
+    width: 42px !important;
+    height: 42px !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .sidebar-icon.active {
+    background-color: #ffffff !important;
+    color: var(--black) !important;
+  }
+
+  .sidebar-item[data-tooltip]::after {
+    display: none !important; /* Hide tooltips on mobile */
+  }
+
+  /* Main content offset for fixed bottom bar */
+  .main-content {
+    padding: 1rem 0.5rem 80px 0.5rem !important;
+    overflow-y: visible !important;
+    height: auto !important;
+  }
+
+  /* Topbar compact */
+  .topbar {
+    flex-wrap: wrap !important;
+    height: auto !important;
+    padding: 0.75rem 0.5rem !important;
+    gap: 0.5rem !important;
+  }
+
+  .topbar-left {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+
+  .topbar-center {
+    width: 100% !important;
+    overflow-x: auto !important;
+    display: flex !important;
+    white-space: nowrap !important;
+    justify-content: flex-start !important;
+    padding: 0.4rem !important;
+    scrollbar-width: none !important;
+  }
+
+  .topbar-center::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .topbar-right {
+    width: 100% !important;
+    justify-content: flex-end !important;
+    margin-top: 0.25rem !important;
+  }
+
+  .topbar-right > div {
+    width: 100% !important;
+    justify-content: space-between !important;
+    margin-right: 0 !important;
+  }
+
+  .brand-dot {
+    display: none !important;
+  }
+
+  /* Typography */
+  .title-area h1 {
+    font-size: 1.6rem !important;
+    margin: 0.5rem 0 1rem 0 !important;
+  }
+
+  /* Grids and Panels responsive default */
+  .panel {
+    padding: 1rem !important;
+    border-radius: 16px !important;
+  }
+
+  /* Make arbitrary grids 1 column */
+  div[style*="grid-template-columns"],
+  div[style*="gridTemplateColumns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Header actions/meta items wrap */
+  .header-meta {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 1rem !important;
+    margin-left: 0 !important;
+  }
+
+  .header-section {
+    flex-direction: column !important;
+    gap: 1rem !important;
+  }
+
+  /* Tabs responsive */
+  .tabs {
+    gap: 1rem !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+    white-space: nowrap !important;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .tab {
+    font-size: 0.95rem !important;
+  }
+
+  /* Action buttons */
+  .action-btn {
+    padding: 0.5rem 0.8rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* Tables responsiveness (Make them scrollable) */
+  table {
+    display: block !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+  }
+
+  /* Forms and inputs */
+  input, select, textarea, button {
+    font-size: 16px !important; /* Prevents iOS auto-zoom */
+  }
+
+  /* Flex wrap defaults */
+  div[style*="display: flex"],
+  div[style*="display:flex"] {
+    flex-wrap: wrap;
+  }
+
+  /* Avoid wraps on specific elements like switcher or profile badge */
+  .topbar-right > div,
+  .language-switcher {
+    flex-wrap: nowrap !important;
+  }
+
+  /* Notification curtain panel width */
+  div[style*="width: 25vw"] {
+    width: 85vw !important;
+    right: -85vw !important;
+  }
+  div[style*="right: 0"] {
+    right: 0 !important;
+  }
+}
+
+
