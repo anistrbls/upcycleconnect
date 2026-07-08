@@ -309,6 +309,31 @@ export default function MonComptePage() {
         }
     };
 
+    const handleExportData = async () => {
+        try {
+            const response = await fetch(apiUrl("/pro/export-data"), {
+                headers: buildAuthHeaders(),
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || "Erreur de téléchargement");
+            }
+            
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "export-donnees-upcycleconnect.csv";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            showToast("Export CSV réussi !");
+        } catch (err) {
+            showToast(err.message || "Erreur lors de l'exportation", "error");
+        }
+    };
+
     if (loading) {
         return (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
@@ -537,6 +562,25 @@ export default function MonComptePage() {
                                 <input style={styles.input} value={userData.interventionZone} readOnly />
                             </div>
                         </div>
+
+                        {userData.subscriptionType === 'premium_atelier' && (
+                            <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1.25rem' }}>
+                                <div style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '0.4rem' }}>
+                                    Espace Premium Atelier
+                                </div>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: '1.3' }}>
+                                    Téléchargez l'intégralité de vos données de la plateforme (informations entreprise, projets d'upcycling, historique des récupérations, watchlist, factures et prestations) organisées dans un fichier CSV.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={handleExportData}
+                                    className="action-btn secondary"
+                                    style={{ width: '100%', padding: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                                >
+                                    Exporter toutes mes données (CSV)
+                                </button>
+                            </div>
+                        )}
                     </section>
                 )}
 

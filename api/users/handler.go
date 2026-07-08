@@ -2,7 +2,9 @@ package users
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -514,3 +516,322 @@ var _ = func(u User) map[string]interface{} {
 	}
 	return m
 }
+
+// ExportCSVHandler exports all pro user data as a CSV file.
+func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request, userID int64) {
+	u, err := h.repo.GetByID(userID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if u.Role != RoleProfessionnel || u.SubscriptionType != "premium_atelier" {
+		writeError(w, http.StatusForbidden, "Premium Atelier subscription required")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=export-donnees-upcycleconnect.csv")
+
+	// Add UTF-8 BOM so Excel opens it correctly with accents in French
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	writer := csv.NewWriter(w)
+	writer.Comma = ';'
+
+	// 1. ENTREPRISE SECTION
+	_ = writer.Write([]string{"--- INFORMATIONS ENTREPRISE ---"})
+	_ = writer.Write([]string{"Nom de l'entreprise", "SIRET", "Email", "Téléphone", "Ville", "Adresse", "Code Postal", "Type d'activité", "Zone d'intervention", "Abonnement"})
+	_ = writer.Write([]string{
+		u.CompanyName,
+		u.Siret,
+		u.Email,
+		u.Phone,
+		u.City,
+		u.Address,
+		u.ZipCode,
+		u.ActivityType,
+		u.InterventionZone,
+		u.SubscriptionType,
+	})
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 2. PROJETS SECTION
+	_ = writer.Write([]string{"--- PROJETS D'UPCYCLING ---"})
+	_ = writer.Write([]string{"ID Projet", "Titre", "Statut", "Statut de modération", "Date de création"})
+
+	rowsP, errP := h.repo.DB().QueryContext(r.Context(), `
+		SELECT id, title, status, moderation_status, created_at
+		FROM upcycling_projects
+		WHERE pro_user_id = $1
+		ORDER BY created_at DESC
+	`, userID)
+	if errP == nil {
+		defer rowsP.Close()
+		for rowsP.Next() {
+			var pID int64
+			var pTitle, pStatus, pModStatus string
+			var pCreatedAt time.Time
+			if err := rowsP.Scan(&pID, &pTitle, &pStatus, &pModStatus, &pCreatedAt); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(pID, 10),
+					pTitle,
+					pStatus,
+					pModStatus,
+					pCreatedAt.Format("2006-01-02 15:04"),
+				})
+			}
+		}
+	}
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 3. RECUPERATIONS (HISTORIQUE DE MATIÈRE) SECTION
+	_ = writer.Write([]string{"--- HISTORIQUE DES RECUPERATIONS ---"})
+	_ = writer.Write([]string{"ID Objet", "Titre", "Matériau", "Poids (kg)", "Prix initial (€)", "Statut logistique", "Date de récupération"})
+
+	rowsL, errL := h.repo.DB().QueryContext(r.Context(), `
+		SELECT il.item_id, i.title, COALESCE(i.material, ''), COALESCE(i.weight_grams, 0)/1000.0, i.price, il.workflow_status, COALESCE(il.picked_up_at, il.updated_at)
+		FROM item_logistics il
+		JOIN items i ON i.id = il.item_id
+		WHERE il.reserved_by_user_id = $1 AND il.workflow_status = 'picked_up'
+		ORDER BY il.picked_up_at DESC
+	`, userID)
+	if errL == nil {
+		defer rowsL.Close()
+		for rowsL.Next() {
+			var itemID int64
+			var title, material, workflowStatus string
+			var weight, price float64
+			var pickedUpAt time.Time
+			if err := rowsL.Scan(&itemID, &title, &material, &weight, &price, &workflowStatus, &pickedUpAt); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(itemID, 10),
+					title,
+					material,
+					fmt.Sprintf("%.2f", weight),
+					fmt.Sprintf("%.2f", price),
+					workflowStatus,
+					pickedUpAt.Format("2006-01-02 15:04"),
+				})
+			}
+		}
+	}
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 4. HISTORIQUE PAIEMENTS & REMBOURSEMENTS OBGETS (LOGISTIQUE) SECTION
+	_ = writer.Write([]string{"--- TRANSACTIONS & PAIEMENTS OBGETS ---"})
+	_ = writer.Write([]string{"ID Objet", "Titre Objet", "Montant Payé (€)", "Statut Paiement", "Ref Stripe (PaymentIntent)", "Ref Stripe (Remboursement)", "Montant Remboursé (€)", "Statut Logistique"})
+
+	rowsTrans, errTrans := h.repo.DB().QueryContext(r.Context(), `
+		SELECT il.item_id, i.title, COALESCE(il.stripe_amount_cents, 0)/100.0, il.stripe_payment_status, il.stripe_payment_intent_id, il.stripe_refund_id, il.refund_amount, il.workflow_status
+		FROM item_logistics il
+		JOIN items i ON i.id = il.item_id
+		WHERE il.reserved_by_user_id = $1 AND il.stripe_amount_cents > 0
+		ORDER BY il.updated_at DESC
+	`, userID)
+	if errTrans == nil {
+		defer rowsTrans.Close()
+		for rowsTrans.Next() {
+			var itemID int64
+			var title, payStatus, piID, refundID, workflowStatus string
+			var amount, refundAmt float64
+			if err := rowsTrans.Scan(&itemID, &title, &amount, &payStatus, &piID, &refundID, &refundAmt, &workflowStatus); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(itemID, 10),
+					title,
+					fmt.Sprintf("%.2f", amount),
+					payStatus,
+					piID,
+					refundID,
+					fmt.Sprintf("%.2f", refundAmt),
+					workflowStatus,
+				})
+			}
+		}
+	}
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 5. COMPTE FINANCIER & PRESTATIONS (SERVICES) SECTION
+	_ = writer.Write([]string{"--- PRESTATIONS ET ATELIERS PROFESSIONNELS ---"})
+	_ = writer.Write([]string{"ID Réservation", "Service", "Montant Payé (€)", "Statut Réservation", "Statut Paiement", "Montant Remboursé (€)", "Date de commande"})
+
+	rowsS, errS := h.repo.DB().QueryContext(r.Context(), `
+		SELECT sb.id, s.name, sb.amount, sb.status, sb.payment_status, sb.refund_amount, sb.created_at
+		FROM service_bookings sb
+		JOIN services s ON s.id = sb.service_id
+		WHERE sb.user_id = $1
+		ORDER BY sb.created_at DESC
+	`, userID)
+	if errS == nil {
+		defer rowsS.Close()
+		for rowsS.Next() {
+			var bID int64
+			var sName, bStatus, bPayStatus string
+			var bAmount, refundAmt float64
+			var bCreatedAt time.Time
+			if err := rowsS.Scan(&bID, &sName, &bAmount, &bStatus, &bPayStatus, &refundAmt, &bCreatedAt); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(bID, 10),
+					sName,
+					fmt.Sprintf("%.2f", bAmount),
+					bStatus,
+					bPayStatus,
+					fmt.Sprintf("%.2f", refundAmt),
+					bCreatedAt.Format("2006-01-02 15:04"),
+				})
+			}
+		}
+	}
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 6. EVENEMENTS INSCRIRE SECTION
+	_ = writer.Write([]string{"--- INSCRIPTIONS AUX ÉVÉNEMENTS ---"})
+	_ = writer.Write([]string{"ID Inscription", "Événement", "Prix Événement (€)", "Statut Paiement", "Statut Inscription", "Montant Remboursé (€)", "Date d'inscription"})
+
+	rowsE, errE := h.repo.DB().QueryContext(r.Context(), `
+		SELECT er.id, e.name, e.price, er.payment_status, er.status, er.refund_amount, er.created_at
+		FROM event_registrations er
+		JOIN events e ON e.id = er.event_id
+		WHERE er.user_id = $1
+		ORDER BY er.created_at DESC
+	`, userID)
+	if errE == nil {
+		defer rowsE.Close()
+		for rowsE.Next() {
+			var rID int64
+			var eName, ePayStatus, eStatus string
+			var price, refundAmt float64
+			var eCreatedAt time.Time
+			if err := rowsE.Scan(&rID, &eName, &price, &ePayStatus, &eStatus, &refundAmt, &eCreatedAt); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(rID, 10),
+					eName,
+					fmt.Sprintf("%.2f", price),
+					ePayStatus,
+					eStatus,
+					fmt.Sprintf("%.2f", refundAmt),
+					eCreatedAt.Format("2006-01-02 15:04"),
+				})
+			}
+		}
+	}
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 7. WATCHLIST SECTION
+	_ = writer.Write([]string{"--- WATCHLIST (FAVORIS) ---"})
+	_ = writer.Write([]string{"ID Objet", "Titre", "Prix (€)"})
+
+	rowsW, errW := h.repo.DB().QueryContext(r.Context(), `
+		SELECT w.item_id, i.title, i.price
+		FROM professional_item_watchlist w
+		JOIN items i ON i.id = w.item_id
+		WHERE w.user_id = $1
+		ORDER BY w.created_at DESC
+	`, userID)
+	if errW == nil {
+		defer rowsW.Close()
+		for rowsW.Next() {
+			var itemID int64
+			var title string
+			var price float64
+			if err := rowsW.Scan(&itemID, &title, &price); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(itemID, 10),
+					title,
+					fmt.Sprintf("%.2f", price),
+				})
+			}
+		}
+	}
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 8. MESSAGES ET SUJETS DU FORUM
+	_ = writer.Write([]string{"--- ACTIVITÉ FORUM (SUJETS CRÉÉS) ---"})
+	_ = writer.Write([]string{"ID Sujet", "Titre du Sujet", "Statut", "Date de création"})
+
+	rowsFT, errFT := h.repo.DB().QueryContext(r.Context(), `
+		SELECT id, title, status, created_at
+		FROM forum_topics
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+	`, userID)
+	if errFT == nil {
+		defer rowsFT.Close()
+		for rowsFT.Next() {
+			var tID int64
+			var tTitle, tStatus string
+			var tCreatedAt time.Time
+			if err := rowsFT.Scan(&tID, &tTitle, &tStatus, &tCreatedAt); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(tID, 10),
+					tTitle,
+					tStatus,
+					tCreatedAt.Format("2006-01-02 15:04"),
+				})
+			}
+		}
+	}
+
+	_ = writer.Write([]string{""}) // Empty row
+	_ = writer.Write([]string{"--- ACTIVITÉ FORUM (RÉPONSES POSTÉES) ---"})
+	_ = writer.Write([]string{"ID Réponse", "Sujet Concerné", "Contenu de la Réponse", "Statut", "Date"})
+
+	rowsFR, errFR := h.repo.DB().QueryContext(r.Context(), `
+		SELECT r.id, t.title, r.content, r.status, r.created_at
+		FROM forum_replies r
+		JOIN forum_topics t ON t.id = r.topic_id
+		WHERE r.user_id = $1
+		ORDER BY r.created_at DESC
+	`, userID)
+	if errFR == nil {
+		defer rowsFR.Close()
+		for rowsFR.Next() {
+			var rID int64
+			var tTitle, rContent, rStatus string
+			var rCreatedAt time.Time
+			if err := rowsFR.Scan(&rID, &tTitle, &rContent, &rStatus, &rCreatedAt); err == nil {
+				// Strip long reply content to make it CSV friendly
+				shortContent := rContent
+				if len(shortContent) > 60 {
+					shortContent = shortContent[:57] + "..."
+				}
+				_ = writer.Write([]string{
+					strconv.FormatInt(rID, 10),
+					tTitle,
+					shortContent,
+					rStatus,
+					rCreatedAt.Format("2006-01-02 15:04"),
+				})
+			}
+		}
+	}
+	_ = writer.Write([]string{""}) // Empty row
+
+	// 9. ARTICLES ET CONSEILS AIMÉS
+	_ = writer.Write([]string{"--- CONSEILS ET ASTUCES LIKÉS ---"})
+	_ = writer.Write([]string{"ID Conseil", "Titre du Conseil", "Catégorie"})
+
+	rowsCL, errCL := h.repo.DB().QueryContext(r.Context(), `
+		SELECT c.id, c.title, c.category
+		FROM conseil_likes l
+		JOIN salarie_contents c ON c.id = l.content_id
+		WHERE l.user_id = $1 AND c.type = 'conseil'
+		ORDER BY c.created_at DESC
+	`, userID)
+	if errCL == nil {
+		defer rowsCL.Close()
+		for rowsCL.Next() {
+			var cID int64
+			var cTitle, cCategory string
+			if err := rowsCL.Scan(&cID, &cTitle, &cCategory); err == nil {
+				_ = writer.Write([]string{
+					strconv.FormatInt(cID, 10),
+					cTitle,
+					cCategory,
+				})
+			}
+		}
+	}
+
+	writer.Flush()
+}
+

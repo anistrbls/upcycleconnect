@@ -125,6 +125,11 @@ func main() {
 	}
 	log.Println("✓ Cities schema initialized")
 
+	if err := ensureSystemLogsSchema(); err != nil {
+		log.Fatalf("failed to init system_logs schema: %v", err)
+	}
+	log.Println("✓ System logs schema initialized")
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", healthHandler)
@@ -258,6 +263,8 @@ func main() {
 	mux.Handle("/api/admin/dashboard/stats", authMiddleware(http.HandlerFunc(dashboardStatsHandler)))
 	mux.Handle("/api/admin/mail/status", authMiddleware(http.HandlerFunc(adminMailStatusHandler)))
 	mux.Handle("/api/admin/mail/test", authMiddleware(http.HandlerFunc(adminMailTestHandler)))
+	mux.Handle("/api/admin/system-logs", authMiddleware(http.HandlerFunc(systemLogsHandler)))
+	mux.Handle("/api/admin/system-logs/sources", authMiddleware(http.HandlerFunc(systemLogsSourcesHandler)))
 	mux.Handle("/api/user/dashboard/stats", authMiddleware(http.HandlerFunc(userDashboardStatsHandler)))
 
 	// Module users — doit etre initialise avant items (FK items.user_id -> users.id)
@@ -375,7 +382,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      corsMiddleware(loggerMiddleware(mux)),
+		Handler:      corsMiddleware(loggerMiddleware(systemLogsMiddleware(mux))),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -6994,13 +7001,53 @@ func adminSaleCommissionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		m := strings.TrimSpace(strings.ToLower(mode.String))
 		if m != "added" {
-			m = "deducted"
+		m = "deducted"
 		}
 		v := 0.0
 		if pct.Valid {
 			v = pct.Float64
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"percent": v, "mode": m})
+		
+		type CommTx struct {
+			ID           int64   `json:"id"`
+			Date         string  `json:"date"`
+			ItemTitle    string  `json:"item_title"`
+			AmountTotal  float64 `json:"amount_total"`
+			Commission   float64 `json:"commission"`
+			Mode         string  `json:"mode"`
+			Status       string  `json:"status"`
+			CustomerName string  `json:"customer_name"`
+		}
+		var transactions []CommTx
+		rows, err := db.Query(`
+			SELECT il.id, COALESCE(il.stripe_paid_at, il.updated_at), i.title, il.stripe_amount_cents, il.stripe_platform_fee_cents, il.sale_commission_mode, il.stripe_payment_status, COALESCE(u.firstname || ' ' || u.lastname, u.email, 'Client')
+			FROM item_logistics il
+			JOIN items i ON il.item_id = i.id
+			LEFT JOIN users u ON il.reserved_by_user_id = u.id
+			WHERE il.stripe_platform_fee_cents > 0
+			ORDER BY COALESCE(il.stripe_paid_at, il.updated_at) DESC
+		`)
+		if err == nil {
+			for rows.Next() {
+				var tx CommTx
+				var dt time.Time
+				var title, mode, status, custName sql.NullString
+				var amountCents, feeCents sql.NullInt64
+				if err := rows.Scan(&tx.ID, &dt, &title, &amountCents, &feeCents, &mode, &status, &custName); err == nil {
+					tx.Date = dt.Format(time.RFC3339)
+					tx.ItemTitle = title.String
+					tx.AmountTotal = float64(amountCents.Int64) / 100.0
+					tx.Commission = float64(feeCents.Int64) / 100.0
+					tx.Mode = mode.String
+					tx.Status = status.String
+					tx.CustomerName = custName.String
+					transactions = append(transactions, tx)
+				}
+			}
+			rows.Close()
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"percent": v, "mode": m, "transactions": transactions})
 	case http.MethodPut, http.MethodPatch:
 		var body struct {
 			Percent float64 `json:"percent"`
@@ -7706,10 +7753,10 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE container_id IS NOT NULL AND status = 'actif'").Scan(&itemsInContainers)
 
 	var donItems int
-	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE type = 'don' AND status = 'actif'").Scan(&donItems)
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE type = 'don'").Scan(&donItems)
 
 	var venteItems int
-	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE type = 'vente' AND status = 'actif'").Scan(&venteItems)
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE type = 'vente'").Scan(&venteItems)
 
 	var upcyclingProjects int
 	_ = db.QueryRow("SELECT COUNT(*) FROM upcycling_projects").Scan(&upcyclingProjects)
@@ -7771,19 +7818,80 @@ func dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 	}
 
+	var resFormations int
+	_ = db.QueryRow("SELECT COUNT(*) FROM service_bookings").Scan(&resFormations)
+
+	var evtAvenir int
+	_ = db.QueryRow("SELECT COUNT(*) FROM events WHERE date >= CURRENT_DATE").Scan(&evtAvenir)
+
+	var allItemsCount, validItemsCount int
+	_ = db.QueryRow("SELECT COUNT(*) FROM items").Scan(&allItemsCount)
+	_ = db.QueryRow("SELECT COUNT(*) FROM items WHERE status = 'actif'").Scan(&validItemsCount)
+	tauxValidation := 0.0
+	if allItemsCount > 0 {
+		tauxValidation = (float64(validItemsCount) / float64(allItemsCount)) * 100.0
+	}
+
+	var containerRemplissage float64
+	_ = db.QueryRow("SELECT COALESCE(AVG((current_count::float / capacity::float) * 100.0), 0.0) FROM containers WHERE capacity > 0").Scan(&containerRemplissage)
+
+	var financeAbonnements float64
+	_ = db.QueryRow(`
+		SELECT COALESCE(SUM(sp.price_euro), 0)
+		FROM users u
+		JOIN subscription_plans sp ON u.subscription_type = sp.key
+		WHERE u.subscription_type NOT IN ('gratuit', 'none', '')
+	`).Scan(&financeAbonnements)
+
+	var totalFeesCents int64
+	_ = db.QueryRow(`
+		SELECT COALESCE(SUM(stripe_platform_fee_cents), 0)
+		FROM item_logistics
+		WHERE stripe_platform_fee_cents > 0
+	`).Scan(&totalFeesCents)
+	financeCommissions := float64(totalFeesCents) / 100.0
+
+	var financeAteliers float64
+	_ = db.QueryRow(`
+		SELECT COALESCE(SUM(e.price), 0) - COALESCE(SUM(er.refund_amount), 0)
+		FROM event_registrations er
+		JOIN events e ON er.event_id = e.id
+		WHERE er.payment_status IN ('paid', 'succeeded')
+	`).Scan(&financeAteliers)
+	var financeService float64
+	_ = db.QueryRow(`
+		SELECT COALESCE(SUM(amount), 0) - COALESCE(SUM(refund_amount), 0)
+		FROM service_bookings
+		WHERE payment_status IN ('paid', 'succeeded')
+	`).Scan(&financeService)
+	financeTotal := financeAbonnements + financeCommissions + financeAteliers + financeService
+
+	finance := map[string]float64{
+		"abonnements": financeAbonnements,
+		"commissions": financeCommissions,
+		"ateliers":    financeAteliers,
+		"service":     financeService,
+		"total":       financeTotal,
+	}
+
 	stats := map[string]interface{}{
-		"totalUsers":        totalUsers,
-		"particuliers":      particuliers,
-		"pros":              pros,
-		"salaries":          salaries,
-		"pendingItems":      pendingItems,
-		"itemsInContainers": itemsInContainers,
-		"donItems":          donItems,
-		"venteItems":        venteItems,
-		"upcyclingProjects": upcyclingProjects,
-		"operationsToday":   operationsToday,
-		"alerts":            alerts,
-		"realtimeActivity":  realtimeActivity,
+		"totalUsers":           totalUsers,
+		"particuliers":         particuliers,
+		"pros":                 pros,
+		"salaries":             salaries,
+		"pendingItems":         pendingItems,
+		"itemsInContainers":    itemsInContainers,
+		"donItems":             donItems,
+		"venteItems":           venteItems,
+		"upcyclingProjects":    upcyclingProjects,
+		"operationsToday":      operationsToday,
+		"alerts":               alerts,
+		"realtimeActivity":     realtimeActivity,
+		"resFormations":        resFormations,
+		"evtAvenir":            evtAvenir,
+		"tauxValidation":       tauxValidation,
+		"containerRemplissage": containerRemplissage,
+		"finance":              finance,
 	}
 
 	writeJSON(w, http.StatusOK, stats)
@@ -7818,6 +7926,7 @@ func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role, _ := claims["role"].(string)
+	log.Printf("[debug-stats] userDashboardStatsHandler called for id=%d, role=%s", id, role)
 
 	stats := make(map[string]interface{})
 
@@ -8028,13 +8137,39 @@ func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			stats["materialBreakdown"] = materialBreakdown
 
-			var totalWeightGrams int64
-			_ = db.QueryRowContext(r.Context(), `
+			var totalWeightGrams float64
+			errWeight := db.QueryRowContext(r.Context(), `
 				SELECT COALESCE(SUM(COALESCE(i.weight_grams, 0)), 0)
-				FROM item_logistics il
-				JOIN items i ON i.id = il.item_id
-				WHERE il.reserved_by_user_id = $1 AND il.workflow_status = 'picked_up'
+				FROM upcycling_projects p
+				JOIN upcycling_project_items upi ON upi.project_id = p.id
+				JOIN items i ON i.id = upi.item_id
+				JOIN item_logistics il ON il.item_id = i.id
+				  AND il.workflow_status = 'picked_up'
+				  AND (
+				    il.reserved_by_user_id = $1
+				    OR (
+				      il.reserved_by_user_id IS NULL
+				      AND EXISTS (
+				        SELECT 1
+				        FROM users umatch
+				        WHERE umatch.id = $1
+				          AND (
+				            (TRIM(COALESCE(umatch.firstname, '') || ' ' || COALESCE(umatch.lastname, '')) <> ''
+				             AND LOWER(TRIM(il.reserved_by_name)) = LOWER(TRIM(COALESCE(umatch.firstname, '') || ' ' || COALESCE(umatch.lastname, ''))))
+				            OR
+				            (TRIM(COALESCE(umatch.company_name, '')) <> ''
+				             AND LOWER(TRIM(il.reserved_by_name)) = LOWER(TRIM(COALESCE(umatch.company_name, ''))))
+				          )
+				      )
+				    )
+				  )
+				WHERE p.pro_user_id = $1
+				  AND p.status = 'publie'
+				  AND p.moderation_status = 'approved'
 			`, id).Scan(&totalWeightGrams)
+			if errWeight != nil {
+				log.Printf("ERROR totalWeightGrams: %v", errWeight)
+			}
 			stats["totalWeightGrams"] = totalWeightGrams
 
 			var thisMonthRecoveries int
@@ -8047,9 +8182,12 @@ func userDashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
 			stats["thisMonthRecoveries"] = thisMonthRecoveries
 
 			var activeProjects int
-			_ = db.QueryRowContext(r.Context(), `
-				SELECT COUNT(*) FROM upcycling_projects WHERE user_id = $1 AND status = 'published'
+			errProj := db.QueryRowContext(r.Context(), `
+				SELECT COUNT(*) FROM upcycling_projects WHERE pro_user_id = $1 AND status = 'publie' AND moderation_status = 'approved'
 			`, id).Scan(&activeProjects)
+			if errProj != nil {
+				log.Printf("ERROR activeProjects: %v", errProj)
+			}
 			stats["activeProjects"] = activeProjects
 
 			var watchlistCount int

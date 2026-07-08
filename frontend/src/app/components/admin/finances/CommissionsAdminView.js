@@ -40,6 +40,7 @@ const modeCardBase = {
 export default function CommissionsAdminView() {
     const [percent, setPercent] = useState("");
     const [mode, setMode] = useState("deducted");
+    const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [loadError, setLoadError] = useState(null);
@@ -57,6 +58,7 @@ export default function CommissionsAdminView() {
             const p = typeof data.percent === "number" ? data.percent : parseFloat(String(data.percent));
             setPercent(Number.isFinite(p) ? String(p).replace(".", ",") : "0");
             setMode(data.mode === "added" ? "added" : "deducted");
+            setTransactions(data.transactions || []);
         } catch (e) {
             setLoadError(e.message || "Erreur");
         } finally {
@@ -172,105 +174,144 @@ export default function CommissionsAdminView() {
                         </button>
                     </div>
                 ) : (
-                    <div className="commissions-layout">
-                        <div className="commissions-main">
-                            <p style={{ ...labelStyle, marginBottom: "0.75rem", letterSpacing: "0.02em" }}>Mode de facturation</p>
-                            <div className="mode-grid">
-                                <button
-                                    type="button"
-                                    style={modeCardStyle(mode === "deducted")}
-                                    onClick={() => {
-                                        setMode("deducted");
-                                        setToast(null);
-                                    }}
-                                    aria-pressed={mode === "deducted"}
-                                >
-                                    <span className="mode-card-title">Sur le prix encaissé</span>
-                                    <span className="mode-card-desc">
-                                        La commission est déduite du montant perçu par le vendeur. L&apos;acheteur paie le
-                                        prix affiché sur l&apos;annonce.
-                                    </span>
-                                </button>
-                                <button
-                                    type="button"
-                                    style={modeCardStyle(mode === "added")}
-                                    onClick={() => {
-                                        setMode("added");
-                                        setToast(null);
-                                    }}
-                                    aria-pressed={mode === "added"}
-                                >
-                                    <span className="mode-card-title">En plus pour l&apos;acheteur</span>
-                                    <span className="mode-card-desc">
-                                        Le prix Stripe inclut l&apos;annonce plus la commission. Le vendeur reçoit le prix
-                                        affiché, la plateforme prélève sa part sur la transaction.
-                                    </span>
-                                </button>
+                    <>
+                        <div className="commissions-layout">
+                            <div className="commissions-main">
+                                <p style={{ ...labelStyle, marginBottom: "0.75rem", letterSpacing: "0.02em" }}>Mode de facturation</p>
+                                <div className="mode-grid">
+                                    <button
+                                        type="button"
+                                        style={modeCardStyle(mode === "deducted")}
+                                        onClick={() => {
+                                            setMode("deducted");
+                                            setToast(null);
+                                        }}
+                                        aria-pressed={mode === "deducted"}
+                                    >
+                                        <span className="mode-card-title">Sur le prix encaissé</span>
+                                        <span className="mode-card-desc">
+                                            La commission est déduite du montant perçu par le vendeur. L&apos;acheteur paie le
+                                            prix affiché sur l&apos;annonce.
+                                        </span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        style={modeCardStyle(mode === "added")}
+                                        onClick={() => {
+                                            setMode("added");
+                                            setToast(null);
+                                        }}
+                                        aria-pressed={mode === "added"}
+                                    >
+                                        <span className="mode-card-title">En plus pour l&apos;acheteur</span>
+                                        <span className="mode-card-desc">
+                                            Le prix Stripe inclut l&apos;annonce plus la commission. Le vendeur reçoit le prix
+                                            affiché, la plateforme prélève sa part sur la transaction.
+                                        </span>
+                                    </button>
+                                </div>
+
+                                <div style={{ ...innerCard, marginTop: "1.5rem" }}>
+                                    <label style={{ ...labelStyle, display: "block", marginBottom: 0 }}>
+                                        Taux de commission (%)
+                                        <div className="rate-row">
+                                            <input
+                                                type="text"
+                                                inputMode="decimal"
+                                                value={percent}
+                                                onChange={(e) => {
+                                                    setPercent(e.target.value);
+                                                    setToast(null);
+                                                }}
+                                                placeholder="0"
+                                                style={{ ...fieldStyle, flex: "0 1 140px", minWidth: "100px", fontWeight: 600 }}
+                                            />
+                                            <button
+                                                type="button"
+                                                className="action-cta task-action-btn"
+                                                onClick={save}
+                                                disabled={saving}
+                                                style={{ opacity: saving ? 0.65 : 1 }}
+                                            >
+                                                {saving ? "Enregistrement…" : "Enregistrer"}
+                                            </button>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
 
-                            <div style={{ ...innerCard, marginTop: "1.5rem" }}>
-                                <label style={{ ...labelStyle, display: "block", marginBottom: 0 }}>
-                                    Taux de commission (%)
-                                    <div className="rate-row">
-                                        <input
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={percent}
-                                            onChange={(e) => {
-                                                setPercent(e.target.value);
-                                                setToast(null);
-                                            }}
-                                            placeholder="0"
-                                            style={{ ...fieldStyle, flex: "0 1 140px", minWidth: "100px", fontWeight: 600 }}
-                                        />
-                                        <button
-                                            type="button"
-                                            className="action-cta task-action-btn"
-                                            onClick={save}
-                                            disabled={saving}
-                                            style={{ opacity: saving ? 0.65 : 1 }}
-                                        >
-                                            {saving ? "Enregistrement…" : "Enregistrer"}
-                                        </button>
+                            <aside className="commissions-aside">
+                                <div className="preview-card">
+                                    <span className="preview-kicker">Aperçu (exemple {fmt(exBase)})</span>
+                                    <div className="preview-block">
+                                        <span className="preview-label">Commission plateforme</span>
+                                        <span className="preview-value accent">
+                                            {Number.isFinite(rate) ? fmt(exFee) : "—"}
+                                        </span>
                                     </div>
-                                </label>
-                            </div>
+                                    <div className="preview-divider" />
+                                    <div className="preview-buyer-seller">
+                                        <div className="preview-block">
+                                            <span className="preview-label">Total payé par l&apos;acheteur</span>
+                                            <span className="preview-value">{Number.isFinite(rate) ? fmt(exBuyer) : "—"}</span>
+                                            <span className="preview-hint">
+                                                {mode === "added"
+                                                    ? "Prix annonce + commission"
+                                                    : "Égal au prix annonce affiché"}
+                                            </span>
+                                        </div>
+                                        <div className="preview-vs" aria-hidden="true" />
+                                        <div className="preview-block">
+                                            <span className="preview-label">Total reçu par le vendeur</span>
+                                            <span className="preview-value">{Number.isFinite(rate) ? fmt(exSeller) : "—"}</span>
+                                            <span className="preview-hint">
+                                                {mode === "added"
+                                                    ? "Égal au prix annonce affiché"
+                                                    : "Après déduction de la commission"}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </aside>
                         </div>
-
-                        <aside className="commissions-aside">
-                            <div className="preview-card">
-                                <span className="preview-kicker">Aperçu (exemple {fmt(exBase)})</span>
-                                <div className="preview-block">
-                                    <span className="preview-label">Commission plateforme</span>
-                                    <span className="preview-value accent">
-                                        {Number.isFinite(rate) ? fmt(exFee) : "—"}
-                                    </span>
-                                </div>
-                                <div className="preview-divider" />
-                                <div className="preview-buyer-seller">
-                                    <div className="preview-block">
-                                        <span className="preview-label">Total payé par l&apos;acheteur</span>
-                                        <span className="preview-value">{Number.isFinite(rate) ? fmt(exBuyer) : "—"}</span>
-                                        <span className="preview-hint">
-                                            {mode === "added"
-                                                ? "Prix annonce + commission"
-                                                : "Égal au prix annonce affiché"}
-                                        </span>
-                                    </div>
-                                    <div className="preview-vs" aria-hidden="true" />
-                                    <div className="preview-block">
-                                        <span className="preview-label">Total reçu par le vendeur</span>
-                                        <span className="preview-value">{Number.isFinite(rate) ? fmt(exSeller) : "—"}</span>
-                                        <span className="preview-hint">
-                                            {mode === "added"
-                                                ? "Égal au prix annonce affiché"
-                                                : "Après déduction de la commission"}
-                                        </span>
-                                    </div>
-                                </div>
+                        
+                        <div style={{ marginTop: "4rem", paddingTop: "2rem", borderTop: "1px solid var(--border)" }}>
+                            <div style={{ marginBottom: "1.25rem" }}>
+                                <h2 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0, color: "var(--text-main)" }}>Historique des transactions commissionnées</h2>
+                                <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "0.25rem 0 0 0" }}>Liste des annonces pour lesquelles une commission a été perçue par la plateforme.</p>
                             </div>
-                        </aside>
-                    </div>
+                            {(!transactions || transactions.length === 0) ? (
+                                <div style={{ padding: "3rem 2rem", textAlign: "center", background: "var(--surface-sunken)", borderRadius: "16px", border: "1px dashed var(--border)" }}>
+                                    <span style={{ color: "var(--text-muted)", fontSize: "0.95rem" }}>Aucune transaction commissionnée pour le moment.</span>
+                                </div>
+                            ) : (
+                                <div className="table-wrapper" style={{ overflowX: "auto", background: "#fff", borderRadius: "16px", border: "1px solid var(--border)" }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                                        <thead>
+                                            <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface-hover)", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                                <th style={{ padding: "1rem", fontWeight: 600 }}>Date</th>
+                                                <th style={{ padding: "1rem", fontWeight: 600 }}>Annonce</th>
+                                                <th style={{ padding: "1rem", fontWeight: 600 }}>Client</th>
+                                                <th style={{ padding: "1rem", fontWeight: 600, textAlign: "right" }}>Prix Initial</th>
+                                                <th style={{ padding: "1rem", fontWeight: 600, textAlign: "right" }}>Commission</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {transactions.map(tx => (
+                                                <tr key={tx.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                                                    <td style={{ padding: "1rem", fontSize: "0.9rem" }}>{new Date(tx.date).toLocaleDateString("fr-FR")}</td>
+                                                    <td style={{ padding: "1rem", fontSize: "0.9rem", fontWeight: 600, color: "var(--text-main)" }}>{tx.item_title}</td>
+                                                    <td style={{ padding: "1rem", fontSize: "0.9rem", color: "var(--text-muted)" }}>{tx.customer_name}</td>
+                                                    <td style={{ padding: "1rem", fontSize: "0.9rem", textAlign: "right", color: "var(--text-muted)" }}>{fmt(tx.amount_total - (tx.mode === "added" ? tx.commission : 0))}</td>
+                                                    <td style={{ padding: "1rem", fontSize: "0.95rem", textAlign: "right", fontWeight: 700, color: "var(--forest-deep)" }}>+ {fmt(tx.commission)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    </>
                 )}
             </div>
             </div>

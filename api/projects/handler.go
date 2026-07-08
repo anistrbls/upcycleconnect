@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"upcycleconnect/api/items"
@@ -859,3 +860,125 @@ func (h *Handler) notifyProjectEngagement(projectID, engagerID int64, engType st
 		}
 	}()
 }
+
+// EcologicalImpactDetailsHandler gère GET /api/projets/impact-details
+func (h *Handler) EcologicalImpactDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userIDVal, ok := claims["userId"].(float64)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "invalid user id in token")
+		return
+	}
+	userID := int64(userIDVal)
+
+	rows, err := h.repo.db.Query(`
+		SELECT i.id, i.title, COALESCE(i.price, 0), COALESCE(il.stripe_amount_cents, 0)::float / 100.0,
+		       COALESCE(i.weight_grams, 0) / 1000.0, COALESCE(i.material, 'Inconnu'), COALESCE(im.impact_coefficient, 1.0),
+		       ((COALESCE(i.weight_grams, 0) / 1000.0) * COALESCE(im.impact_coefficient, 1.0)) AS item_score,
+		       p.title AS project_title, COALESCE(il.stripe_paid_at, il.updated_at)
+		FROM upcycling_projects p
+		JOIN upcycling_project_items upi ON upi.project_id = p.id
+		JOIN items i ON i.id = upi.item_id
+		JOIN item_logistics il ON il.item_id = i.id
+		  AND il.workflow_status = 'picked_up'
+		  AND (
+		    il.reserved_by_user_id = $1
+		    OR (
+		      il.reserved_by_user_id IS NULL
+		      AND EXISTS (
+		        SELECT 1
+		        FROM users umatch
+		        WHERE umatch.id = $1
+		          AND (
+		            (TRIM(COALESCE(umatch.firstname, '') || ' ' || COALESCE(umatch.lastname, '')) <> ''
+		             AND LOWER(TRIM(il.reserved_by_name)) = LOWER(TRIM(COALESCE(umatch.firstname, '') || ' ' || COALESCE(umatch.lastname, ''))))
+		            OR
+		            (TRIM(COALESCE(umatch.company_name, '')) <> ''
+		             AND LOWER(TRIM(il.reserved_by_name)) = LOWER(TRIM(COALESCE(umatch.company_name, ''))))
+		          )
+		      )
+		    )
+		  )
+		LEFT JOIN item_materials im ON LOWER(TRIM(im.label)) = LOWER(TRIM(i.material))
+		WHERE p.pro_user_id = $1
+		  AND p.status = 'publie'
+		  AND p.moderation_status = 'approved'
+	`, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query impact details")
+		return
+	}
+	defer rows.Close()
+
+	type ImpactDetailRow struct {
+		ItemID       int64   `json:"item_id"`
+		ItemTitle    string  `json:"item_title"`
+		Price        float64 `json:"price"`
+		PaidAmount   float64 `json:"paid_amount"`
+		WeightKg     float64 `json:"weight_kg"`
+		Material     string  `json:"material"`
+		Coefficient  float64 `json:"coefficient"`
+		ItemScore    float64 `json:"item_score"`
+		ProjectTitle string  `json:"project_title"`
+		PaidAt       string  `json:"paid_at"`
+	}
+
+	var details []ImpactDetailRow
+	for rows.Next() {
+		var row ImpactDetailRow
+		var paidAt time.Time
+		if err := rows.Scan(&row.ItemID, &row.ItemTitle, &row.Price, &row.PaidAmount, &row.WeightKg, &row.Material, &row.Coefficient, &row.ItemScore, &row.ProjectTitle, &paidAt); err == nil {
+			row.PaidAt = paidAt.Format(time.RFC3339)
+			details = append(details, row)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"details": details})
+}
+
+// ToggleFeaturedHandler gère POST /api/pro/projects/{id}/featured.
+func (h *Handler) ToggleFeaturedHandler(w http.ResponseWriter, r *http.Request) {
+	proUserID, ok := h.getProUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	// Verify that user has premium_atelier subscription
+	var subscriptionType string
+	err := h.repo.db.QueryRowContext(r.Context(), "SELECT COALESCE(subscription_type, '') FROM users WHERE id = $1", proUserID).Scan(&subscriptionType)
+	if err != nil || subscriptionType != "premium_atelier" {
+		writeError(w, http.StatusForbidden, "Abonnement Premium Atelier requis pour mettre en avant un projet")
+		return
+	}
+
+	// Parse project ID
+	path := strings.TrimSuffix(r.URL.Path, "/featured")
+	projectID, ok := parseID(path, "/api/pro/projects/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+
+	// Fetch project and verify ownership
+	p, err := h.repo.GetByID(projectID, proUserID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	// Toggle is_featured
+	newFeatured := !p.IsFeatured
+	_, err = h.repo.db.ExecContext(r.Context(), "UPDATE upcycling_projects SET is_featured = $1 WHERE id = $2", newFeatured, projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update featured status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "isFeatured": newFeatured})
+}
+

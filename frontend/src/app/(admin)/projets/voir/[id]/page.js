@@ -136,6 +136,24 @@ function ProjectDetailInner() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [lightboxIndex, setLightboxIndex] = useState(null);
+    const [subscriptionType, setSubscriptionType] = useState("decouverte");
+    const [currentUserId, setCurrentUserId] = useState(null);
+    const [isPro, setIsPro] = useState(false);
+    const [isFeatured, setIsFeatured] = useState(false);
+
+    const handleToggleFeatured = async () => {
+        try {
+            const res = await fetch(apiUrl(`/pro/projects/${id}/featured`), {
+                method: "POST",
+                headers: buildAuthHeaders(),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || "Erreur de mise à jour");
+            setIsFeatured(json.isFeatured);
+        } catch (err) {
+            alert(err.message);
+        }
+    };
 
     const nextImage = (e) => {
         e?.stopPropagation();
@@ -150,6 +168,21 @@ function ProjectDetailInner() {
     };
 
     useEffect(() => {
+        const fetchUser = async () => {
+            try {
+                const res = await fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    setSubscriptionType(data.user?.subscriptionType || "decouverte");
+                    setCurrentUserId(data.user?.id || null);
+                    setIsPro(data.user?.role === "professionnel");
+                }
+            } catch (e) {
+                console.error("Erreur récup utilisateur:", e);
+            }
+        };
+        fetchUser();
+
         const fetchDetail = async () => {
             try {
                 const suffix = from ? `?from=${encodeURIComponent(from)}` : "";
@@ -157,6 +190,7 @@ function ProjectDetailInner() {
                 const json = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(json.error || "Erreur de chargement");
                 setData(json);
+                setIsFeatured(json.project?.isFeatured || false);
 
 				// Le backend décide l'accès (proprio + abonnement), on évite les faux négatifs côté UI.
 				const statsRes = await fetch(apiUrl(`/pro/projects/${id}/analytics`), { headers: buildAuthHeaders() });
@@ -209,6 +243,29 @@ function ProjectDetailInner() {
                         <span data-i18n-user-content="true">{project.category}</span> · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
                     </div>
                 </div>
+                {isPro && subscriptionType === "premium_atelier" && project.proUserId === currentUserId && (
+                    <button
+                        onClick={handleToggleFeatured}
+                        style={{
+                            background: isFeatured ? "var(--green-leaf, #E5FFBC)" : "var(--surface-hover, #EDF2F1)",
+                            color: "var(--text-main, #233B3D)",
+                            border: isFeatured ? "1px solid var(--forest-deep, #3E686C)" : "1px solid var(--border, #CAD6D8)",
+                            borderRadius: "999px",
+                            padding: "0.6rem 1.2rem",
+                            fontWeight: "600",
+                            fontSize: "0.85rem",
+                            cursor: "pointer",
+                            transition: "all 0.2s ease",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.4rem",
+                            boxShadow: "0 2px 5px rgba(0,0,0,0.05)",
+                        }}
+                    >
+                        <Award size={15} fill={isFeatured ? "var(--text-main, #233B3D)" : "none"} />
+                        {isFeatured ? "Mis en avant" : "Mettre en avant"}
+                    </button>
+                )}
             </div>
 
             <div style={styles.grid}>

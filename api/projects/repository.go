@@ -111,6 +111,7 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS project_steps JSONB NOT NULL DEFAULT '[]'::jsonb`,
 		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS moderation_note TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE upcycling_projects ADD COLUMN IF NOT EXISTS is_featured BOOLEAN NOT NULL DEFAULT FALSE`,
 		`CREATE TABLE IF NOT EXISTS upcycling_project_items (
 			id         BIGSERIAL PRIMARY KEY,
 			project_id BIGINT NOT NULL REFERENCES upcycling_projects(id) ON DELETE CASCADE,
@@ -445,7 +446,7 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 		       ` + sqlExprCorrelatedProjectPublishedUCScore + ` AS upcycling_score,
 		       (SELECT COUNT(*)::int FROM upcycling_project_likes WHERE project_id = p.id) AS like_count,
 		       (SELECT COUNT(*)::int FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
-		       p.created_at, p.updated_at
+		       p.is_featured, p.created_at, p.updated_at
 		FROM upcycling_projects p
 		JOIN users u ON u.id = p.pro_user_id
 		WHERE p.id = $1
@@ -462,7 +463,7 @@ func (r *Repository) GetByID(id, proUserID int64) (*Project, error) {
 	err := r.db.QueryRow(query, args...).Scan(&p.ID, &p.ProUserID, &p.ProDisplayName, &p.Title, &p.Description, &stepsRaw,
 		&p.Category, &p.Status, &p.ModerationStatus, &p.ModerationNote,
 		&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
-		&p.LikeCount, &p.BookmarkCount, &p.CreatedAt, &p.UpdatedAt)
+		&p.LikeCount, &p.BookmarkCount, &p.IsFeatured, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("project not found")
@@ -1061,7 +1062,7 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 		       (SELECT COUNT(*) FROM upcycling_project_bookmarks WHERE project_id = p.id) AS bookmark_count,
 		       EXISTS(SELECT 1 FROM upcycling_project_likes WHERE project_id = p.id AND user_id = $1) AS is_liked,
 		       EXISTS(SELECT 1 FROM upcycling_project_bookmarks WHERE project_id = p.id AND user_id = $1) AS is_bookmarked,
-		       p.created_at, p.updated_at
+		       p.is_featured, p.created_at, p.updated_at
 		FROM upcycling_projects p
 		LEFT JOIN upcycling_project_items pi ON pi.project_id = p.id
 		LEFT JOIN LATERAL (
@@ -1109,7 +1110,7 @@ func (r *Repository) ParticulierListPosted(userID int64) ([]Project, error) {
 			&p.ModerationStatus, &p.ModerationNote,
 			&p.ItemCount, &p.TotalWeightGrams, &p.UpcyclingScore,
 			&p.LikeCount, &p.BookmarkCount, &p.IsLiked, &p.IsBookmarked,
-			&p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.IsFeatured, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.TotalWeightKg = p.TotalWeightGrams / 1000.0

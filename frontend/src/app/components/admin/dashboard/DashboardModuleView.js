@@ -782,7 +782,7 @@ export default function DashboardModuleView({ subpage, title }) {
                                 <div className="finance-block"><span className="finance-label">Abonnements</span><span className="finance-amount">{stats?.finance?.abonnements?.toFixed(2) || "0.00"} €</span></div>
                                 <div className="finance-block"><span className="finance-label">Commissions</span><span className="finance-amount">{stats?.finance?.commissions?.toFixed(2) || "0.00"} €</span></div>
                                 <div className="finance-block"><span className="finance-label">Ateliers / Formations</span><span className="finance-amount">{stats?.finance?.ateliers?.toFixed(2) || "0.00"} €</span></div>
-                                <div className="finance-block"><span className="finance-label">Publicités / Partenariats</span><span className="finance-amount">{stats?.finance?.pubs?.toFixed(2) || "0.00"} €</span></div>
+                                <div className="finance-block"><span className="finance-label">Service</span><span className="finance-amount">{stats?.finance?.service?.toFixed(2) || "0.00"} €</span></div>
                             </div>
                             <div className="finance-total">
                                 <span>Total mensuel</span>

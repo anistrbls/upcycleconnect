@@ -9,6 +9,8 @@ import InvoicePreviewModal from "../../finances/InvoicePreviewModal";
 
 export default function PaymentsAdminView() {
     const [payments, setPayments] = useState([]);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [filterSource, setFilterSource] = useState("all");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [refundDetailPayment, setRefundDetailPayment] = useState(null);
@@ -84,6 +86,21 @@ export default function PaymentsAdminView() {
         });
     };
 
+    const filteredPayments = payments.filter(p => {
+        if (filterSource !== "all" && p.source !== filterSource) return false;
+        if (searchTerm) {
+            const q = searchTerm.toLowerCase();
+            if (
+                !(p.userName || "").toLowerCase().includes(q) &&
+                !(p.entityName || "").toLowerCase().includes(q) &&
+                !(p.transactionRef || "").toLowerCase().includes(q)
+            ) {
+                return false;
+            }
+        }
+        return true;
+    });
+
     return (
         <div style={{ padding: "0" }}>
             <div className="header-section">
@@ -91,6 +108,26 @@ export default function PaymentsAdminView() {
                     <span className="activities-label">Administration</span>
                     <h1>Historique des paiements</h1>
                 </div>
+            </div>
+
+            <div className="panel" style={{ marginBottom: "1.5rem", padding: "1.25rem", display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                    type="text"
+                    placeholder="Rechercher (nom, référence, etc.)"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{ flex: "1 1 250px", padding: "0.75rem", borderRadius: "10px", border: "1px solid var(--border)", outline: "none", fontSize: "0.95rem", background: "var(--surface-sunken)" }}
+                />
+                <select
+                    value={filterSource}
+                    onChange={(e) => setFilterSource(e.target.value)}
+                    style={{ flex: "0 1 250px", padding: "0.75rem", borderRadius: "10px", border: "1px solid var(--border)", outline: "none", fontSize: "0.95rem", background: "var(--surface)", cursor: "pointer" }}
+                >
+                    <option value="all">Toutes les sources</option>
+                    <option value="Inscription événement">Ateliers / Formations</option>
+                    <option value="Vente annonce">Ventes d'annonces</option>
+                    <option value="Réservation service">Services</option>
+                </select>
             </div>
 
             <div className="panel">
@@ -106,11 +143,11 @@ export default function PaymentsAdminView() {
                         <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem" }}>{error}</p>
                         <button className="action-cta task-action-btn" onClick={fetchPayments}>Réessayer</button>
                     </div>
-                ) : payments.length === 0 ? (
+                ) : filteredPayments.length === 0 ? (
                     <div style={{ padding: "5rem 2rem", textAlign: "center" }}>
                         <div style={{ fontSize: "3rem", marginBottom: "1.5rem", opacity: 0.3 }}>💳</div>
                         <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>
-                            Aucune transaction enregistrée pour le moment.
+                            Aucune transaction trouvée.
                         </p>
                     </div>
                 ) : (
@@ -127,7 +164,7 @@ export default function PaymentsAdminView() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {payments.map((p, i) => {
+                                {filteredPayments.map((p, i) => {
                                     const st = statusStyle(p);
                                     return (
                                     <tr key={`${p.source}-${p.sourceId}-${i}`} className="table-row-hover" style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.2s" }}>

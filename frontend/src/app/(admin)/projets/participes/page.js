@@ -309,6 +309,132 @@ function ProjetsParticipesContent() {
     const [myWeight, setMyWeight] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [loading, setLoading] = useState(true);
+    const [subscriptionType, setSubscriptionType] = useState("decouverte");
+    const [generatingPdf, setGeneratingPdf] = useState(false);
+
+    useEffect(() => {
+        const fetchUser = async () => {
+            try {
+                const res = await fetch(apiUrl("/auth/me"), { headers: buildAuthHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    setSubscriptionType(data.user?.subscriptionType || "decouverte");
+                }
+            } catch (e) {
+                console.error("Erreur récup utilisateur:", e);
+            }
+        };
+        fetchUser();
+    }, []);
+
+    const handleDownloadPDF = async () => {
+        setGeneratingPdf(true);
+        try {
+            const response = await fetch(apiUrl("/projets/impact-details"), {
+                headers: buildAuthHeaders(),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Erreur de chargement");
+            
+            const details = data.details || [];
+            
+            const { jsPDF } = await import("jspdf");
+            const doc = new jsPDF();
+            
+            // Header styling
+            doc.setFillColor(15, 25, 35);
+            doc.rect(0, 0, 210, 40, "F");
+            
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(20);
+            doc.setFont("helvetica", "bold");
+            doc.text("ANALYSE D'IMPACT ECOLOGIQUE DETAILLEE", 15, 20);
+            doc.setFontSize(10);
+            doc.setFont("helvetica", "normal");
+            doc.text("Généré par UpCycle Connect — Espace Premium", 15, 30);
+            
+            // Score Summary
+            doc.setTextColor(15, 25, 35);
+            doc.setFontSize(14);
+            doc.setFont("helvetica", "bold");
+            doc.text("Résumé Global", 15, 55);
+            
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(11);
+            doc.text(`Score UC Total : ${myScore === null ? "0.0" : myScore.toFixed(1)} UC`, 15, 65);
+            doc.text(`Masse Totale Revalorisée : ${myWeight === null ? "0.0" : myWeight.toFixed(1)} kg`, 15, 72);
+            doc.text(`Nombre de Projets Publiés : ${projects.length}`, 15, 79);
+            
+            // Table Header
+            let y = 95;
+            doc.setFont("helvetica", "bold");
+            doc.setFillColor(235, 245, 240);
+            doc.rect(15, y, 180, 8, "F");
+            
+            doc.setFontSize(8);
+            doc.text("Objet (ID)", 17, y + 5);
+            doc.text("Matériau (Coeff)", 70, y + 5);
+            doc.text("Masse (kg)", 110, y + 5);
+            doc.text("Prix initial", 135, y + 5);
+            doc.text("Payé (Stripe)", 155, y + 5);
+            doc.text("Score (UC)", 178, y + 5);
+            
+            y += 8;
+            doc.setFont("helvetica", "normal");
+            
+            details.forEach((row, index) => {
+                if (y > 270) {
+                    doc.addPage();
+                    y = 20;
+                    
+                    // Table Header on new page
+                    doc.setFont("helvetica", "bold");
+                    doc.setFillColor(235, 245, 240);
+                    doc.rect(15, y, 180, 8, "F");
+                    doc.text("Objet (ID)", 17, y + 5);
+                    doc.text("Matériau (Coeff)", 70, y + 5);
+                    doc.text("Masse (kg)", 110, y + 5);
+                    doc.text("Prix initial", 135, y + 5);
+                    doc.text("Payé (Stripe)", 155, y + 5);
+                    doc.text("Score (UC)", 178, y + 5);
+                    y += 8;
+                    doc.setFont("helvetica", "normal");
+                }
+                
+                // Alternate row color
+                if (index % 2 === 1) {
+                    doc.setFillColor(250, 250, 250);
+                    doc.rect(15, y, 180, 7, "F");
+                }
+                
+                // Print cells
+                const titleStr = row.item_title.length > 25 ? row.item_title.substring(0, 22) + "..." : row.item_title;
+                doc.text(`${titleStr} (#${row.item_id})`, 17, y + 5);
+                doc.text(`${row.material} (x${row.coefficient.toFixed(1)})`, 70, y + 5);
+                doc.text(`${row.weight_kg.toFixed(2)} kg`, 110, y + 5);
+                doc.text(`${row.price.toFixed(2)} €`, 135, y + 5);
+                doc.text(`${row.paid_amount.toFixed(2)} €`, 155, y + 5);
+                
+                doc.setFont("helvetica", "bold");
+                doc.text(`+${row.item_score.toFixed(1)}`, 178, y + 5);
+                doc.setFont("helvetica", "normal");
+                
+                y += 7;
+            });
+            
+            // Footer notice
+            doc.setFontSize(8);
+            doc.setTextColor(120, 120, 120);
+            doc.text("Ce document atteste de la contribution écologique certifiée de l'entreprise sur la plateforme UpCycle Connect.", 15, y + 15);
+            doc.text("Les calculs d'impact sont basés sur les formules officielles de la plateforme (masse x coefficient matériau).", 15, y + 20);
+            
+            doc.save("analyse-impact-ecologique.pdf");
+        } catch (err) {
+            alert("Erreur lors de la génération du PDF : " + err.message);
+        } finally {
+            setGeneratingPdf(false);
+        }
+    };
 
     useEffect(() => {
         const fetchProjects = async () => {
@@ -406,6 +532,29 @@ function ProjetsParticipesContent() {
                             <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: "0.2rem" }}>Poids</div>
                         </div>
                     </div>
+                    {isPro && subscriptionType === "premium_atelier" && (
+                        <button
+                            onClick={handleDownloadPDF}
+                            disabled={generatingPdf}
+                            style={{
+                                marginTop: "1rem",
+                                background: "#4ade80",
+                                color: "#0d2218",
+                                border: "none",
+                                borderRadius: "999px",
+                                padding: "0.6rem 1.2rem",
+                                fontWeight: "700",
+                                fontSize: "0.8rem",
+                                cursor: generatingPdf ? "default" : "pointer",
+                                transition: "all 0.2s",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.4rem",
+                            }}
+                        >
+                            {generatingPdf ? "Génération du PDF..." : "Obtenir mon analyse d'impact écologique détaillée"}
+                        </button>
+                    )}
                 </div>
             </div>
 

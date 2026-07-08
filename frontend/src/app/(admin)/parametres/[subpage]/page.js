@@ -442,6 +442,33 @@ function SystemLogsPanel() {
                                         </td>
                                         <td style={{ padding: "0.75rem 1rem", color: "var(--text-main)", maxWidth: "520px" }}>
                                             <span style={{ fontSize: "0.83rem", lineHeight: 1.45 }}>{log.message}</span>
+                                            {(() => {
+                                                let meta = null;
+                                                if (log.metadata) {
+                                                    if (typeof log.metadata === "object") {
+                                                        meta = log.metadata;
+                                                    } else {
+                                                        try {
+                                                            meta = JSON.parse(log.metadata);
+                                                        } catch (_) {}
+                                                    }
+                                                }
+                                                if (!meta) return null;
+                                                return (
+                                                    <div style={{ marginTop: "0.35rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                                                        {meta.ip && (
+                                                            <span style={{ fontSize: "0.72rem", background: "var(--surface-hover, #f1f5f9)", color: "var(--text-muted)", padding: "0.1rem 0.4rem", borderRadius: "4px", fontFamily: "monospace" }}>
+                                                                IP: {meta.ip}
+                                                            </span>
+                                                        )}
+                                                        {meta.user_email && (
+                                                            <span style={{ fontSize: "0.72rem", background: "rgba(77,113,117,0.1)", color: "var(--forest-deep)", padding: "0.1rem 0.4rem", borderRadius: "4px" }}>
+                                                                Utilisateur: {meta.user_email} (ID #{meta.user_id})
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
                                         </td>
                                     </tr>
                                 );
