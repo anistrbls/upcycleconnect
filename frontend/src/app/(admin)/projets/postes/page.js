@@ -320,6 +320,12 @@ const styles = {
     },
 };
 
+const isBoostedNow = (project) => {
+    if (!project?.featured) return false;
+    if (!project.featuredUntil) return true;
+    return new Date(project.featuredUntil).getTime() > Date.now();
+};
+
 function ProjetsPostesContent() {
     const router = useRouter();
     const spaceLabel = getRoleFromToken() === "professionnel" ? "Espace Professionnel" : "Espace Particulier";
@@ -381,11 +387,11 @@ function ProjetsPostesContent() {
     };
 
     const featuredProjects = useMemo(() => {
-        return filtered.filter((p) => p.isFeatured);
+        return filtered.filter((p) => p.isFeatured || isBoostedNow(p));
     }, [filtered]);
 
     const otherProjects = useMemo(() => {
-        return filtered.filter((p) => !p.isFeatured);
+        return filtered.filter((p) => !p.isFeatured && !isBoostedNow(p));
     }, [filtered]);
 
     const renderProjectCard = (project) => {
@@ -414,7 +420,7 @@ function ProjetsPostesContent() {
             >
                 {/* Social Buttons */}
                 <div style={{ position: "absolute", top: "1.2rem", right: "1.2rem", zIndex: 10, display: "flex", gap: "0.6rem" }}>
-                    {project.isFeatured && (
+                    {(project.isFeatured || isBoostedNow(project)) && (
                         <div style={{
                             background: "#ca8a04",
                             borderRadius: "50px",
