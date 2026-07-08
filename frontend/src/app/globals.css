@@ -3069,7 +3069,7 @@ input::-ms-clear {
 /* ==========================================
    MOBILE & RESPONSIVE ADAPTATIONS
    ========================================== */
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   /* Layout changes */
   body {
     overflow-y: auto !important;
