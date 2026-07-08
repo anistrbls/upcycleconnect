@@ -715,12 +715,7 @@ export default function DashboardModuleView({ subpage, title }) {
                                 <span className="section-title">Répartition des activités</span>
                                 <span className="db-badge">Ce mois</span>
                             </div>
-                            <div className="activity-grid" style={{
-                                display: "grid",
-                                gridTemplateColumns: "1fr 1fr",
-                                gap: "1rem",
-                                marginTop: "1rem"
-                            }}>
+                            <div className="activity-grid">
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem", background: "var(--surface-sunken)", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
                                     <div style={{ padding: "0.5rem", borderRadius: "10px", background: "rgba(59, 130, 246, 0.1)", color: DISTINCT.blue }}><Gift size={18} /></div>
                                     <div style={{ display: "flex", flexDirection: "column" }}>

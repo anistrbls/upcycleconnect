@@ -916,6 +916,13 @@ body {
   margin-bottom: 0;
 }
 
+.activity-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
 .stats-panel { padding: 1.5rem; }
 
 .stat-list { display: flex; flex-direction: column; gap: 0.65rem; }
@@ -3354,6 +3361,13 @@ input::-ms-clear {
 
   .alert-panel {
     width: 100% !important;
+  }
+
+  .activity-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
   }
 }
 
