@@ -909,8 +909,6 @@ body {
 .kpi-up     { color: #2F7D93; }
 .kpi-down   { color: var(--state-low); }
 .kpi-neutral{ color: var(--text-muted); }
-
-
 .stats-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3286,6 +3284,34 @@ input::-ms-clear {
   }
   div[style*="right: 0"] {
     right: 0 !important;
+  }
+
+  /* Specific Dashboard View mobile overrides */
+  .stats-row {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .kpi-grid {
+    overflow-x: auto !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none !important;
+    padding-bottom: 0.5rem !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .kpi-grid::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .kpi-card {
+    flex: 0 0 250px !important;
+  }
+
+  .finance-grid {
+    grid-template-columns: 1fr !important;
   }
 }
 
