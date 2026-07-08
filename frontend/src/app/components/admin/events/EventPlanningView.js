@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "../../i18n/I18nProvider";
 
@@ -174,6 +174,12 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
         ? currentDate.toLocaleDateString(dateLocale, { month: "long", year: "numeric" })
         : `${getWeekPrefix(locale)} ${getStartOfWeek(currentDate).toLocaleDateString(dateLocale, { day: "numeric", month: "short" })}`;
 
+    useEffect(() => {
+        if (typeof window !== "undefined" && window.innerWidth <= 768) {
+            setViewMode("week");
+        }
+    }, []);
+
     const goToPrevious = () => {
         if (viewMode === "month") {
             setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
@@ -216,13 +222,14 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
                     
                     <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
                         <span className="section-title" style={{ textTransform: "capitalize", margin: 0 }}>{monthLabel}</span>
-                        <div style={{ display: "flex", background: "#e8ecee", borderRadius: "999px", padding: "4px" }}>
+                        <div className="hide-on-mobile" style={{ display: "flex", background: "#e8ecee", borderRadius: "999px", padding: "4px" }}>
                             <button type="button" onClick={() => setViewMode("month")} style={{ padding: "6px 16px", borderRadius: "999px", border: "none", background: viewMode === "month" ? "white" : "transparent", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer", boxShadow: viewMode === "month" ? "0 2px 4px rgba(0,0,0,0.1)" : "none", color: "var(--text-main)", transition: "all 0.2s" }}>Mois</button>
                             <button type="button" onClick={() => setViewMode("week")} style={{ padding: "6px 16px", borderRadius: "999px", border: "none", background: viewMode === "week" ? "white" : "transparent", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer", boxShadow: viewMode === "week" ? "0 2px 4px rgba(0,0,0,0.1)" : "none", color: "var(--text-main)", transition: "all 0.2s" }}>Semaine</button>
                         </div>
                     </div>
                 </div>
 
+                <div style={{ overflowX: "auto", paddingBottom: "0.5rem", width: "100%", WebkitOverflowScrolling: "touch" }}>
                 {viewMode === "week" ? (() => {
                     const HOUR_HEIGHT = 50;
                     const START_HOUR = 7;
@@ -230,7 +237,7 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
                     const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i + START_HOUR);
 
                     return (
-                        <div style={{ display: "flex", flexDirection: "column", border: "1px solid #d7e0e1", borderRadius: "14px", overflow: "hidden", background: "#fff", height: "650px", position: "relative", isolation: "isolate", transform: "translateZ(0)" }}>
+                        <div style={{ display: "flex", flexDirection: "column", border: "1px solid #d7e0e1", borderRadius: "14px", overflow: "hidden", background: "#fff", height: "650px", position: "relative", isolation: "isolate", transform: "translateZ(0)", minWidth: "840px" }}>
                             {/* Sticky Header Row */}
                             <div style={{ display: "flex", borderBottom: "1px solid #d7e0e1", background: "#f8fbfb", zIndex: 30, flexShrink: 0, position: "relative" }}>
                                 <div style={{ width: "50px", flexShrink: 0, borderRight: "1px solid #d7e0e1", background: "#f8fbfb" }}></div>
@@ -339,7 +346,7 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
                         </div>
                     );
                 })() : (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: "0.5rem" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(120px, 1fr))", gap: "0.5rem", minWidth: "840px" }}>
                         {weekdayLabels.map((label) => (
                             <div key={label} style={{ textAlign: "center", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, padding: "0.35rem 0" }}>
                                 {label}
@@ -434,6 +441,7 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
                         })}
                     </div>
                 )}
+                </div>
 
                 <div style={{ background: "#F8FBFB", borderRadius: "16px", padding: "0.95rem" }}>
                     <div className="section-header" style={{ marginBottom: "0.5rem" }}>

@@ -135,6 +135,7 @@ func main() {
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /ping", pingHandler)
 	mux.HandleFunc("GET /api/status", statusHandler)
+	mux.HandleFunc("POST /api/contact", handleContactForm)
 	mux.HandleFunc("/api/auth/login", loginHandler)
 	inseeClient := newInseeClient()
 	mux.HandleFunc("POST /api/auth/register", func(w http.ResponseWriter, r *http.Request) {
@@ -614,6 +615,56 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprintln(w, "pong")
+}
+
+func handleContactForm(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		FirstName string `json:"firstName"`
+		LastName  string `json:"lastName"`
+		Email     string `json:"email"`
+		Subject   string `json:"subject"`
+		Message   string `json:"message"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json payload")
+		return
+	}
+
+	if payload.Email == "" || payload.Message == "" {
+		writeError(w, http.StatusBadRequest, "L'email et le message sont requis")
+		return
+	}
+
+	cfg := mailer.ConfigFromEnv()
+	if !cfg.Configured() {
+		writeError(w, http.StatusServiceUnavailable, "Le service d'email est temporairement indisponible")
+		return
+	}
+
+	to := cfg.FromEmail
+	if to == "" {
+		to = "hello@upcycleconnect.com"
+	}
+
+	subject := fmt.Sprintf("Nouveau message: %s", payload.Subject)
+	body := fmt.Sprintf("Nom: %s %s\nEmail: %s\nSujet: %s\n\nMessage:\n%s", payload.FirstName, payload.LastName, payload.Email, payload.Subject, payload.Message)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	msg := mailer.Message{
+		To:      []string{to},
+		Subject: subject,
+		Text:    body,
+	}
+
+	if err := mailer.Send(ctx, cfg, msg); err != nil {
+		writeError(w, http.StatusBadGateway, "Erreur lors de l'envoi de l'email")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func statusHandler(w http.ResponseWriter, r *http.Request) {

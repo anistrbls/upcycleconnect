@@ -570,7 +570,7 @@ export default function AdminLayout({ children }) {
 
     const handleLogout = () => {
         window.localStorage.removeItem(TOKEN_KEY);
-        router.replace("/login");
+        router.replace("/");
     };
 
     const handleModuleChange = (moduleKey) => {

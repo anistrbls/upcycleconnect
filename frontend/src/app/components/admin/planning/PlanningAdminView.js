@@ -169,6 +169,12 @@ export default function PlanningAdminView({
         ? currentDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
         : `Sem. du ${getStartOfWeek(currentDate).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
 
+    useEffect(() => {
+        if (typeof window !== "undefined" && window.innerWidth <= 768) {
+            setViewMode("week");
+        }
+    }, []);
+
     const selectedDayKey = toDayKey(selectedDate);
     const selectedDayItems = itemsByDay.get(selectedDayKey) || [];
 
@@ -289,7 +295,7 @@ export default function PlanningAdminView({
                 
                 <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
                     <span className="section-title" style={{ textTransform: "capitalize", margin: 0 }}>{monthLabel}</span>
-                    <div style={{ display: "flex", background: "#e8ecee", borderRadius: "999px", padding: "4px" }}>
+                    <div className="hide-on-mobile" style={{ display: "flex", background: "#e8ecee", borderRadius: "999px", padding: "4px" }}>
                         <button onClick={() => setViewMode("month")} style={{ padding: "6px 16px", borderRadius: "999px", border: "none", background: viewMode === "month" ? "white" : "transparent", cursor: "pointer", fontWeight: 700 }}>Mois</button>
                         <button onClick={() => setViewMode("week")} style={{ padding: "6px 16px", borderRadius: "999px", border: "none", background: viewMode === "week" ? "white" : "transparent", cursor: "pointer", fontWeight: 700 }}>Semaine</button>
                     </div>
@@ -300,8 +306,9 @@ export default function PlanningAdminView({
                 </div>
             </div>
             {/* Calendar Grid */}
+            <div style={{ overflowX: "auto", paddingBottom: "0.5rem", WebkitOverflowScrolling: "touch", width: "100%" }}>
             {viewMode === "month" ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "0.5rem" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(120px, 1fr))", gap: "0.5rem", minWidth: "840px" }}>
                     {WEEKDAY_LABELS.map(l => <div key={l} style={{ textAlign: "center", fontWeight: 700, fontSize: "0.8rem", color: "var(--text-muted)" }}>{l}</div>)}
                     {calendarDays.map(day => {
                         const key = toDayKey(day);
@@ -379,7 +386,7 @@ export default function PlanningAdminView({
                 const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i + START_HOUR);
 
                 return (
-                    <div style={{ display: "flex", flexDirection: "column", border: "1px solid #d7e0e1", borderRadius: "14px", overflow: "hidden", background: "#fff", height: "650px", position: "relative" }}>
+                    <div style={{ display: "flex", flexDirection: "column", border: "1px solid #d7e0e1", borderRadius: "14px", overflow: "hidden", background: "#fff", height: "650px", position: "relative", minWidth: "840px" }}>
                         {/* Header Row */}
                         <div style={{ display: "flex", borderBottom: "1px solid #d7e0e1", background: "#f8fbfb", zIndex: 30, flexShrink: 0 }}>
                             <div style={{ width: "50px", flexShrink: 0, borderRight: "1px solid #d7e0e1" }}></div>
@@ -521,6 +528,7 @@ export default function PlanningAdminView({
                     </div>
                 );
             })()}
+            </div>
 
             {/* Selected Day Details */}
             <div className="panel">

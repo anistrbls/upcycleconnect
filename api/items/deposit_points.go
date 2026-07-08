@@ -239,7 +239,7 @@ func (r *Repository) ListContainerItemsByPoint(ctx context.Context, pointID int6
 		       TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, ''))
 		FROM items i
 		INNER JOIN item_logistics l ON l.item_id = i.id
-		INNER JOIN users u ON u.id = i.user_id
+		LEFT JOIN users u ON u.id = i.user_id
 		INNER JOIN containers c ON c.id = l.container_id
 		WHERE c.deposit_point_id = $1
 		  AND l.container_id IS NOT NULL
@@ -274,6 +274,7 @@ func attachContainerItems(containers []Container, itemsByContainer map[int64][]C
 			items = []ContainerItemSummary{}
 		}
 		containers[i].Items = items
+		containers[i].CurrentCount = len(items)
 	}
 	return containers
 }

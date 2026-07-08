@@ -135,7 +135,7 @@ export default function FinancialOverviewView() {
                     <button className="action-cta task-action-btn" onClick={fetchData}>Réessayer</button>
                 </div>
             ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem", minWidth: 0, width: "100%" }}>
                     
                     {/* KPI Cards Grid */}
                     <div className="kpi-grid">
@@ -248,7 +248,7 @@ export default function FinancialOverviewView() {
 
                             <div className="refund-summary-box">
                                 <h4 style={{ margin: "0 0 0.75rem", fontSize: "0.9rem", fontWeight: "700" }}>Flux de Remboursements</h4>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "1rem" }}>
                                     <div className="refund-metric">
                                         <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Total Remboursé</span>
                                         <div style={{ fontSize: "1.1rem", fontWeight: "700", color: "#2563eb", marginTop: "2px" }}>{formatAmount(totalRefunded)}</div>
@@ -263,8 +263,8 @@ export default function FinancialOverviewView() {
                     </div>
 
                     {/* Recent Transactions Panel */}
-                    <div className="panel">
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
+                    <div className="panel" style={{ minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap", gap: "1rem" }}>
                             <h3 style={{ margin: 0 }}>Transactions récentes</h3>
                             <button 
                                 onClick={() => window.location.hash = "#/finances/paiements"} 
@@ -289,8 +289,8 @@ export default function FinancialOverviewView() {
                                 Aucune transaction récente.
                             </div>
                         ) : (
-                            <div style={{ overflowX: "auto", margin: "0 -1.5rem" }}>
-                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                            <div style={{ overflowX: "auto", margin: "0", paddingBottom: "1rem", maxWidth: "100%" }}>
+                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem", minWidth: "max-content" }}>
                                     <thead>
                                         <tr style={{ textAlign: "left", background: "var(--surface-sunken)" }}>
                                             <th style={{ padding: "0.8rem 1.5rem", color: "var(--text-muted)", textTransform: "uppercase", fontSize: "0.7rem", letterSpacing: "0.05em" }}>Date & Client</th>
@@ -360,6 +360,21 @@ export default function FinancialOverviewView() {
                     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.015);
                     transition: transform 0.2s, box-shadow 0.2s;
                 }
+                @media (max-width: 768px) {
+                    .kpi-grid {
+                        display: flex !important;
+                        flex-direction: column !important;
+                        overflow: hidden !important;
+                        width: 100% !important;
+                        gap: 1rem !important;
+                    }
+                    .kpi-card {
+                        flex: 1 1 auto !important;
+                        width: 100% !important;
+                        height: auto !important;
+                        min-height: 120px !important;
+                    }
+                }
                 .kpi-card:hover {
                     transform: translateY(-2px);
                     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.03);
@@ -403,7 +418,7 @@ export default function FinancialOverviewView() {
 
                 .analytics-section {
                     display: grid;
-                    grid-template-columns: 1fr;
+                    grid-template-columns: minmax(0, 1fr);
                     gap: 1.5rem;
                 }
                 @media (min-width: 800px) {

@@ -3136,8 +3136,10 @@ input::-ms-clear {
   /* Main content offset for fixed bottom bar */
   .main-content {
     padding: 1rem 0.5rem 80px 0.5rem !important;
-    overflow-y: visible !important;
-    height: auto !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
 
   /* Compact & structured topbar for mobile */
@@ -3221,7 +3223,7 @@ input::-ms-clear {
   /* Make arbitrary grids 1 column */
   div[style*="grid-template-columns"],
   div[style*="gridTemplateColumns"] {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 
   /* Header actions/meta items wrap */
@@ -3295,9 +3297,8 @@ input::-ms-clear {
 
   /* Specific Dashboard View mobile overrides */
   .stats-row {
-    grid-template-columns: 1fr !important;
-    display: flex !important;
-    flex-direction: column !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     gap: 1rem !important;
   }
 
@@ -3320,9 +3321,8 @@ input::-ms-clear {
   }
 
   .finance-grid {
-    grid-template-columns: 1fr !important;
-    display: flex !important;
-    flex-direction: column !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     gap: 0.75rem !important;
   }
 
@@ -3336,9 +3336,8 @@ input::-ms-clear {
 
   /* Realtime & operations dashboard overrides */
   .realtime-grid {
-    grid-template-columns: 1fr !important;
-    display: flex !important;
-    flex-direction: column !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     gap: 1.5rem !important;
   }
 
@@ -3347,15 +3346,15 @@ input::-ms-clear {
   }
 
   .ops-grid {
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 0.5rem !important;
   }
 
   /* Alerts grid overrides */
   .alerts-grid {
-    grid-template-columns: 1fr !important;
-    display: flex !important;
-    flex-direction: column !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     gap: 1rem !important;
   }
 
@@ -3364,11 +3363,16 @@ input::-ms-clear {
   }
 
   .activity-grid {
-    grid-template-columns: 1fr !important;
-    display: flex !important;
-    flex-direction: column !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     gap: 0.75rem !important;
   }
 }
 
 
+
+@media (max-width: 768px) {
+    .hide-on-mobile {
+        display: none !important;
+    }
+}
