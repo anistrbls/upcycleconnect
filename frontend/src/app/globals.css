@@ -3326,6 +3326,35 @@ input::-ms-clear {
     flex: 0 0 250px !important;
     width: auto !important;
   }
+
+  /* Realtime & operations dashboard overrides */
+  .realtime-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1.5rem !important;
+  }
+
+  .realtime-right {
+    width: 100% !important;
+  }
+
+  .ops-grid {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important;
+    gap: 0.5rem !important;
+  }
+
+  /* Alerts grid overrides */
+  .alerts-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem !important;
+  }
+
+  .alert-panel {
+    width: 100% !important;
+  }
 }
 
 
