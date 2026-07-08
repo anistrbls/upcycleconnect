@@ -3295,15 +3295,21 @@ input::-ms-clear {
   }
 
   .kpi-grid {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 1rem !important;
-    overflow-x: visible !important;
+    overflow-x: auto !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none !important;
+    padding-bottom: 0.5rem !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .kpi-grid::-webkit-scrollbar {
+    display: none !important;
   }
 
   .kpi-card {
-    flex: none !important;
-    width: 100% !important;
+    flex: 0 0 250px !important;
+    width: auto !important;
   }
 
   .finance-grid {
@@ -3317,7 +3323,8 @@ input::-ms-clear {
   .kpi-grid > a {
     display: flex !important;
     flex-direction: column !important;
-    width: 100% !important;
+    flex: 0 0 250px !important;
+    width: auto !important;
   }
 }
 
