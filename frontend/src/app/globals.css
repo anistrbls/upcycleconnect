@@ -3291,27 +3291,33 @@ input::-ms-clear {
     grid-template-columns: 1fr !important;
     display: flex !important;
     flex-direction: column !important;
+    gap: 1rem !important;
   }
 
   .kpi-grid {
-    overflow-x: auto !important;
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    scrollbar-width: none !important;
-    padding-bottom: 0.5rem !important;
-    -webkit-overflow-scrolling: touch !important;
-  }
-
-  .kpi-grid::-webkit-scrollbar {
-    display: none !important;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+    overflow-x: visible !important;
   }
 
   .kpi-card {
-    flex: 0 0 250px !important;
+    flex: none !important;
+    width: 100% !important;
   }
 
   .finance-grid {
     grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+  }
+
+  /* Make links or cards in kpi-grid display block/flex vertical */
+  .kpi-grid > a {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
   }
 }
 
