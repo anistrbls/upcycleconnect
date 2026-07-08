@@ -68,20 +68,39 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL:-http://localhost:3000/annonces/mes-recuperations?stripe=success&session_id={CHECKOUT_SESSION_ID}}
       - STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL:-http://localhost:3000/annonces/mes-recuperations?stripe=cancel}
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USERNAME=${SMTP_USERNAME:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
+      # Mailpit intercepte tous les mails en dev (pas besoin de vrai compte SMTP)
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_USERNAME=
+      - SMTP_PASSWORD=
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-noreply@upcycleconnect.fr}
       - SMTP_FROM_NAME=${SMTP_FROM_NAME:-UpcycleConnect}
       - SMTP_REPLY_TO=${SMTP_REPLY_TO:-}
-      - SMTP_TLS=${SMTP_TLS:-false}
-      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
-      - SMTP_SKIP_VERIFY=${SMTP_SKIP_VERIFY:-false}
+      - SMTP_TLS=false
+      - SMTP_STARTTLS=false
+      - SMTP_SKIP_VERIFY=false
       - SMTP_TIMEOUT_SECONDS=${SMTP_TIMEOUT_SECONDS:-15}
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
+    networks:
+      - app-network
+
+  # Service mail de test : Mailpit
+  # Intercepte tous les emails envoyés par l'API sans les délivrer vraiment
+  # Interface web : http://localhost:8025
+  # SMTP interne : mailpit:1025 (pas d'auth requise)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: upcycle-mailpit-dev
+    ports:
+      - "8025:8025"   # Interface web
+      - "1025:1025"   # Serveur SMTP
+    environment:
+      - MP_MAX_MESSAGES=500
+      - MP_UI_AUTH_FILE=
     networks:
       - app-network
 

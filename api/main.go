@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +29,7 @@ import (
 	"upcycleconnect/api/reservations"
 	"upcycleconnect/api/servicecatalog"
 	"upcycleconnect/api/sirene"
+	"upcycleconnect/api/support"
 	"upcycleconnect/api/users"
 )
 
@@ -319,6 +321,9 @@ func main() {
 
 	// Module projects (projets d'upcycling professionnels)
 	projects.RegisterRoutes(mux, db, authMiddleware)
+
+	// Module assistance (messagerie privée utilisateur ↔ support)
+	support.RegisterRoutes(mux, db, authMiddleware)
 
 	// Module salarié — contenus (conseils + actualités)
 	if err := ensureSalarieContentsSchema(); err != nil {
@@ -828,23 +833,37 @@ type servicePayload struct {
 	EmployeeIDs      []int64  `json:"employeeIds"`
 }
 
+type eventSessionPayload struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
 type eventPayload struct {
-	Name             string  `json:"name"`
-	Description      string  `json:"description"`
-	CategoryID       int64   `json:"categoryId"`
-	Type             string  `json:"type"`
-	DateDebut        string  `json:"dateDebut"`
-	DateFin          string  `json:"dateFin"`
-	Lieu             string  `json:"lieu"`
-	Capacite         *int64  `json:"capacite"`
-	Status           string  `json:"status"`
-	Intervenant      string  `json:"intervenant"`
-	IntervenantID    *int64  `json:"intervenantId"`
-	ValidationStatus string  `json:"validationStatus"`
-	RejectionComment string  `json:"rejectionComment"`
-	ImageUrl         string  `json:"imageUrl"`
-	PricingType      string  `json:"pricingType"`
-	Price            float64 `json:"price"`
+	Name             string                `json:"name"`
+	Description      string                `json:"description"`
+	CategoryID       int64                 `json:"categoryId"`
+	Type             string                `json:"type"`
+	DateDebut        string                `json:"dateDebut"`
+	DateFin          string                `json:"dateFin"`
+	Sessions         []eventSessionPayload `json:"sessions"`
+	Lieu             string                `json:"lieu"`
+	Capacite         *int64                `json:"capacite"`
+	Status           string                `json:"status"`
+	Intervenant      string                `json:"intervenant"`
+	IntervenantID    *int64                `json:"intervenantId"`
+	ValidationStatus string                `json:"validationStatus"`
+	RejectionComment string                `json:"rejectionComment"`
+	ImageUrl         string                `json:"imageUrl"`
+	PricingType      string                `json:"pricingType"`
+	Price            float64               `json:"price"`
+}
+
+type eventSession struct {
+	ID       int64
+	EventID  int64
+	Start    time.Time
+	End      time.Time
+	Position int
 }
 
 type eventRejectPayload struct {
@@ -909,20 +928,10 @@ func createConseilNotification(userID int64, title, message, notifType string) {
 }
 
 func notifyConseilValidation(userID int64, title string) {
-	var enabled bool
-	err := db.QueryRow(`SELECT app_conseil_moderation FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&enabled)
-	if err == nil && !enabled {
-		return
-	}
 	createConseilNotification(userID, "Validation de conseil", fmt.Sprintf("Votre conseil %q a été validé par l'administration et est maintenant en ligne !", title), "conseil_moderation")
 }
 
 func notifyConseilRejection(userID int64, title, reason string) {
-	var enabled bool
-	err := db.QueryRow(`SELECT app_conseil_moderation FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&enabled)
-	if err == nil && !enabled {
-		return
-	}
 	createConseilNotification(userID, "Refus de conseil", fmt.Sprintf("Votre conseil %q requiert des modifications. Motif : %s", title, reason), "conseil_moderation")
 }
 
@@ -930,8 +939,7 @@ func notifyAdminsNewConseil(title string, authorName string) {
 	rows, err := db.Query(`
 		SELECT u.id 
 		FROM users u 
-		LEFT JOIN user_notification_settings s ON s.user_id = u.id 
-		WHERE u.role = 'admin' AND COALESCE(s.app_admin_new_conseil, true) = true
+		WHERE u.role = 'admin'
 	`)
 	if err != nil {
 		return
@@ -951,11 +959,6 @@ func notifyAdminsNewConseil(title string, authorName string) {
 }
 
 func notifyConseilEngagement(userID int64, title, engagerName, engType string) {
-	var enabled bool
-	err := db.QueryRow(`SELECT app_conseil_engagement FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&enabled)
-	if err == nil && !enabled {
-		return
-	}
 	var action string
 	if engType == "like" {
 		action = "aimé"
@@ -969,7 +972,7 @@ func notifyCommunityNewConseil(title string) {
 	go func() {
 		ctx := context.Background()
 		rows, err := db.QueryContext(ctx, `
-			SELECT user_id FROM user_notification_settings WHERE app_new_conseil = true
+			SELECT id FROM users WHERE COALESCE(status, 'active') = 'active'
 		`)
 		if err != nil {
 			return
@@ -2199,6 +2202,18 @@ func ensureEventsSchema() error {
 			CONSTRAINT events_status_check CHECK (status IN ('brouillon', 'planifie', 'valide', 'annule', 'termine')),
 			CONSTRAINT events_dates_check CHECK (date_fin >= date_debut)
 		)`,
+		`CREATE TABLE IF NOT EXISTS event_sessions (
+			id BIGSERIAL PRIMARY KEY,
+			event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+			start_time TIMESTAMPTZ NOT NULL,
+			end_time TIMESTAMPTZ NOT NULL,
+			position INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			CONSTRAINT event_sessions_dates_check CHECK (end_time > start_time)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_sessions_event_id ON event_sessions(event_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_sessions_start_time ON event_sessions(start_time)`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS validation_status TEXT NOT NULL DEFAULT 'approved'`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS rejection_comment TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`,
@@ -2340,7 +2355,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 
 	case http.MethodPost:
-		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
+		payload, startAt, endAt, sessions, err := parseAndValidateEventPayload(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -2391,14 +2406,22 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
 		}
 
-		err = db.QueryRow(`
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not start event creation")
+			return
+		}
+		defer tx.Rollback()
+
+		normalizedType := normalizeEventType(payload.Type)
+		err = tx.QueryRow(`
 			INSERT INTO events (name, description, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status, image_url, pricing_type, price)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING id, created_at, updated_at
 		`,
 			strings.TrimSpace(payload.Name),
 			strings.TrimSpace(payload.Description),
-			normalizeEventType(payload.Type),
+			normalizedType,
 			startAt,
 			endAt,
 			strings.TrimSpace(payload.Lieu),
@@ -2413,6 +2436,14 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		).Scan(&id, &createdAt, &updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create event")
+			return
+		}
+		if err := replaceEventSessions(tx, id, normalizedType, sessions); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create event sessions")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not finalize event creation")
 			return
 		}
 
@@ -2433,7 +2464,7 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 				IntervenantID:    intervenantID,
 			}, callerUserID)
 		}
-		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
+		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, startAt, endAt, sessions, createdAt, updatedAt))
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -2527,6 +2558,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if intervenantID.Valid {
 			item["intervenantId"] = intervenantID.Int64
 		}
+		attachEventSessions(item)
 
 		writeJSON(w, http.StatusOK, item)
 
@@ -2541,7 +2573,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
+		payload, startAt, endAt, sessions, err := parseAndValidateEventPayload(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -2582,7 +2614,15 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
 		}
 
-		result := db.QueryRow(`
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not start event update")
+			return
+		}
+		defer tx.Rollback()
+
+		normalizedType := normalizeEventType(payload.Type)
+		result := tx.QueryRow(`
 			UPDATE events
 			SET name = $1,
 				description = $2,
@@ -2605,7 +2645,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		`,
 			strings.TrimSpace(payload.Name),
 			strings.TrimSpace(payload.Description),
-			normalizeEventType(payload.Type),
+			normalizedType,
 			startAt,
 			endAt,
 			strings.TrimSpace(payload.Lieu),
@@ -2627,6 +2667,14 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "could not update event")
+			return
+		}
+		if err := replaceEventSessions(tx, id, normalizedType, sessions); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update event sessions")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not finalize event update")
 			return
 		}
 
@@ -2653,7 +2701,7 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if retValidationStatus == "approved" {
 			notifyEventUpdated(before, after, false)
 		}
-		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
+		writeJSON(w, http.StatusOK, mapEventPayload(id, payload, startAt, endAt, sessions, createdAt, updatedAt))
 
 	case http.MethodDelete:
 		var registeredCount int64
@@ -2690,39 +2738,89 @@ func eventByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parseAndValidateEventPayload(r *http.Request) (eventPayload, time.Time, time.Time, error) {
+func parseAndValidateEventPayload(r *http.Request) (eventPayload, time.Time, time.Time, []eventSession, error) {
 	var payload eventPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("invalid JSON body")
+		return payload, time.Time{}, time.Time{}, nil, fmt.Errorf("invalid JSON body")
 	}
 
 	if strings.TrimSpace(payload.Name) == "" {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("name is required")
+		return payload, time.Time{}, time.Time{}, nil, fmt.Errorf("name is required")
 	}
-	if normalizeEventType(payload.Type) == "" {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("invalid type")
+	eventType := normalizeEventType(payload.Type)
+	if eventType == "" {
+		return payload, time.Time{}, time.Time{}, nil, fmt.Errorf("invalid type")
 	}
 	if normalizeEventStatus(payload.Status) == "" {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("invalid status")
+		return payload, time.Time{}, time.Time{}, nil, fmt.Errorf("invalid status")
+	}
+
+	startAt, endAt, sessions, err := parseEventTiming(payload, eventType)
+	if err != nil {
+		return payload, time.Time{}, time.Time{}, nil, err
+	}
+
+	if payload.Capacite != nil && *payload.Capacite < 0 {
+		return payload, time.Time{}, time.Time{}, nil, fmt.Errorf("capacite must be positive")
+	}
+
+	return payload, startAt.UTC(), endAt.UTC(), sessions, nil
+}
+
+func parseEventTiming(payload eventPayload, eventType string) (time.Time, time.Time, []eventSession, error) {
+	if eventType == "formation" && len(payload.Sessions) > 0 {
+		sessions := make([]eventSession, 0, len(payload.Sessions))
+		for idx, rawSession := range payload.Sessions {
+			startAt, err := time.Parse(time.RFC3339, strings.TrimSpace(rawSession.Start))
+			if err != nil {
+				return time.Time{}, time.Time{}, nil, fmt.Errorf("session %d: invalid start", idx+1)
+			}
+			endAt, err := time.Parse(time.RFC3339, strings.TrimSpace(rawSession.End))
+			if err != nil {
+				return time.Time{}, time.Time{}, nil, fmt.Errorf("session %d: invalid end", idx+1)
+			}
+			if !endAt.After(startAt) {
+				return time.Time{}, time.Time{}, nil, fmt.Errorf("session %d: end must be after start", idx+1)
+			}
+			sessions = append(sessions, eventSession{
+				Start:    startAt.UTC(),
+				End:      endAt.UTC(),
+				Position: idx,
+			})
+		}
+
+		sort.SliceStable(sessions, func(i, j int) bool {
+			return sessions[i].Start.Before(sessions[j].Start)
+		})
+		for idx := range sessions {
+			sessions[idx].Position = idx
+			if idx > 0 && sessions[idx].Start.Before(sessions[idx-1].End) {
+				return time.Time{}, time.Time{}, nil, fmt.Errorf("les sessions de formation ne doivent pas se chevaucher")
+			}
+		}
+		return sessions[0].Start, sessions[len(sessions)-1].End, sessions, nil
 	}
 
 	startAt, err := time.Parse(time.RFC3339, strings.TrimSpace(payload.DateDebut))
 	if err != nil {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("invalid dateDebut")
+		return time.Time{}, time.Time{}, nil, fmt.Errorf("invalid dateDebut")
 	}
 	endAt, err := time.Parse(time.RFC3339, strings.TrimSpace(payload.DateFin))
 	if err != nil {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("invalid dateFin")
+		return time.Time{}, time.Time{}, nil, fmt.Errorf("invalid dateFin")
 	}
-	if endAt.Before(startAt) {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("dateFin must be after dateDebut")
+	if !endAt.After(startAt) {
+		return time.Time{}, time.Time{}, nil, fmt.Errorf("dateFin must be after dateDebut")
+	}
+	if eventType == "formation" {
+		return startAt.UTC(), endAt.UTC(), []eventSession{{
+			Start:    startAt.UTC(),
+			End:      endAt.UTC(),
+			Position: 0,
+		}}, nil
 	}
 
-	if payload.Capacite != nil && *payload.Capacite < 0 {
-		return payload, time.Time{}, time.Time{}, fmt.Errorf("capacite must be positive")
-	}
-
-	return payload, startAt.UTC(), endAt.UTC(), nil
+	return startAt.UTC(), endAt.UTC(), nil, nil
 }
 
 func normalizeEventType(raw string) string {
@@ -2749,7 +2847,7 @@ func normalizeValidationStatus(raw string) string {
 	return "approved"
 }
 
-func mapEventPayload(id int64, payload eventPayload, startAt time.Time, endAt time.Time, createdAt time.Time, updatedAt time.Time) map[string]interface{} {
+func mapEventPayload(id int64, payload eventPayload, startAt time.Time, endAt time.Time, sessions []eventSession, createdAt time.Time, updatedAt time.Time) map[string]interface{} {
 	data := map[string]interface{}{
 		"id":               id,
 		"name":             strings.TrimSpace(payload.Name),
@@ -2757,6 +2855,7 @@ func mapEventPayload(id int64, payload eventPayload, startAt time.Time, endAt ti
 		"type":             normalizeEventType(payload.Type),
 		"dateDebut":        startAt.UTC().Format(time.RFC3339),
 		"dateFin":          endAt.UTC().Format(time.RFC3339),
+		"sessions":         mapEventSessions(sessions),
 		"lieu":             strings.TrimSpace(payload.Lieu),
 		"status":           normalizeEventStatus(payload.Status),
 		"intervenant":      strings.TrimSpace(payload.Intervenant),
@@ -2783,6 +2882,74 @@ func mapEventPayload(id int64, payload eventPayload, startAt time.Time, endAt ti
 	}
 
 	return data
+}
+
+func mapEventSessions(sessions []eventSession) []map[string]interface{} {
+	items := make([]map[string]interface{}, 0, len(sessions))
+	for _, session := range sessions {
+		items = append(items, map[string]interface{}{
+			"id":       session.ID,
+			"start":    session.Start.UTC().Format(time.RFC3339),
+			"end":      session.End.UTC().Format(time.RFC3339),
+			"position": session.Position,
+		})
+	}
+	return items
+}
+
+func loadEventSessions(eventID int64) ([]eventSession, error) {
+	rows, err := db.Query(`
+		SELECT id, event_id, start_time, end_time, position
+		FROM event_sessions
+		WHERE event_id = $1
+		ORDER BY position ASC, start_time ASC
+	`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sessions := make([]eventSession, 0)
+	for rows.Next() {
+		var session eventSession
+		if err := rows.Scan(&session.ID, &session.EventID, &session.Start, &session.End, &session.Position); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, rows.Err()
+}
+
+func replaceEventSessions(tx *sql.Tx, eventID int64, eventType string, sessions []eventSession) error {
+	if _, err := tx.Exec(`DELETE FROM event_sessions WHERE event_id = $1`, eventID); err != nil {
+		return err
+	}
+	if eventType != "formation" {
+		return nil
+	}
+	for idx, session := range sessions {
+		if _, err := tx.Exec(`
+			INSERT INTO event_sessions (event_id, start_time, end_time, position)
+			VALUES ($1, $2, $3, $4)
+		`, eventID, session.Start, session.End, idx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func attachEventSessions(item map[string]interface{}) {
+	id, ok := item["id"].(int64)
+	if !ok {
+		return
+	}
+	sessions, err := loadEventSessions(id)
+	if err != nil {
+		log.Printf("could not load event sessions for event %d: %v", id, err)
+		item["sessions"] = []map[string]interface{}{}
+		return
+	}
+	item["sessions"] = mapEventSessions(sessions)
 }
 
 func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
@@ -2826,6 +2993,7 @@ func scanEventRow(rows *sql.Rows) (map[string]interface{}, error) {
 	if intervenantID.Valid {
 		item["intervenantId"] = intervenantID.Int64
 	}
+	attachEventSessions(item)
 	return item, nil
 }
 
@@ -2870,6 +3038,7 @@ func scanEventSingleRow(row *sql.Row) (map[string]interface{}, error) {
 	if intervenantID.Valid {
 		item["intervenantId"] = intervenantID.Int64
 	}
+	attachEventSessions(item)
 	return item, nil
 }
 
@@ -2948,6 +3117,7 @@ func myRegistrationsHandler(w http.ResponseWriter, r *http.Request) {
 		if intervenantID.Valid {
 			item["intervenantId"] = intervenantID.Int64
 		}
+		attachEventSessions(item)
 		items = append(items, item)
 	}
 
@@ -6323,7 +6493,7 @@ func salarieMemberEventsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 
 	case http.MethodPost:
-		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
+		payload, startAt, endAt, sessions, err := parseAndValidateEventPayload(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -6340,13 +6510,21 @@ func salarieMemberEventsHandler(w http.ResponseWriter, r *http.Request) {
 			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
 		}
 
-		err = db.QueryRow(`
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not start event creation")
+			return
+		}
+		defer tx.Rollback()
+
+		normalizedType := normalizeEventType(payload.Type)
+		err = tx.QueryRow(`
 			INSERT INTO events (name, description, type, date_debut, date_fin, lieu, capacite, status, intervenant, intervenant_id, validation_status, image_url, pricing_type, price)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING id, created_at, updated_at
 		`,
 			strings.TrimSpace(payload.Name), strings.TrimSpace(payload.Description),
-			normalizeEventType(payload.Type), startAt, endAt, strings.TrimSpace(payload.Lieu),
+			normalizedType, startAt, endAt, strings.TrimSpace(payload.Lieu),
 			capacity, normalizeEventStatus(payload.Status), intervenantName, userID,
 			"pending", strings.TrimSpace(payload.ImageUrl), payload.PricingType, payload.Price,
 		).Scan(&id, &createdAt, &updatedAt)
@@ -6355,9 +6533,17 @@ func salarieMemberEventsHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not create event")
 			return
 		}
+		if err := replaceEventSessions(tx, id, normalizedType, sessions); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create event sessions")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not finalize event creation")
+			return
+		}
 		payload.Intervenant = intervenantName
 		payload.ValidationStatus = "pending"
-		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, startAt, endAt, createdAt, updatedAt))
+		writeJSON(w, http.StatusCreated, mapEventPayload(id, payload, startAt, endAt, sessions, createdAt, updatedAt))
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -6414,7 +6600,7 @@ func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		payload, startAt, endAt, err := parseAndValidateEventPayload(r)
+		payload, startAt, endAt, sessions, err := parseAndValidateEventPayload(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -6425,17 +6611,33 @@ func salarieMemberEventByIDHandler(w http.ResponseWriter, r *http.Request) {
 			capacity = sql.NullInt64{Int64: *payload.Capacite, Valid: true}
 		}
 
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not start event update")
+			return
+		}
+		defer tx.Rollback()
+
+		normalizedType := normalizeEventType(payload.Type)
 		var updatedAt time.Time
-		err = db.QueryRow(`
+		err = tx.QueryRow(`
 			UPDATE events SET name=$1, description=$2, type=$3, date_debut=$4, date_fin=$5, lieu=$6, capacite=$7, status=$8, image_url=$9, pricing_type=$10, price=$11, validation_status='pending', rejection_comment='', updated_at=NOW()
 			WHERE id=$12 RETURNING updated_at
 		`, strings.TrimSpace(payload.Name), strings.TrimSpace(payload.Description),
-			normalizeEventType(payload.Type), startAt, endAt, strings.TrimSpace(payload.Lieu),
+			normalizedType, startAt, endAt, strings.TrimSpace(payload.Lieu),
 			capacity, normalizeEventStatus(payload.Status), strings.TrimSpace(payload.ImageUrl),
 			payload.PricingType, payload.Price, id,
 		).Scan(&updatedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not update event")
+			return
+		}
+		if err := replaceEventSessions(tx, id, normalizedType, sessions); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update event sessions")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not finalize event update")
 			return
 		}
 		after := eventNotificationSnapshot{

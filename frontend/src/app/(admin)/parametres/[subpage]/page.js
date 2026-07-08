@@ -572,6 +572,8 @@ export default function SettingsSubPage({ params }) {
         app_new_conseil: true,
         email_new_conseil: true,
         app_project_engagement: true,
+        email_conseil_engagement: true,
+        email_project_engagement: true,
         // Forum
         app_forum_new_reply: true,
         email_forum_new_reply: true,
@@ -593,6 +595,7 @@ export default function SettingsSubPage({ params }) {
         app_finance_subscription_active: true,
         email_finance_subscription_active: true,
         app_material_alerts: true,
+        email_material_alerts: true,
         // Prestations
         app_booking_confirmed: true,
         email_booking_confirmed: true,
@@ -751,14 +754,20 @@ export default function SettingsSubPage({ params }) {
                 app_finance_subscription_active:       !!newSettings.app_finance_subscription_active,
                 email_finance_subscription_active:     !!newSettings.email_finance_subscription_active,
                 app_material_alerts:                   !!newSettings.app_material_alerts,
+                email_material_alerts:                 !!newSettings.email_material_alerts,
                 // Conseils
                 app_conseil_moderation:                !!newSettings.app_conseil_moderation,
                 email_conseil_moderation:              !!newSettings.email_conseil_moderation,
                 app_new_conseil:                       !!newSettings.app_new_conseil,
                 email_new_conseil:                     !!newSettings.email_new_conseil,
                 app_conseil_engagement:                !!newSettings.app_conseil_engagement,
+                email_conseil_engagement:              !!newSettings.email_conseil_engagement,
                 // Projets
                 app_project_engagement:                !!newSettings.app_project_engagement,
+                email_project_engagement:              !!newSettings.email_project_engagement,
+                // Assistance
+                app_new_message_received:              !!newSettings.app_new_message_received,
+                email_new_message_received:            !!newSettings.email_new_message_received,
                 // Admin
                 app_admin_new_conseil:                 !!newSettings.app_admin_new_conseil,
                 email_admin_new_conseil:               !!newSettings.email_admin_new_conseil,
@@ -842,7 +851,7 @@ export default function SettingsSubPage({ params }) {
                 color: "#ea580c",
                 items: [
                     { appKey: "app_conseil_moderation", emailKey: "email_conseil_moderation", label: "Validation ou refus de mes conseils", desc: "Lorsqu'un administrateur valide ou refuse mon conseil." },
-                    { appKey: "app_conseil_engagement", emailKey: null, label: "Interactions sur mes conseils", desc: "Lorsqu'un utilisateur aime ou ajoute mon conseil à ses favoris." },
+                    { appKey: "app_conseil_engagement", emailKey: "email_conseil_engagement", label: "Interactions sur mes conseils", desc: "Lorsqu'un utilisateur aime ou ajoute mon conseil à ses favoris." },
                 ],
             },
         ];
@@ -856,7 +865,7 @@ export default function SettingsSubPage({ params }) {
                 items: [
                     { appKey: "app_moderation", emailKey: "email_moderation", label: "Validation & modération de mes annonces", desc: "Lorsqu'un administrateur valide ou refuse mon annonce." },
                     { appKey: "app_booking_received", emailKey: "email_booking_received", label: "Réservation de mes annonces", desc: "Lorsqu'un professionnel réserve un de mes matériaux." },
-                    { appKey: "app_material_alerts", emailKey: null, label: "Alertes sur matériaux recherchés", desc: "Quand une annonce correspondant à un matériau sauvegardé est publiée." },
+                    { appKey: "app_material_alerts", emailKey: "email_material_alerts", label: "Alertes sur matériaux recherchés", desc: "Quand une annonce correspondant à un matériau sauvegardé est publiée." },
                     { appKey: "app_booking_expired", emailKey: "email_booking_expired", label: "Expiration de la réservation de mes objets", desc: "Lorsqu'un professionnel n'a pas finalisé son retrait à temps." },
                     { appKey: "app_point_assigned", emailKey: "email_point_assigned", label: "Assignation de point de dépôt", desc: "Lorsqu'un point de dépôt est assigné pour le transit de mon matériau." },
                     { appKey: "app_deposit_reminder", emailKey: "email_deposit_reminder", label: "Rappel de dépôt de mes objets", desc: "Plus que 24h pour déposer mon objet dans le conteneur." },
@@ -906,7 +915,7 @@ export default function SettingsSubPage({ params }) {
                 items: [
                     { appKey: "app_point_assigned", emailKey: "email_point_assigned", label: "Assignation de point de dépôt", desc: "Lorsqu'un point de dépôt est assigné pour le transit d'un matériau réservé." },
                     { appKey: "app_material_deposited", emailKey: "email_material_deposited", label: "Confirmation de dépôt", desc: "Lorsque le dépôt du matériau que j'ai réservé est enregistré." },
-                    { appKey: "app_material_alerts", emailKey: null, label: "Alertes sur matériaux recherchés", desc: "Quand une annonce correspondant à un matériau sauvegardé est publiée." },
+                    { appKey: "app_material_alerts", emailKey: "email_material_alerts", label: "Alertes sur matériaux recherchés", desc: "Quand une annonce correspondant à un matériau sauvegardé est publiée." },
                     { appKey: "app_booking_cancelled", emailKey: "email_booking_cancelled", label: "Annulation de mes réservations", desc: "Lorsqu'un particulier retire ou annule son annonce." },
                     { appKey: "app_booking_expired", emailKey: "email_booking_expired", label: "Expiration de mes réservations", desc: "Lorsque le délai de retrait ou de paiement est dépassé." },
                     { appKey: "app_rating_received", emailKey: "email_rating_received", label: "Nouvelle évaluation reçue", desc: "Lorsqu'un particulier évalue ma récupération de matériau." },
@@ -950,7 +959,7 @@ export default function SettingsSubPage({ params }) {
                 icon: <Folder size={16} />,
                 color: "#be185d",
                 items: [
-                    { appKey: "app_project_engagement", emailKey: null, label: "Interactions sur mes projets", desc: "Lorsqu'un utilisateur aime ou ajoute mon projet à ses favoris." },
+                    { appKey: "app_project_engagement", emailKey: "email_project_engagement", label: "Interactions sur mes projets", desc: "Lorsqu'un utilisateur aime ou ajoute mon projet à ses favoris." },
                 ],
             },
         ];
@@ -970,6 +979,21 @@ export default function SettingsSubPage({ params }) {
         icon: <MessageSquare size={16} />,
         color: "#eab308",
         items: forumItems,
+    });
+
+    modules.push({
+        key: "support",
+        label: "Assistance",
+        icon: <MessageSquare size={16} />,
+        color: "#2563eb",
+        items: [
+            {
+                appKey: "app_new_message_received",
+                emailKey: "email_new_message_received",
+                label: "Messages d'assistance",
+                desc: "Lorsqu'une réponse ou une nouvelle demande arrive dans une conversation d'assistance.",
+            },
+        ],
     });
 
     const financeItems = [];

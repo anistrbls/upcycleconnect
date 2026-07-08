@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"upcycleconnect/api/projects"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Handler regroupe les handlers HTTP du module users.
@@ -499,15 +500,15 @@ func writeError(w http.ResponseWriter, status int, message string) {
 // laissé ici comme documentation des champs exposés.
 var _ = func(u User) map[string]interface{} {
 	m := map[string]interface{}{
-		"id":          u.ID,
-		"firstname":   u.Firstname,
-		"lastname":    u.Lastname,
-		"email":       u.Email,
-		"role":        u.Role,
-		"status":      u.Status,
-		"adminNote":   u.AdminNote,
-		"createdAt":   u.CreatedAt.UTC().Format(time.RFC3339),
-		"updatedAt":   u.UpdatedAt.UTC().Format(time.RFC3339),
+		"id":        u.ID,
+		"firstname": u.Firstname,
+		"lastname":  u.Lastname,
+		"email":     u.Email,
+		"role":      u.Role,
+		"status":    u.Status,
+		"adminNote": u.AdminNote,
+		"createdAt": u.CreatedAt.UTC().Format(time.RFC3339),
+		"updatedAt": u.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 	if u.LastLoginAt != nil {
 		m["lastLoginAt"] = u.LastLoginAt.UTC().Format(time.RFC3339)
@@ -835,3 +836,397 @@ func (h *Handler) ExportCSVHandler(w http.ResponseWriter, r *http.Request, userI
 	writer.Flush()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Préférences de notification utilisateur
+// ─────────────────────────────────────────────────────────────────────────────
+
+// NotificationSettings contient toutes les préférences de notification et d'affichage d'un utilisateur.
+// Les clés JSON correspondent exactement à ce qu'attend le frontend.
+type NotificationSettings struct {
+	AppEnabled        bool   `json:"appEnabled"`
+	EmailEnabled      bool   `json:"emailEnabled"`
+	DisplayMode       string `json:"displayMode"`
+	Language          string `json:"language"`
+	MapType           string `json:"mapType"`
+	ShowPhonePublicly bool   `json:"showPhonePublicly"`
+	ShowEmailPublicly bool   `json:"showEmailPublicly"`
+
+	AppModeration                   bool `json:"app_moderation"`
+	EmailModeration                 bool `json:"email_moderation"`
+	AppBookingReceived              bool `json:"app_booking_received"`
+	EmailBookingReceived            bool `json:"email_booking_received"`
+	AppPointAssigned                bool `json:"app_point_assigned"`
+	EmailPointAssigned              bool `json:"email_point_assigned"`
+	AppMaterialDeposited            bool `json:"app_material_deposited"`
+	EmailMaterialDeposited          bool `json:"email_material_deposited"`
+	AppMaterialRecovered            bool `json:"app_material_recovered"`
+	EmailMaterialRecovered          bool `json:"email_material_recovered"`
+	AppRatingReceived               bool `json:"app_rating_received"`
+	EmailRatingReceived             bool `json:"email_rating_received"`
+	AppBookingCancelled             bool `json:"app_booking_cancelled"`
+	EmailBookingCancelled           bool `json:"email_booking_cancelled"`
+	AppBookingExpired               bool `json:"app_booking_expired"`
+	EmailBookingExpired             bool `json:"email_booking_expired"`
+	AppDepositReminder              bool `json:"app_deposit_reminder"`
+	EmailDepositReminder            bool `json:"email_deposit_reminder"`
+	AppBookingConfirmed             bool `json:"app_booking_confirmed"`
+	EmailBookingConfirmed           bool `json:"email_booking_confirmed"`
+	AppBookingRequestReceived       bool `json:"app_booking_request_received"`
+	EmailBookingRequestReceived     bool `json:"email_booking_request_received"`
+	AppPrestationBookingCancelled   bool `json:"app_prestation_booking_cancelled"`
+	EmailPrestationBookingCancelled bool `json:"email_prestation_booking_cancelled"`
+	AppServiceReminder              bool `json:"app_service_reminder"`
+	EmailServiceReminder            bool `json:"email_service_reminder"`
+	AppServiceCompleted             bool `json:"app_service_completed"`
+	EmailServiceCompleted           bool `json:"email_service_completed"`
+	AppEventRegistration            bool `json:"app_event_registration"`
+	EmailEventRegistration          bool `json:"email_event_registration"`
+	AppEventCancellation            bool `json:"app_event_cancellation"`
+	EmailEventCancellation          bool `json:"email_event_cancellation"`
+	AppEventReminder                bool `json:"app_event_reminder"`
+	EmailEventReminder              bool `json:"email_event_reminder"`
+	AppEventModeration              bool `json:"app_event_moderation"`
+	EmailEventModeration            bool `json:"email_event_moderation"`
+	AppForumNewReply                bool `json:"app_forum_new_reply"`
+	EmailForumNewReply              bool `json:"email_forum_new_reply"`
+	AppForumMention                 bool `json:"app_forum_mention"`
+	EmailForumMention               bool `json:"email_forum_mention"`
+	AppForumModeration              bool `json:"app_forum_moderation"`
+	EmailForumModeration            bool `json:"email_forum_moderation"`
+	AppAdminForumReport             bool `json:"app_admin_forum_report"`
+	EmailAdminForumReport           bool `json:"email_admin_forum_report"`
+	AppFinancePaymentConfirmed      bool `json:"app_finance_payment_confirmed"`
+	EmailFinancePaymentConfirmed    bool `json:"email_finance_payment_confirmed"`
+	AppFinancePaymentReceived       bool `json:"app_finance_payment_received"`
+	EmailFinancePaymentReceived     bool `json:"email_finance_payment_received"`
+	AppFinancePaymentFailed         bool `json:"app_finance_payment_failed"`
+	EmailFinancePaymentFailed       bool `json:"email_finance_payment_failed"`
+	AppFinanceRefundIssued          bool `json:"app_finance_refund_issued"`
+	EmailFinanceRefundIssued        bool `json:"email_finance_refund_issued"`
+	AppFinanceSubscriptionActive    bool `json:"app_finance_subscription_active"`
+	EmailFinanceSubscriptionActive  bool `json:"email_finance_subscription_active"`
+	AppMaterialAlerts               bool `json:"app_material_alerts"`
+	EmailMaterialAlerts             bool `json:"email_material_alerts"`
+	AppConseilModeration            bool `json:"app_conseil_moderation"`
+	EmailConseilModeration          bool `json:"email_conseil_moderation"`
+	AppNewConseil                   bool `json:"app_new_conseil"`
+	EmailNewConseil                 bool `json:"email_new_conseil"`
+	AppConseilEngagement            bool `json:"app_conseil_engagement"`
+	EmailConseilEngagement          bool `json:"email_conseil_engagement"`
+	AppAdminNewConseil              bool `json:"app_admin_new_conseil"`
+	EmailAdminNewConseil            bool `json:"email_admin_new_conseil"`
+	AppProjectEngagement            bool `json:"app_project_engagement"`
+	EmailProjectEngagement          bool `json:"email_project_engagement"`
+	AppNewMessageReceived           bool `json:"app_new_message_received"`
+	EmailNewMessageReceived         bool `json:"email_new_message_received"`
+}
+
+// defaultNotificationSettings retourne les préférences par défaut (tout activé).
+func defaultNotificationSettings() NotificationSettings {
+	return NotificationSettings{
+		AppEnabled: true, EmailEnabled: true,
+		DisplayMode: "light", Language: "fr", MapType: "plan",
+		AppModeration: true, EmailModeration: true,
+		AppBookingReceived: true, EmailBookingReceived: true,
+		AppPointAssigned: true, EmailPointAssigned: true,
+		AppMaterialDeposited: true, EmailMaterialDeposited: true,
+		AppMaterialRecovered: true, EmailMaterialRecovered: true,
+		AppRatingReceived: true, EmailRatingReceived: true,
+		AppBookingCancelled: true, EmailBookingCancelled: true,
+		AppBookingExpired: true, EmailBookingExpired: true,
+		AppDepositReminder: true, EmailDepositReminder: true,
+		AppBookingConfirmed: true, EmailBookingConfirmed: true,
+		AppBookingRequestReceived: true, EmailBookingRequestReceived: true,
+		AppPrestationBookingCancelled: true, EmailPrestationBookingCancelled: true,
+		AppServiceReminder: true, EmailServiceReminder: true,
+		AppServiceCompleted: true, EmailServiceCompleted: true,
+		AppEventRegistration: true, EmailEventRegistration: true,
+		AppEventCancellation: true, EmailEventCancellation: true,
+		AppEventReminder: true, EmailEventReminder: true,
+		AppEventModeration: true, EmailEventModeration: true,
+		AppForumNewReply: true, EmailForumNewReply: true,
+		AppForumMention: true, EmailForumMention: true,
+		AppForumModeration: true, EmailForumModeration: true,
+		AppAdminForumReport: true, EmailAdminForumReport: true,
+		AppFinancePaymentConfirmed: true, EmailFinancePaymentConfirmed: true,
+		AppFinancePaymentReceived: true, EmailFinancePaymentReceived: true,
+		AppFinancePaymentFailed: true, EmailFinancePaymentFailed: true,
+		AppFinanceRefundIssued: true, EmailFinanceRefundIssued: true,
+		AppFinanceSubscriptionActive: true, EmailFinanceSubscriptionActive: true,
+		AppMaterialAlerts: true, EmailMaterialAlerts: true,
+		AppConseilModeration: true, EmailConseilModeration: true,
+		AppNewConseil: true, EmailNewConseil: true,
+		AppConseilEngagement: true, EmailConseilEngagement: true,
+		AppAdminNewConseil: true, EmailAdminNewConseil: true,
+		AppProjectEngagement: true, EmailProjectEngagement: true,
+		AppNewMessageReceived: true, EmailNewMessageReceived: true,
+	}
+}
+
+// GetNotificationSettingsHandler gère GET /api/user/notification-settings
+func (h *Handler) GetNotificationSettingsHandler(w http.ResponseWriter, r *http.Request, userID int64) {
+	s := defaultNotificationSettings()
+	err := h.repo.DB().QueryRowContext(r.Context(), `
+		SELECT
+			app_enabled, email_enabled, display_mode, language, map_type, show_phone_publicly, show_email_publicly,
+			app_moderation, email_moderation,
+			app_booking_received, email_booking_received,
+			app_point_assigned, email_point_assigned,
+			app_material_deposited, email_material_deposited,
+			app_material_recovered, email_material_recovered,
+			app_rating_received, email_rating_received,
+			app_booking_cancelled, email_booking_cancelled,
+			app_booking_expired, email_booking_expired,
+			app_deposit_reminder, email_deposit_reminder,
+			app_booking_confirmed, email_booking_confirmed,
+			app_booking_request_received, email_booking_request_received,
+			app_prestation_booking_cancelled, email_prestation_booking_cancelled,
+			app_service_reminder, email_service_reminder,
+			app_service_completed, email_service_completed,
+			app_event_registration, email_event_registration,
+			app_event_cancellation, email_event_cancellation,
+			app_event_reminder, email_event_reminder,
+			app_event_moderation, email_event_moderation,
+			app_forum_new_reply, email_forum_new_reply,
+			app_forum_mention, email_forum_mention,
+			app_forum_moderation, email_forum_moderation,
+			app_admin_forum_report, email_admin_forum_report,
+			app_finance_payment_confirmed, email_finance_payment_confirmed,
+			app_finance_payment_received, email_finance_payment_received,
+			app_finance_payment_failed, email_finance_payment_failed,
+			app_finance_refund_issued, email_finance_refund_issued,
+			app_finance_subscription_active, email_finance_subscription_active,
+			app_material_alerts, email_material_alerts,
+			app_conseil_moderation, email_conseil_moderation,
+			app_new_conseil, email_new_conseil,
+			app_conseil_engagement, email_conseil_engagement,
+			app_admin_new_conseil, email_admin_new_conseil,
+			app_project_engagement, email_project_engagement,
+			app_new_message_received, email_new_message_received
+		FROM user_notification_settings WHERE user_id = $1
+	`, userID).Scan(
+		&s.AppEnabled, &s.EmailEnabled, &s.DisplayMode, &s.Language, &s.MapType, &s.ShowPhonePublicly, &s.ShowEmailPublicly,
+		&s.AppModeration, &s.EmailModeration,
+		&s.AppBookingReceived, &s.EmailBookingReceived,
+		&s.AppPointAssigned, &s.EmailPointAssigned,
+		&s.AppMaterialDeposited, &s.EmailMaterialDeposited,
+		&s.AppMaterialRecovered, &s.EmailMaterialRecovered,
+		&s.AppRatingReceived, &s.EmailRatingReceived,
+		&s.AppBookingCancelled, &s.EmailBookingCancelled,
+		&s.AppBookingExpired, &s.EmailBookingExpired,
+		&s.AppDepositReminder, &s.EmailDepositReminder,
+		&s.AppBookingConfirmed, &s.EmailBookingConfirmed,
+		&s.AppBookingRequestReceived, &s.EmailBookingRequestReceived,
+		&s.AppPrestationBookingCancelled, &s.EmailPrestationBookingCancelled,
+		&s.AppServiceReminder, &s.EmailServiceReminder,
+		&s.AppServiceCompleted, &s.EmailServiceCompleted,
+		&s.AppEventRegistration, &s.EmailEventRegistration,
+		&s.AppEventCancellation, &s.EmailEventCancellation,
+		&s.AppEventReminder, &s.EmailEventReminder,
+		&s.AppEventModeration, &s.EmailEventModeration,
+		&s.AppForumNewReply, &s.EmailForumNewReply,
+		&s.AppForumMention, &s.EmailForumMention,
+		&s.AppForumModeration, &s.EmailForumModeration,
+		&s.AppAdminForumReport, &s.EmailAdminForumReport,
+		&s.AppFinancePaymentConfirmed, &s.EmailFinancePaymentConfirmed,
+		&s.AppFinancePaymentReceived, &s.EmailFinancePaymentReceived,
+		&s.AppFinancePaymentFailed, &s.EmailFinancePaymentFailed,
+		&s.AppFinanceRefundIssued, &s.EmailFinanceRefundIssued,
+		&s.AppFinanceSubscriptionActive, &s.EmailFinanceSubscriptionActive,
+		&s.AppMaterialAlerts, &s.EmailMaterialAlerts,
+		&s.AppConseilModeration, &s.EmailConseilModeration,
+		&s.AppNewConseil, &s.EmailNewConseil,
+		&s.AppConseilEngagement, &s.EmailConseilEngagement,
+		&s.AppAdminNewConseil, &s.EmailAdminNewConseil,
+		&s.AppProjectEngagement, &s.EmailProjectEngagement,
+		&s.AppNewMessageReceived, &s.EmailNewMessageReceived,
+	)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("[notification-settings] GET user %d: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "could not load settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+// PutNotificationSettingsHandler gère PUT /api/user/notification-settings
+func (h *Handler) PutNotificationSettingsHandler(w http.ResponseWriter, r *http.Request, userID int64) {
+	var p NotificationSettings
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if p.DisplayMode == "" {
+		p.DisplayMode = "light"
+	}
+	if p.Language == "" {
+		p.Language = "fr"
+	}
+	if p.MapType == "" {
+		p.MapType = "plan"
+	}
+
+	_, err := h.repo.DB().ExecContext(r.Context(), `
+		INSERT INTO user_notification_settings (
+			user_id, app_enabled, email_enabled, display_mode, language, map_type, show_phone_publicly, show_email_publicly,
+			app_moderation, email_moderation,
+			app_booking_received, email_booking_received,
+			app_point_assigned, email_point_assigned,
+			app_material_deposited, email_material_deposited,
+			app_material_recovered, email_material_recovered,
+			app_rating_received, email_rating_received,
+			app_booking_cancelled, email_booking_cancelled,
+			app_booking_expired, email_booking_expired,
+			app_deposit_reminder, email_deposit_reminder,
+			app_booking_confirmed, email_booking_confirmed,
+			app_booking_request_received, email_booking_request_received,
+			app_prestation_booking_cancelled, email_prestation_booking_cancelled,
+			app_service_reminder, email_service_reminder,
+			app_service_completed, email_service_completed,
+			app_event_registration, email_event_registration,
+			app_event_cancellation, email_event_cancellation,
+			app_event_reminder, email_event_reminder,
+			app_event_moderation, email_event_moderation,
+			app_forum_new_reply, email_forum_new_reply,
+			app_forum_mention, email_forum_mention,
+			app_forum_moderation, email_forum_moderation,
+			app_admin_forum_report, email_admin_forum_report,
+			app_finance_payment_confirmed, email_finance_payment_confirmed,
+			app_finance_payment_received, email_finance_payment_received,
+			app_finance_payment_failed, email_finance_payment_failed,
+			app_finance_refund_issued, email_finance_refund_issued,
+			app_finance_subscription_active, email_finance_subscription_active,
+			app_material_alerts, email_material_alerts,
+			app_conseil_moderation, email_conseil_moderation,
+			app_new_conseil, email_new_conseil,
+			app_conseil_engagement, email_conseil_engagement,
+			app_admin_new_conseil, email_admin_new_conseil,
+			app_project_engagement, email_project_engagement,
+			app_new_message_received, email_new_message_received
+		) VALUES (
+			$1,$2,$3,$4,$5,$6,$7,$8,
+			$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,
+			$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
+			$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60,$61,$62,
+			$63,$64,$65,$66,$67,$68,$69,$70,$71,$72,$73,$74,$75,$76
+		)
+		ON CONFLICT (user_id) DO UPDATE SET
+			app_enabled = EXCLUDED.app_enabled,
+			email_enabled = EXCLUDED.email_enabled,
+			display_mode = EXCLUDED.display_mode,
+			language = EXCLUDED.language,
+			map_type = EXCLUDED.map_type,
+			show_phone_publicly = EXCLUDED.show_phone_publicly,
+			show_email_publicly = EXCLUDED.show_email_publicly,
+			app_moderation = EXCLUDED.app_moderation,
+			email_moderation = EXCLUDED.email_moderation,
+			app_booking_received = EXCLUDED.app_booking_received,
+			email_booking_received = EXCLUDED.email_booking_received,
+			app_point_assigned = EXCLUDED.app_point_assigned,
+			email_point_assigned = EXCLUDED.email_point_assigned,
+			app_material_deposited = EXCLUDED.app_material_deposited,
+			email_material_deposited = EXCLUDED.email_material_deposited,
+			app_material_recovered = EXCLUDED.app_material_recovered,
+			email_material_recovered = EXCLUDED.email_material_recovered,
+			app_rating_received = EXCLUDED.app_rating_received,
+			email_rating_received = EXCLUDED.email_rating_received,
+			app_booking_cancelled = EXCLUDED.app_booking_cancelled,
+			email_booking_cancelled = EXCLUDED.email_booking_cancelled,
+			app_booking_expired = EXCLUDED.app_booking_expired,
+			email_booking_expired = EXCLUDED.email_booking_expired,
+			app_deposit_reminder = EXCLUDED.app_deposit_reminder,
+			email_deposit_reminder = EXCLUDED.email_deposit_reminder,
+			app_booking_confirmed = EXCLUDED.app_booking_confirmed,
+			email_booking_confirmed = EXCLUDED.email_booking_confirmed,
+			app_booking_request_received = EXCLUDED.app_booking_request_received,
+			email_booking_request_received = EXCLUDED.email_booking_request_received,
+			app_prestation_booking_cancelled = EXCLUDED.app_prestation_booking_cancelled,
+			email_prestation_booking_cancelled = EXCLUDED.email_prestation_booking_cancelled,
+			app_service_reminder = EXCLUDED.app_service_reminder,
+			email_service_reminder = EXCLUDED.email_service_reminder,
+			app_service_completed = EXCLUDED.app_service_completed,
+			email_service_completed = EXCLUDED.email_service_completed,
+			app_event_registration = EXCLUDED.app_event_registration,
+			email_event_registration = EXCLUDED.email_event_registration,
+			app_event_cancellation = EXCLUDED.app_event_cancellation,
+			email_event_cancellation = EXCLUDED.email_event_cancellation,
+			app_event_reminder = EXCLUDED.app_event_reminder,
+			email_event_reminder = EXCLUDED.email_event_reminder,
+			app_event_moderation = EXCLUDED.app_event_moderation,
+			email_event_moderation = EXCLUDED.email_event_moderation,
+			app_forum_new_reply = EXCLUDED.app_forum_new_reply,
+			email_forum_new_reply = EXCLUDED.email_forum_new_reply,
+			app_forum_mention = EXCLUDED.app_forum_mention,
+			email_forum_mention = EXCLUDED.email_forum_mention,
+			app_forum_moderation = EXCLUDED.app_forum_moderation,
+			email_forum_moderation = EXCLUDED.email_forum_moderation,
+			app_admin_forum_report = EXCLUDED.app_admin_forum_report,
+			email_admin_forum_report = EXCLUDED.email_admin_forum_report,
+			app_finance_payment_confirmed = EXCLUDED.app_finance_payment_confirmed,
+			email_finance_payment_confirmed = EXCLUDED.email_finance_payment_confirmed,
+			app_finance_payment_received = EXCLUDED.app_finance_payment_received,
+			email_finance_payment_received = EXCLUDED.email_finance_payment_received,
+			app_finance_payment_failed = EXCLUDED.app_finance_payment_failed,
+			email_finance_payment_failed = EXCLUDED.email_finance_payment_failed,
+			app_finance_refund_issued = EXCLUDED.app_finance_refund_issued,
+			email_finance_refund_issued = EXCLUDED.email_finance_refund_issued,
+			app_finance_subscription_active = EXCLUDED.app_finance_subscription_active,
+			email_finance_subscription_active = EXCLUDED.email_finance_subscription_active,
+			app_material_alerts = EXCLUDED.app_material_alerts,
+			email_material_alerts = EXCLUDED.email_material_alerts,
+			app_conseil_moderation = EXCLUDED.app_conseil_moderation,
+			email_conseil_moderation = EXCLUDED.email_conseil_moderation,
+			app_new_conseil = EXCLUDED.app_new_conseil,
+			email_new_conseil = EXCLUDED.email_new_conseil,
+			app_conseil_engagement = EXCLUDED.app_conseil_engagement,
+			email_conseil_engagement = EXCLUDED.email_conseil_engagement,
+			app_admin_new_conseil = EXCLUDED.app_admin_new_conseil,
+			email_admin_new_conseil = EXCLUDED.email_admin_new_conseil,
+			app_project_engagement = EXCLUDED.app_project_engagement,
+			email_project_engagement = EXCLUDED.email_project_engagement,
+			app_new_message_received = EXCLUDED.app_new_message_received,
+			email_new_message_received = EXCLUDED.email_new_message_received
+	`,
+		userID, p.AppEnabled, p.EmailEnabled, p.DisplayMode, p.Language, p.MapType, p.ShowPhonePublicly, p.ShowEmailPublicly,
+		p.AppModeration, p.EmailModeration,
+		p.AppBookingReceived, p.EmailBookingReceived,
+		p.AppPointAssigned, p.EmailPointAssigned,
+		p.AppMaterialDeposited, p.EmailMaterialDeposited,
+		p.AppMaterialRecovered, p.EmailMaterialRecovered,
+		p.AppRatingReceived, p.EmailRatingReceived,
+		p.AppBookingCancelled, p.EmailBookingCancelled,
+		p.AppBookingExpired, p.EmailBookingExpired,
+		p.AppDepositReminder, p.EmailDepositReminder,
+		p.AppBookingConfirmed, p.EmailBookingConfirmed,
+		p.AppBookingRequestReceived, p.EmailBookingRequestReceived,
+		p.AppPrestationBookingCancelled, p.EmailPrestationBookingCancelled,
+		p.AppServiceReminder, p.EmailServiceReminder,
+		p.AppServiceCompleted, p.EmailServiceCompleted,
+		p.AppEventRegistration, p.EmailEventRegistration,
+		p.AppEventCancellation, p.EmailEventCancellation,
+		p.AppEventReminder, p.EmailEventReminder,
+		p.AppEventModeration, p.EmailEventModeration,
+		p.AppForumNewReply, p.EmailForumNewReply,
+		p.AppForumMention, p.EmailForumMention,
+		p.AppForumModeration, p.EmailForumModeration,
+		p.AppAdminForumReport, p.EmailAdminForumReport,
+		p.AppFinancePaymentConfirmed, p.EmailFinancePaymentConfirmed,
+		p.AppFinancePaymentReceived, p.EmailFinancePaymentReceived,
+		p.AppFinancePaymentFailed, p.EmailFinancePaymentFailed,
+		p.AppFinanceRefundIssued, p.EmailFinanceRefundIssued,
+		p.AppFinanceSubscriptionActive, p.EmailFinanceSubscriptionActive,
+		p.AppMaterialAlerts, p.EmailMaterialAlerts,
+		p.AppConseilModeration, p.EmailConseilModeration,
+		p.AppNewConseil, p.EmailNewConseil,
+		p.AppConseilEngagement, p.EmailConseilEngagement,
+		p.AppAdminNewConseil, p.EmailAdminNewConseil,
+		p.AppProjectEngagement, p.EmailProjectEngagement,
+		p.AppNewMessageReceived, p.EmailNewMessageReceived,
+	)
+	if err != nil {
+		log.Printf("[notification-settings] PUT user %d: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "could not save settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}

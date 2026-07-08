@@ -400,7 +400,7 @@ func (r *Repository) GetByID(id int64) (Item, error) {
 	log.Printf("Repository details: GetByID called for id=%d", id)
 	var it Item
 	var userRegistrationTS sql.NullTime
-	
+
 	query := `
 		SELECT i.id, i.title, i.description, i.type, i.price, i.category, i.condition, i.material, i.quantity, i.weight_value, i.weight_unit, i.weight_grams, i.city, i.country, i.zip, i.delivery_mode, i.dimensions, i.image, i.photos, i.reference, i.status, i.views, i.saves, i.interested, i.user_id, i.created_at, i.updated_at,
 		(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')) as user_name,
@@ -800,11 +800,7 @@ func (r *Repository) SyncRefundFromStripeWebhook(ctx context.Context, paymentInt
 		`, pi).Scan(&buyerID)
 
 		if buyerID > 0 {
-			var appFinanceRefundIssued bool
-			_ = r.db.QueryRowContext(ctx, `SELECT app_finance_refund_issued FROM user_notification_settings WHERE user_id = $1`, buyerID).Scan(&appFinanceRefundIssued)
-			if appFinanceRefundIssued {
-				_ = CreateNotification(ctx, r.db, buyerID, "Remboursement effectué", "Un remboursement a été traité sur votre compte.", "finance_refund_issued")
-			}
+			_ = CreateNotification(ctx, r.db, buyerID, "Remboursement effectué", "Un remboursement a été traité sur votre compte.", "finance_refund_issued")
 		}
 
 		return nil

@@ -2,8 +2,8 @@ package items
 
 import (
 	"context"
-	"database/sql"
 	"crypto/rand"
+	"database/sql"
 	"fmt"
 	"math"
 	"math/big"
@@ -16,37 +16,37 @@ import (
 // ── Workflow statuses ────────────────────────────────────────────────────────
 
 const (
-	WFValidated        = "validated"
-	WFAssigned         = "assigned"
-	WFDepositCodeSent  = "deposit_code_sent"
-	WFDeposited        = "deposited"
-	WFAvailable        = "available"
-	WFPendingPayment   = "pending_payment"
-	WFReserved         = "reserved"
-	WFPickedUp         = "picked_up"
-	WFDepositExpired   = "deposit_expired"
-	WFCancelled        = "cancelled"
-	WFNeverCollected   = "never_collected"
+	WFValidated       = "validated"
+	WFAssigned        = "assigned"
+	WFDepositCodeSent = "deposit_code_sent"
+	WFDeposited       = "deposited"
+	WFAvailable       = "available"
+	WFPendingPayment  = "pending_payment"
+	WFReserved        = "reserved"
+	WFPickedUp        = "picked_up"
+	WFDepositExpired  = "deposit_expired"
+	WFCancelled       = "cancelled"
+	WFNeverCollected  = "never_collected"
 )
 
 const (
-	DepositCodeTTL      = 72 * time.Hour
-	PickupCodeTTL       = 48 * time.Hour
-	ReservationTTL      = 48 * time.Hour
+	DepositCodeTTL = 72 * time.Hour
+	PickupCodeTTL  = 48 * time.Hour
+	ReservationTTL = 48 * time.Hour
 )
 
 // ── Model ────────────────────────────────────────────────────────────────────
 
 type ItemLogistics struct {
-	ID                   int64      `json:"id"`
-	ItemID               int64      `json:"item_id"`
-	WorkflowStatus       string     `json:"workflow_status"`
+	ID             int64  `json:"id"`
+	ItemID         int64  `json:"item_id"`
+	WorkflowStatus string `json:"workflow_status"`
 
 	// Assignment
-	DepositPointID       *int64     `json:"deposit_point_id,omitempty"`
-	ContainerID          *int64     `json:"container_id,omitempty"`
-	AssignedAt           *time.Time `json:"assigned_at,omitempty"`
-	AssignedBy           *int64     `json:"assigned_by,omitempty"`
+	DepositPointID *int64     `json:"deposit_point_id,omitempty"`
+	ContainerID    *int64     `json:"container_id,omitempty"`
+	AssignedAt     *time.Time `json:"assigned_at,omitempty"`
+	AssignedBy     *int64     `json:"assigned_by,omitempty"`
 
 	// Deposit code
 	DepositCode          string     `json:"deposit_code,omitempty"`
@@ -66,33 +66,33 @@ type ItemLogistics struct {
 	PaymentValidatedAt   *time.Time `json:"payment_validated_at,omitempty"`
 
 	// Pickup code
-	PickupCode           string     `json:"pickup_code,omitempty"`
-	PickupCodeExpiresAt  *time.Time `json:"pickup_code_expires_at,omitempty"`
+	PickupCode          string     `json:"pickup_code,omitempty"`
+	PickupCodeExpiresAt *time.Time `json:"pickup_code_expires_at,omitempty"`
 
 	// Collection
 	CollectedAt          *time.Time `json:"collected_at,omitempty"`
 	CollectedConfirmedBy *int64     `json:"collected_confirmed_by,omitempty"`
 
 	// Closure
-	PickedUpAt           *time.Time `json:"picked_up_at,omitempty"`
+	PickedUpAt *time.Time `json:"picked_up_at,omitempty"`
 
 	// Cancellation
-	CancelledAt          *time.Time `json:"cancelled_at,omitempty"`
-	CancelReason         string     `json:"cancel_reason,omitempty"`
+	CancelledAt  *time.Time `json:"cancelled_at,omitempty"`
+	CancelReason string     `json:"cancel_reason,omitempty"`
 
 	// Timestamps
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Joined fields for frontend display
-	ItemTitle            string     `json:"item_title,omitempty"`
-	ItemImage            string     `json:"item_image,omitempty"`
-	ItemCity             string     `json:"item_city,omitempty"`
-	ItemCategory         string     `json:"item_category,omitempty"`
-	ItemType             string     `json:"item_type,omitempty"`
-	OwnerName            string     `json:"owner_name,omitempty"`
-	DepositPointName     string     `json:"deposit_point_name,omitempty"`
-	ContainerName        string     `json:"container_name,omitempty"`
+	ItemTitle        string `json:"item_title,omitempty"`
+	ItemImage        string `json:"item_image,omitempty"`
+	ItemCity         string `json:"item_city,omitempty"`
+	ItemCategory     string `json:"item_category,omitempty"`
+	ItemType         string `json:"item_type,omitempty"`
+	OwnerName        string `json:"owner_name,omitempty"`
+	DepositPointName string `json:"deposit_point_name,omitempty"`
+	ContainerName    string `json:"container_name,omitempty"`
 }
 
 // ── Schema ───────────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ func generateCode(config CodeConfig) string {
 		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
 		b[i] = charset[n.Int64()]
 	}
-	
+
 	// Guarantee at least one special character if requested
 	if config.UseSpecial {
 		hasSpecial := false
@@ -291,14 +291,30 @@ func isFrenchHoliday(date time.Time) bool {
 	m := date.Month()
 
 	// Fixed holidays
-	if m == time.January && d == 1 { return true }   // Jour de l'An
-	if m == time.May && d == 1 { return true }       // Fête du Travail
-	if m == time.May && d == 8 { return true }       // Victoire 1945
-	if m == time.July && d == 14 { return true }     // Fête Nationale
-	if m == time.August && d == 15 { return true }   // Assomption
-	if m == time.November && d == 1 { return true }  // Toussaint
-	if m == time.November && d == 11 { return true } // Armistice 1918
-	if m == time.December && d == 25 { return true } // Noël
+	if m == time.January && d == 1 {
+		return true
+	} // Jour de l'An
+	if m == time.May && d == 1 {
+		return true
+	} // Fête du Travail
+	if m == time.May && d == 8 {
+		return true
+	} // Victoire 1945
+	if m == time.July && d == 14 {
+		return true
+	} // Fête Nationale
+	if m == time.August && d == 15 {
+		return true
+	} // Assomption
+	if m == time.November && d == 1 {
+		return true
+	} // Toussaint
+	if m == time.November && d == 11 {
+		return true
+	} // Armistice 1918
+	if m == time.December && d == 25 {
+		return true
+	} // Noël
 
 	// Variable holidays (Easter based)
 	y := date.Year()
@@ -306,15 +322,21 @@ func isFrenchHoliday(date time.Time) bool {
 
 	// Lundi de Pâques (+1 jour)
 	easterMonday := easter.AddDate(0, 0, 1)
-	if m == easterMonday.Month() && d == easterMonday.Day() { return true }
+	if m == easterMonday.Month() && d == easterMonday.Day() {
+		return true
+	}
 
 	// Jeudi de l'Ascension (+39 jours)
 	ascension := easter.AddDate(0, 0, 39)
-	if m == ascension.Month() && d == ascension.Day() { return true }
+	if m == ascension.Month() && d == ascension.Day() {
+		return true
+	}
 
 	// Lundi de Pentecôte (+50 jours)
 	whitMonday := easter.AddDate(0, 0, 50)
-	if m == whitMonday.Month() && d == whitMonday.Day() { return true }
+	if m == whitMonday.Month() && d == whitMonday.Day() {
+		return true
+	}
 
 	return false
 }
@@ -461,35 +483,35 @@ func (r *Repository) sendUpcomingDepositReminders(ctx context.Context) {
 }
 
 type ProfessionalItem struct {
-	ID                 int64   `json:"id"`
-	Title              string  `json:"title"`
-	Description        string  `json:"description"`
-	Type               string  `json:"type"`
-	Price              float64 `json:"price"`
-	Category           string  `json:"category"`
-	Condition          string  `json:"condition"`
-	Material           string  `json:"material"`
-	Quantity           string  `json:"quantity"`
-	WeightValue        *float64 `json:"weightValue,omitempty"`
-	WeightUnit         string  `json:"weightUnit,omitempty"`
-	WeightGrams        *float64 `json:"weightGrams,omitempty"`
-	City               string  `json:"city"`
-	Country            string  `json:"country"`
-	Image              string  `json:"image"`
-	Photos             []string `json:"photos"`
-	CreatedAt          time.Time `json:"createdAt"`
-	WorkflowStatus     string  `json:"workflowStatus"`
-	TransactionRef     string  `json:"transactionRef,omitempty"`
-	DepositPointName   string  `json:"depositPointName"`
-	DepositPointPhotos []string `json:"depositPointPhotos,omitempty"`
-	DepositPointAddress string `json:"depositPointAddress,omitempty"`
-	DepositPointZipCode string `json:"depositPointZipCode,omitempty"`
-	DepositPointCity    string `json:"depositPointCity,omitempty"`
-	DepositPointCountry string `json:"depositPointCountry,omitempty"`
-	ContainerName      string  `json:"containerName"`
-	AvailableAt        *time.Time `json:"availableAt,omitempty"`
-	StripePaymentStatus string `json:"stripePaymentStatus,omitempty"`
-	ReservedAt         *time.Time `json:"reservedAt,omitempty"`
+	ID                   int64      `json:"id"`
+	Title                string     `json:"title"`
+	Description          string     `json:"description"`
+	Type                 string     `json:"type"`
+	Price                float64    `json:"price"`
+	Category             string     `json:"category"`
+	Condition            string     `json:"condition"`
+	Material             string     `json:"material"`
+	Quantity             string     `json:"quantity"`
+	WeightValue          *float64   `json:"weightValue,omitempty"`
+	WeightUnit           string     `json:"weightUnit,omitempty"`
+	WeightGrams          *float64   `json:"weightGrams,omitempty"`
+	City                 string     `json:"city"`
+	Country              string     `json:"country"`
+	Image                string     `json:"image"`
+	Photos               []string   `json:"photos"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	WorkflowStatus       string     `json:"workflowStatus"`
+	TransactionRef       string     `json:"transactionRef,omitempty"`
+	DepositPointName     string     `json:"depositPointName"`
+	DepositPointPhotos   []string   `json:"depositPointPhotos,omitempty"`
+	DepositPointAddress  string     `json:"depositPointAddress,omitempty"`
+	DepositPointZipCode  string     `json:"depositPointZipCode,omitempty"`
+	DepositPointCity     string     `json:"depositPointCity,omitempty"`
+	DepositPointCountry  string     `json:"depositPointCountry,omitempty"`
+	ContainerName        string     `json:"containerName"`
+	AvailableAt          *time.Time `json:"availableAt,omitempty"`
+	StripePaymentStatus  string     `json:"stripePaymentStatus,omitempty"`
+	ReservedAt           *time.Time `json:"reservedAt,omitempty"`
 	ReservationExpiresAt *time.Time `json:"reservation_expires_at,omitempty"`
 	PickupCode           string     `json:"pickupCode,omitempty"`
 	PickupCodeExpiresAt  *time.Time `json:"pickupCodeExpiresAt,omitempty"`
@@ -500,14 +522,14 @@ type ProfessionalItem struct {
 	SaleCommissionMode    string  `json:"saleCommissionMode,omitempty"`
 	SaleCommissionPercent float64 `json:"saleCommissionPercent,omitempty"`
 	// Vendeur (particulier) et notes cumulées (notes laissées par les pros sur ce vendeur).
-	SellerUserID         int64      `json:"sellerUserId"`
-	SellerName           string     `json:"sellerName"`
-	SellerRatingAvg      *float64   `json:"sellerRatingAvg,omitempty"`
-	SellerRatingCount    int64      `json:"sellerRatingCount"`
-	MySellerRating       *int       `json:"mySellerRating,omitempty"`
-	SellerCity           string     `json:"sellerCity,omitempty"`
-	SellerRegisteredAt   *time.Time `json:"sellerRegisteredAt,omitempty"`
-	SellerItemsCount     int64      `json:"sellerItemsCount"`
+	SellerUserID       int64      `json:"sellerUserId"`
+	SellerName         string     `json:"sellerName"`
+	SellerRatingAvg    *float64   `json:"sellerRatingAvg,omitempty"`
+	SellerRatingCount  int64      `json:"sellerRatingCount"`
+	MySellerRating     *int       `json:"mySellerRating,omitempty"`
+	SellerCity         string     `json:"sellerCity,omitempty"`
+	SellerRegisteredAt *time.Time `json:"sellerRegisteredAt,omitempty"`
+	SellerItemsCount   int64      `json:"sellerItemsCount"`
 }
 
 func (r *Repository) ListProfessionalAvailableItems(ctx context.Context) ([]ProfessionalItem, error) {
@@ -1230,7 +1252,9 @@ func (r *Repository) GenerateDepositCode(ctx context.Context, itemID int64) (str
 	}
 
 	config, _ := r.GetCodeConfig(ctx)
-	if config.Length < 4 { config.Length = 6 }
+	if config.Length < 4 {
+		config.Length = 6
+	}
 	code := generateCode(config)
 	now := time.Now()
 	expires := addFrenchBusinessDays(now, 3)
@@ -1270,12 +1294,14 @@ func (r *Repository) ConfirmDeposit(ctx context.Context, itemID int64, adminID i
 	}
 
 	now := time.Now()
-	
+
 	pickupCodeStr := existingPickupCode
 	var expiresAt *time.Time
 	if pickupCodeStr == "" {
 		config, _ := r.GetCodeConfig(ctx)
-		if config.Length < 4 { config.Length = 8 }
+		if config.Length < 4 {
+			config.Length = 8
+		}
 		pickupCodeStr = generateCode(config)
 		expires := now.Add(PickupCodeTTL)
 		expiresAt = &expires
@@ -1338,7 +1364,7 @@ func (r *Repository) MakeAvailable(ctx context.Context, itemID int64) error {
 // ── Transition: Reserve ──────────────────────────────────────────────────────
 
 type ReservePayload struct {
-	ReservedByName string `json:"reserved_by_name"`
+	ReservedByName   string `json:"reserved_by_name"`
 	ReservedByUserID *int64 `json:"reserved_by_user_id,omitempty"`
 }
 
@@ -1544,7 +1570,9 @@ func (r *Repository) ValidateStripePaymentByProfessional(ctx context.Context, it
 	}
 
 	config, _ := r.GetCodeConfig(ctx)
-	if config.Length < 4 { config.Length = 8 }
+	if config.Length < 4 {
+		config.Length = 8
+	}
 	pickupCode := generateCode(config)
 	now := time.Now()
 	pickupExpires := now.Add(PickupCodeTTL)
@@ -1571,29 +1599,11 @@ func (r *Repository) ValidateStripePaymentByProfessional(ctx context.Context, it
 		return "", fmt.Errorf("payment validation conflict")
 	}
 
-	// NOTIFICATIONS: Payment Confirmed (Buyer)
-	appBuyerConfirmed := true
-	err = r.db.QueryRowContext(ctx, `
-		SELECT COALESCE(app_enabled, true) AND COALESCE(app_finance_payment_confirmed, true)
-		FROM user_notification_settings
-		WHERE user_id = $1
-	`, userID).Scan(&appBuyerConfirmed)
-	if err == sql.ErrNoRows || (err == nil && appBuyerConfirmed) {
-		msg := fmt.Sprintf("Votre paiement pour '%s' a été confirmé.", title)
-		_ = CreateNotification(ctx, r.db, userID, "Confirmation de paiement", msg, "finance_payment_confirmed")
-	}
+	msg := fmt.Sprintf("Votre paiement pour '%s' a été confirmé.", title)
+	_ = CreateNotification(ctx, r.db, userID, "Confirmation de paiement", msg, "finance_payment_confirmed")
 
-	// NOTIFICATIONS: Payment Received (Seller)
-	appSellerReceived := true
-	err = r.db.QueryRowContext(ctx, `
-		SELECT COALESCE(app_enabled, true) AND COALESCE(app_finance_payment_received, true)
-		FROM user_notification_settings
-		WHERE user_id = $1
-	`, ownerID).Scan(&appSellerReceived)
-	if err == sql.ErrNoRows || (err == nil && appSellerReceived) {
-		msg := fmt.Sprintf("Vous avez reçu un paiement pour '%s'.", title)
-		_ = CreateNotification(ctx, r.db, ownerID, "Paiement reçu", msg, "finance_payment_received")
-	}
+	receivedMsg := fmt.Sprintf("Vous avez reçu un paiement pour '%s'.", title)
+	_ = CreateNotification(ctx, r.db, ownerID, "Paiement reçu", receivedMsg, "finance_payment_received")
 
 	return pickupCode, nil
 }
@@ -1654,29 +1664,20 @@ func (r *Repository) FailStripePaymentByProfessional(ctx context.Context, itemID
 		return err
 	}
 
-	// NOTIFICATIONS: Payment Failed (Buyer)
-	appBuyerFailed := true
-	err = r.db.QueryRowContext(ctx, `
-		SELECT COALESCE(app_enabled, true) AND COALESCE(app_finance_payment_failed, true)
-		FROM user_notification_settings
-		WHERE user_id = $1
-	`, userID).Scan(&appBuyerFailed)
-	if err == sql.ErrNoRows || (err == nil && appBuyerFailed) {
-		msg := fmt.Sprintf("Votre paiement pour '%s' a échoué ou a expiré.", title)
-		_ = CreateNotification(ctx, r.db, userID, "Échec de paiement", msg, "finance_payment_failed")
-	}
+	msg := fmt.Sprintf("Votre paiement pour '%s' a échoué ou a expiré.", title)
+	_ = CreateNotification(ctx, r.db, userID, "Échec de paiement", msg, "finance_payment_failed")
 
 	return nil
 }
 
 type StripeCheckoutReservation struct {
-	ItemID             int64
-	ItemTitle          string
-	AmountCents        int64  // montant total débité sur Stripe
-	BaseCents          int64  // prix annonce (ligne 1 Checkout)
-	PlatformFeeCents   int64  // commission (ligne 2 si mode added et > 0)
-	CommissionMode     string // deducted | added
-	Currency           string
+	ItemID           int64
+	ItemTitle        string
+	AmountCents      int64  // montant total débité sur Stripe
+	BaseCents        int64  // prix annonce (ligne 1 Checkout)
+	PlatformFeeCents int64  // commission (ligne 2 si mode added et > 0)
+	CommissionMode   string // deducted | added
+	Currency         string
 }
 
 func (r *Repository) GetStripeCheckoutReservation(ctx context.Context, itemID, userID int64) (*StripeCheckoutReservation, error) {
@@ -1941,7 +1942,7 @@ func (r *Repository) CancelLogistics(ctx context.Context, itemID int64, reason s
 				updated_at = NOW() ` + extraReset + `
 			WHERE item_id = $2`
 		_, err = r.db.ExecContext(ctx, query, revertTo, itemID)
-		
+
 		if isPostDeposit && targetIsPreDeposit && wasDeposited && containerID != nil {
 			r.db.ExecContext(ctx, `UPDATE containers SET current_count = GREATEST(current_count - 1, 0) WHERE id = $1`, *containerID)
 			r.db.ExecContext(ctx, `UPDATE item_logistics SET 
@@ -2073,17 +2074,17 @@ func (r *Repository) ResetLogisticsForModeration(ctx context.Context, itemID int
 // ── Stats ────────────────────────────────────────────────────────────────────
 
 type LogisticsStats struct {
-	Validated      int `json:"validated"`
-	Assigned       int `json:"assigned"`
+	Validated       int `json:"validated"`
+	Assigned        int `json:"assigned"`
 	DepositCodeSent int `json:"deposit_code_sent"`
-	Deposited      int `json:"deposited"`
-	Available      int `json:"available"`
-	PendingPayment int `json:"pending_payment"`
-	Reserved       int `json:"reserved"`
-	PickedUp       int `json:"picked_up"`
-	Cancelled      int `json:"cancelled"`
-	Expired        int `json:"expired"`
-	Total          int `json:"total"`
+	Deposited       int `json:"deposited"`
+	Available       int `json:"available"`
+	PendingPayment  int `json:"pending_payment"`
+	Reserved        int `json:"reserved"`
+	PickedUp        int `json:"picked_up"`
+	Cancelled       int `json:"cancelled"`
+	Expired         int `json:"expired"`
+	Total           int `json:"total"`
 }
 
 func (r *Repository) GetLogisticsStats(ctx context.Context) (*LogisticsStats, error) {

@@ -105,6 +105,7 @@ export default function SalariePlanningPage({ params }) {
                             employeeId={empId}
                             onReload={loadData}
                             loading={loading}
+                            eventHrefBuilder={(event) => `/salarie-formations/mes-evenements?id=${encodeURIComponent(event.id)}`}
                         />
                     );
                 })()}

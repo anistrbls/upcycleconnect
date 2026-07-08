@@ -37,6 +37,26 @@ function formatTime(raw) {
     if (isNaN(d.getTime())) return "";
     return d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
+function getEventSessions(item) {
+    const source = item?.type === "formation" && Array.isArray(item.sessions) && item.sessions.length > 0
+        ? item.sessions.map((session) => ({ start: session.start, end: session.end }))
+        : [{ start: item?.dateDebut, end: item?.dateFin }];
+    return source
+        .map((session) => ({
+            start: new Date(session.start),
+            end: new Date(session.end || session.start),
+        }))
+        .filter((session) => !isNaN(session.start.getTime()) && !isNaN(session.end.getTime()))
+        .sort((a, b) => a.start - b.start);
+}
+function formatEventSchedule(item) {
+    const sessions = getEventSessions(item);
+    if (item?.type === "formation" && sessions.length > 1) {
+        const first = sessions[0].start.toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+        return `${sessions.length} sessions · dès le ${first}`;
+    }
+    return formatDate(item?.dateDebut);
+}
 function formatPrice(item) {
     if (item.pricingType === "payant" && item.price > 0) return `${Number(item.price).toLocaleString("fr-FR")} €`;
     return "Gratuit";
@@ -51,7 +71,8 @@ function placesRestantes(item) {
 /** Événement terminé : date de fin passée (ou date de début si fin absente). */
 function isEventPast(item) {
     if (!item) return false;
-    const end = new Date(item.dateFin);
+    const sessions = getEventSessions(item);
+    const end = sessions[sessions.length - 1]?.end || new Date(item.dateFin);
     const start = new Date(item.dateDebut);
     const now = new Date();
     if (!isNaN(end.getTime())) return end < now;
@@ -62,7 +83,7 @@ function isEventPast(item) {
 /* ── Card événement style photo plein fond ── */
 function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout, registeredIds, loadingIds, isPremiumAtelier }) {
     const tc = TYPE_COLORS[item.type] || { bg: "#E6EDEE", color: "#444" };
-    const start = new Date(item.dateDebut);
+    const scheduleLabel = formatEventSchedule(item);
     const isFull = (() => { const r = placesRestantes(item); return r !== null && r <= 0; })();
     const canRegisterDespiteFull = isFull && isPremiumAtelier;
     const isRegistered = registeredIds.has(item.id);
@@ -98,7 +119,7 @@ function EventCard({ item, index, onDetail, onRegister, onUnregister, onCheckout
                     </div>
                 </div>
                 <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.7)", margin: 0 }}>
-                    {!isNaN(start.getTime()) && start.toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {scheduleLabel}
                     {item.lieu && ` · ${item.lieu}`}
                 </p>
                 <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
@@ -181,6 +202,8 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
     const restantes = placesRestantes(item);
     const start = new Date(item.dateDebut);
     const end = new Date(item.dateFin);
+    const sessions = getEventSessions(item);
+    const hasSessionSchedule = item.type === "formation" && sessions.length > 1;
 
     return (
         <AdminModal open={open} title={item.name} onClose={onClose}>
@@ -196,7 +219,17 @@ function EventDetailModal({ item, open, onClose, onRegister, onUnregister, onChe
                 </div>
                 {item.description && <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.65 }}>{item.description}</p>}
                 <div style={{ display: "grid", gap: "0.55rem", fontSize: "0.85rem", color: "var(--text-main)" }}>
-                    {!isNaN(start.getTime()) && <div style={{ display: "flex", gap: "0.5rem" }}><span style={{ color: "var(--text-muted)", flexShrink: 0 }}>Date</span><span>{formatDate(item.dateDebut)}{!isNaN(end.getTime()) && ` → ${start.toDateString() === end.toDateString() ? formatTime(item.dateFin) : formatDate(item.dateFin)}`}</span></div>}
+                    {!isNaN(start.getTime()) && !hasSessionSchedule && <div style={{ display: "flex", gap: "0.5rem" }}><span style={{ color: "var(--text-muted)", flexShrink: 0 }}>Date</span><span>{formatDate(item.dateDebut)}{!isNaN(end.getTime()) && ` → ${start.toDateString() === end.toDateString() ? formatTime(item.dateFin) : formatDate(item.dateFin)}`}</span></div>}
+                    {hasSessionSchedule && (
+                        <div style={{ display: "grid", gap: "0.35rem" }}>
+                            <span style={{ color: "var(--text-muted)" }}>Sessions</span>
+                            {sessions.map((session, index) => (
+                                <span key={`${session.start.toISOString()}-${index}`} style={{ fontWeight: 650 }}>
+                                    {index + 1}. {session.start.toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} - {session.end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     {item.lieu && <div style={{ display: "flex", gap: "0.5rem" }}><span style={{ color: "var(--text-muted)", flexShrink: 0 }}>Lieu</span><span>{item.lieu}</span></div>}
                     {item.categoryName && <div style={{ display: "flex", gap: "0.5rem" }}><span style={{ color: "var(--text-muted)", flexShrink: 0 }}>Catégorie</span><span>{item.categoryName}</span></div>}
                     {item.intervenant && <div style={{ display: "flex", gap: "0.5rem" }}><span style={{ color: "var(--text-muted)", flexShrink: 0 }}>Intervenant</span><span>{item.intervenant}</span></div>}

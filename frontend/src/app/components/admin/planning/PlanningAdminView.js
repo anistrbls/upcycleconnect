@@ -38,6 +38,29 @@ const toDayKey = (date) => {
 
 const isSameDay = (d1, d2) => toDayKey(d1) === toDayKey(d2);
 
+const defaultEventHrefBuilder = (item) => `/evenements/planning?open=${encodeURIComponent(item.id)}`;
+
+const getEventPlanningOccurrences = (event) => {
+    const sessions = event?.type === "formation" && Array.isArray(event.sessions) && event.sessions.length > 0
+        ? event.sessions.map((session) => ({ start: session.start, end: session.end }))
+        : [{ start: event.dateDebut, end: event.dateFin || event.dateDebut }];
+
+    return sessions
+        .map((session, index) => ({
+            ...event,
+            _planningKey: `${event.id || "event"}-${index}`,
+            _planningStart: session.start,
+            _planningEnd: session.end || session.start,
+            _sessionIndex: index,
+            _sessionCount: sessions.length,
+        }))
+        .filter((occurrence) => {
+            const start = new Date(occurrence._planningStart);
+            const end = new Date(occurrence._planningEnd);
+            return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start;
+        });
+};
+
 export default function PlanningAdminView({ 
     events = [], 
     slots = [], 
@@ -47,7 +70,8 @@ export default function PlanningAdminView({
     onReload, 
     employeeId = null,
     salaries = [],
-    loading = false
+    loading = false,
+    eventHrefBuilder = defaultEventHrefBuilder
 }) {
     const router = useRouter();
     const [selectedEmployee, setSelectedEmployee] = useState(employeeId || "");
@@ -123,14 +147,15 @@ export default function PlanningAdminView({
         const map = new Map();
         
         const add = (item, type) => {
-            const date = type === "event" ? item.dateDebut : item.startTime;
+            const typedItem = { ...item, _type: type };
+            const date = getPlanningItemStart(typedItem);
             const key = toDayKey(date);
             if (!key) return;
             if (!map.has(key)) map.set(key, []);
-            map.get(key).push({ ...item, _type: type });
+            map.get(key).push(typedItem);
         };
 
-        events.forEach(e => add(e, "event"));
+        events.forEach(e => getEventPlanningOccurrences(e).forEach((occurrence) => add(occurrence, "event")));
         slots.forEach(s => add(s, "slot"));
         bookings.forEach(b => add(b, "booking"));
         unavailabilities.forEach(u => add(u, "unavail"));
@@ -232,6 +257,13 @@ export default function PlanningAdminView({
             if (res.ok && onReload) onReload();
         } catch (err) {
             alert("Erreur lors de la suppression");
+        }
+    };
+
+    const openPlanningEvent = (item) => {
+        const href = typeof eventHrefBuilder === "function" ? eventHrefBuilder(item) : defaultEventHrefBuilder(item);
+        if (href) {
+            router.push(href);
         }
     };
 
@@ -358,7 +390,7 @@ export default function PlanningAdminView({
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (it._type === "event") {
-                                                    router.push(`/evenements/planning?open=${it.id}`);
+                                                    openPlanningEvent(it);
                                                 } else if (it._type === "unavail") {
                                                     openEditItem(it);
                                                 }
@@ -499,7 +531,7 @@ export default function PlanningAdminView({
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             if (it._type === "event") {
-                                                                router.push(`/evenements/planning?open=${it.id}`);
+                                                                openPlanningEvent(it);
                                                             } else if (it._type === "unavail") {
                                                                 openEditItem(it);
                                                             }
@@ -538,11 +570,17 @@ export default function PlanningAdminView({
                 <div style={{ display: "grid", gap: "0.5rem" }}>
                     {selectedDayItems.length === 0 && <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>Aucun élément ce jour.</p>}
                     {selectedDayItems.map((it, i) => (
-                        <div key={i} onClick={() => it._type === "unavail" && openEditItem(it)} style={{ 
+                        <div key={i} onClick={() => {
+                            if (it._type === "event") {
+                                openPlanningEvent(it);
+                            } else if (it._type === "unavail") {
+                                openEditItem(it);
+                            }
+                        }} style={{
                             display: "flex", justifyContent: "space-between", alignItems: "center", 
                             padding: "0.8rem", borderRadius: "10px", 
                             background: getPlanningItemStyle(it._type).panel,
-                            cursor: it._type === "unavail" ? "pointer" : "default",
+                            cursor: it._type === "unavail" || it._type === "event" ? "pointer" : "default",
                             border: "1px solid #f1f5f9"
                         }}>
                             <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>

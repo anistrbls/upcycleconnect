@@ -29,12 +29,51 @@ const STATUS_CONFIG = {
 
 function isEventPastFromEvent(ev) {
     if (!ev) return false;
-    const end = new Date(ev.dateFin);
+    const sessions = getEventSessions(ev);
+    const lastSession = sessions[sessions.length - 1];
+    const end = lastSession ? lastSession.endDate : new Date(ev.dateFin);
     const start = new Date(ev.dateDebut);
     const now = new Date();
     if (!isNaN(end.getTime())) return end < now;
     if (!isNaN(start.getTime())) return start < now;
     return false;
+}
+
+function getEventSessions(ev) {
+    const source = ev?.type === "formation" && Array.isArray(ev.sessions) && ev.sessions.length > 0
+        ? ev.sessions.map((session) => ({ start: session.start, end: session.end }))
+        : [{ start: ev?.dateDebut, end: ev?.dateFin }];
+    return source
+        .map((session, index) => ({
+            index,
+            startDate: new Date(session.start),
+            endDate: new Date(session.end || session.start),
+        }))
+        .filter((session) => !Number.isNaN(session.startDate.getTime()) && !Number.isNaN(session.endDate.getTime()))
+        .sort((a, b) => a.startDate - b.startDate);
+}
+
+function formatSessionDate(session) {
+    const sameDay = session.startDate.getFullYear() === session.endDate.getFullYear()
+        && session.startDate.getMonth() === session.endDate.getMonth()
+        && session.startDate.getDate() === session.endDate.getDate();
+    const date = session.startDate.toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" });
+    const start = session.startDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    const end = session.endDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    if (sameDay) {
+        return `${date} · ${start} - ${end}`;
+    }
+    return `${date} ${start} → ${session.endDate.toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" })} ${end}`;
+}
+
+function formatDurationMinutes(totalMinutes) {
+    const minutes = Math.max(0, Math.round(totalMinutes));
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h > 0) {
+        return `${h}h${m > 0 ? m : ""}`;
+    }
+    return `${m}min`;
 }
 
 export default function EventDetailView({ eventId, onBack }) {
@@ -301,8 +340,10 @@ export default function EventDetailView({ eventId, onBack }) {
     if (loading) return <div className="panel" style={{ padding: "4rem", textAlign: "center" }}><div className="loading-spinner" /></div>;
     if (error || !event) return <div className="panel" style={{ padding: "4rem", textAlign: "center", color: "var(--state-critical)" }}><XCircle size={48} style={{ marginBottom: "1rem" }} /><p>{error || "Événement non trouvé"}</p></div>;
 
-    const startDate = new Date(event.dateDebut);
-    const endDate = new Date(event.dateFin);
+    const eventSessions = getEventSessions(event);
+    const hasSessionSchedule = event.type === "formation" && eventSessions.length > 1;
+    const startDate = eventSessions[0]?.startDate || new Date(event.dateDebut);
+    const endDate = eventSessions[eventSessions.length - 1]?.endDate || new Date(event.dateFin);
     const isSameEventDay = startDate.getFullYear() === endDate.getFullYear()
         && startDate.getMonth() === endDate.getMonth()
         && startDate.getDate() === endDate.getDate();
@@ -311,9 +352,11 @@ export default function EventDetailView({ eventId, onBack }) {
         : `Du ${startDate.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} au ${endDate.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}`;
     const startTime = startDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     const endTime = endDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-    const timeLabel = isSameEventDay ? `${startTime} - ${endTime}` : `${startTime} → ${endTime}`;
+    const timeLabel = hasSessionSchedule
+        ? `${eventSessions.length} sessions`
+        : (isSameEventDay ? `${startTime} - ${endTime}` : `${startTime} → ${endTime}`);
     
-    const isPassed = startDate < new Date();
+    const isPassed = endDate < new Date();
     
     const sc = STATUS_CONFIG[event.status] || { label: event.status, color: "var(--text-muted)", bg: "rgba(35,59,61,0.08)" };
     const displayLabel = (isPassed && event.status !== "annule") ? "Passé" : sc.label;
@@ -327,6 +370,7 @@ export default function EventDetailView({ eventId, onBack }) {
     const isPaidEvent = event.pricingType === "payant" || event.paymentStatus === "paid";
     const isPastEventRefund = isEventPastFromEvent(event);
     const refundDiffHours = (startDate - new Date()) / (1000 * 3600);
+    const totalSessionMinutes = eventSessions.reduce((total, session) => total + ((session.endDate - session.startDate) / (1000 * 60)), 0);
     const isRefundWindow24h = refundDiffHours >= 24;
     const unregisterModalTitle = isPastEventRefund && isPaidEvent ? "Demande de remboursement" : "Désinscription";
 
@@ -477,6 +521,18 @@ export default function EventDetailView({ eventId, onBack }) {
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}><Clock size={14} /> {timeLabel}</span>
                                 </div>
 
+                                {hasSessionSchedule && (
+                                    <div style={{ display: "grid", gap: "0.45rem", margin: "-0.3rem 0 1.2rem", padding: "0.9rem", borderRadius: "18px", background: "#fff", border: "1px solid rgba(35,59,61,0.08)" }}>
+                                        <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sessions</div>
+                                        {eventSessions.map((session, index) => (
+                                            <div key={`${session.startDate.toISOString()}-${index}`} style={{ display: "flex", alignItems: "center", gap: "0.55rem", color: "var(--text-main)", fontSize: "0.86rem", fontWeight: 650 }}>
+                                                <span style={{ width: "24px", height: "24px", borderRadius: "999px", background: "var(--surface-hover)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "0.72rem", fontWeight: 800 }}>{index + 1}</span>
+                                                <span>{formatSessionDate(session)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.9rem", padding: "1.2rem 0", borderTop: "1px solid rgba(35,59,61,0.08)", borderBottom: "1px solid rgba(35,59,61,0.08)", marginBottom: "1.2rem" }}>
                                     <div>
                                         <div style={{ fontSize: "0.68rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.18rem" }}>Participants</div>
@@ -487,12 +543,7 @@ export default function EventDetailView({ eventId, onBack }) {
                                     <div>
                                         <div style={{ fontSize: "0.68rem", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.18rem" }}>Durée</div>
                                         <div style={{ fontSize: "1.15rem", fontWeight: "800", color: "var(--text-main)" }}>
-                                            {(() => {
-                                                const diff = (endDate - startDate) / (1000 * 60);
-                                                const h = Math.floor(diff / 60);
-                                                const m = diff % 60;
-                                                return h > 0 ? `${h}h${m > 0 ? m : ""}` : `${m}min`;
-                                            })()}
+                                            {formatDurationMinutes(hasSessionSchedule ? totalSessionMinutes : ((endDate - startDate) / (1000 * 60)))}
                                         </div>
                                     </div>
                                 </div>

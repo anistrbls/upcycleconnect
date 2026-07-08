@@ -243,13 +243,13 @@ func (h *Handler) notifyCancellationToProviderAndAdmins(r *http.Request, id int6
 	msg := fmt.Sprintf("La réservation de %s pour \"%s\" le %s a été annulée.", booking.UserName, booking.ServiceName, dateStr)
 
 	if booking.EmployeeID != nil && *booking.EmployeeID > 0 {
-		_ = items.CreateNotification(ctx, h.db, *booking.EmployeeID, "Réservation annulée", msg, "booking_cancelled")
+		_ = items.CreateNotification(ctx, h.db, *booking.EmployeeID, "Réservation annulée", msg, "prestation_booking_cancelled")
 	}
 
 	if admins, errAdmins := h.repo.GetAdminIDs(ctx); errAdmins == nil {
 		for _, adminID := range admins {
 			if booking.EmployeeID == nil || adminID != *booking.EmployeeID {
-				_ = items.CreateNotification(ctx, h.db, adminID, "Réservation annulée", msg, "booking_cancelled")
+				_ = items.CreateNotification(ctx, h.db, adminID, "Réservation annulée", msg, "prestation_booking_cancelled")
 			}
 		}
 	}

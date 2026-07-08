@@ -41,12 +41,13 @@ const DURATION_OPTIONS = [30, 60, 90, 120, 180, 240, 360, 480];
 const MULTI_DAY_EVENT_TYPE = "formation";
 const EMPTY_FORM = {
     name: "", description: "", type: "formation",
-    dateDebut: "", dateFin: "", duree: "60",
+    dateDebut: "", dateFin: "", duree: "60", sessions: [{ start: "", end: "" }],
     adresse: "", codePostal: "", ville: "", pays: "France",
     capaciteMax: "",
     status: "brouillon", imageUrl: "",
     pricingType: "gratuit", price: "",
 };
+const createEmptyFormState = () => ({ ...EMPTY_FORM, sessions: EMPTY_FORM.sessions.map((session) => ({ ...session })) });
 
 const isMultiDayEventType = (type) => type === MULTI_DAY_EVENT_TYPE;
 
@@ -68,6 +69,79 @@ const nearestDuration = (dateFin, dateDebut) => {
         return "60";
     }
     return String(DURATION_OPTIONS.reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a, DURATION_OPTIONS[0]));
+};
+
+const createTrainingSession = (start = "", duree = "60") => ({
+    start,
+    end: start ? computeDateFinFromDuration(start, duree) : "",
+});
+const normalizeTrainingSessions = (sessions = [], dateDebut = "", dateFin = "", duree = "60") => {
+    const existing = Array.isArray(sessions)
+        ? sessions
+            .map((session) => ({
+                start: session?.start ? toDateTimeInputValue(session.start) : "",
+                end: session?.end ? toDateTimeInputValue(session.end) : "",
+            }))
+            .filter((session) => session.start || session.end)
+        : [];
+    if (existing.length > 0) {
+        return existing;
+    }
+    const start = dateDebut ? toDateTimeInputValue(dateDebut) : "";
+    const end = dateFin ? toDateTimeInputValue(dateFin) : computeDateFinFromDuration(start, duree);
+    return [start || end ? { start, end } : createTrainingSession("", duree)];
+};
+const syncTrainingSessionBounds = (state, sessions) => {
+    const normalized = normalizeTrainingSessions(sessions, "", "", state.duree);
+    const filled = normalized.filter((session) => session.start || session.end);
+    return {
+        ...state,
+        sessions: normalized,
+        dateDebut: filled[0]?.start || state.dateDebut,
+        dateFin: filled[filled.length - 1]?.end || state.dateFin,
+    };
+};
+const validateTrainingSessions = (sessions) => {
+    const normalized = normalizeTrainingSessions(sessions).filter((session) => session.start || session.end);
+    if (normalized.length === 0) {
+        return { error: "Ajoutez au moins une session de formation." };
+    }
+    const parsed = normalized.map((session, index) => {
+        if (!session.start || !session.end) {
+            return { error: `La session ${index + 1} doit avoir une date de début et une date de fin.` };
+        }
+        const startDate = new Date(session.start);
+        const endDate = new Date(session.end);
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+            return { error: `La session ${index + 1} contient une date invalide.` };
+        }
+        if (endDate <= startDate) {
+            return { error: `La fin de la session ${index + 1} doit être après son début.` };
+        }
+        return { startDate, endDate };
+    });
+    const invalid = parsed.find((session) => session.error);
+    if (invalid) {
+        return { error: invalid.error };
+    }
+    parsed.sort((a, b) => a.startDate - b.startDate);
+    for (let idx = 1; idx < parsed.length; idx += 1) {
+        if (parsed[idx].startDate < parsed[idx - 1].endDate) {
+            return { error: "Les sessions de formation ne doivent pas se chevaucher." };
+        }
+    }
+    return { sessions: parsed };
+};
+const getEventScheduleRanges = (item) => {
+    const source = Array.isArray(item?.sessions) && item.sessions.length > 0
+        ? item.sessions.map((session) => ({ start: session.start, end: session.end }))
+        : [{ start: item?.dateDebut, end: item?.dateFin }];
+    return source
+        .map((session) => ({
+            startDate: new Date(session.start),
+            endDate: new Date(session.end || session.start),
+        }))
+        .filter((session) => !Number.isNaN(session.startDate.getTime()) && !Number.isNaN(session.endDate.getTime()));
 };
 
 const S = {
@@ -111,7 +185,7 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
     const fileRef = useRef();
     const [adresseSuggestions, setAdresseSuggestions] = useState([]);
     const [adresseLoading, setAdresseLoading] = useState(false);
-    const usesExplicitEndDate = isMultiDayEventType(formState.type);
+    const usesSessionSchedule = isMultiDayEventType(formState.type);
 
     const set = (key) => (e) => setFormState(p => ({ ...p, [key]: e.target.value }));
 
@@ -120,9 +194,9 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
         setFormState((p) => ({
             ...p,
             type: nextType,
-            dateFin: isMultiDayEventType(nextType) && !p.dateFin
-                ? computeDateFinFromDuration(p.dateDebut, p.duree)
-                : p.dateFin,
+            sessions: isMultiDayEventType(nextType)
+                ? normalizeTrainingSessions(p.sessions, p.dateDebut, p.dateFin, p.duree)
+                : p.sessions,
         }));
     };
 
@@ -130,13 +204,46 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
         const nextDateDebut = e.target.value;
         setFormState((p) => {
             const nextDateFin = computeDateFinFromDuration(nextDateDebut, p.duree);
-            const shouldRefreshEndDate = isMultiDayEventType(p.type)
+            const shouldRefreshEndDate = !isMultiDayEventType(p.type)
                 && (!p.dateFin || new Date(p.dateFin) <= new Date(nextDateDebut));
             return {
                 ...p,
                 dateDebut: nextDateDebut,
                 dateFin: shouldRefreshEndDate ? nextDateFin : p.dateFin,
             };
+        });
+    };
+
+    const addSession = () => {
+        setFormState((p) => {
+            const sessions = normalizeTrainingSessions(p.sessions, p.dateDebut, p.dateFin, p.duree);
+            const last = sessions[sessions.length - 1];
+            const nextStart = last?.end || last?.start || p.dateDebut || "";
+            return syncTrainingSessionBounds(p, [...sessions, createTrainingSession(nextStart, p.duree)]);
+        });
+    };
+
+    const updateSession = (index, key, value) => {
+        setFormState((p) => {
+            const sessions = normalizeTrainingSessions(p.sessions, p.dateDebut, p.dateFin, p.duree).map((session) => ({ ...session }));
+            if (!sessions[index]) {
+                return p;
+            }
+            sessions[index][key] = value;
+            if (key === "start") {
+                const nextEnd = computeDateFinFromDuration(value, p.duree);
+                if (!sessions[index].end || new Date(sessions[index].end) <= new Date(value)) {
+                    sessions[index].end = nextEnd;
+                }
+            }
+            return syncTrainingSessionBounds(p, sessions);
+        });
+    };
+
+    const removeSession = (index) => {
+        setFormState((p) => {
+            const sessions = normalizeTrainingSessions(p.sessions, p.dateDebut, p.dateFin, p.duree).filter((_, idx) => idx !== index);
+            return syncTrainingSessionBounds(p, sessions.length ? sessions : [createTrainingSession("", p.duree)]);
         });
     };
 
@@ -241,26 +348,46 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                         </div>
                         <div style={S.card}>
                             <h2 style={S.sectionTitle}>Dates & lieu</h2>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
-                                <label style={S.label}>
-                                    Date de début *
-                                    <input type="datetime-local" value={formState.dateDebut}
-                                        min={!editingEvent ? new Date(Date.now() + 60000).toISOString().slice(0, 16) : undefined}
-                                        onChange={setDateDebut} style={S.input} required />
-                                </label>
-                                {usesExplicitEndDate ? (
+                            {usesSessionSchedule ? (
+                                <div style={{ display: "grid", gap: "0.85rem", marginBottom: "1rem" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+                                        <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", lineHeight: 1.5 }}>
+                                            Ajoutez chaque session de formation séparément. Elles peuvent être le même jour ou sur des jours différents, sans former un bloc continu.
+                                        </p>
+                                        <button type="button" onClick={addSession} style={{ ...S.btnSecondary, padding: "0.55rem 0.95rem", whiteSpace: "nowrap" }}>+ Ajouter une session</button>
+                                    </div>
+                                    {normalizeTrainingSessions(formState.sessions, formState.dateDebut, formState.dateFin, formState.duree).map((session, index) => (
+                                        <div key={index} style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr auto", gap: "0.75rem", alignItems: "end", padding: "0.85rem", borderRadius: "18px", background: "rgba(255,255,255,0.66)", border: "1px solid rgba(35,59,61,0.08)" }}>
+                                            <span style={{ width: "34px", height: "34px", borderRadius: "999px", background: "var(--black)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "0.85rem" }}>{index + 1}</span>
+                                            <label style={S.label}>
+                                                Début *
+                                                <input type="datetime-local" value={session.start}
+                                                    min={!editingEvent ? new Date(Date.now() + 60000).toISOString().slice(0, 16) : undefined}
+                                                    onChange={(e) => updateSession(index, "start", e.target.value)} style={S.input} required />
+                                            </label>
+                                            <label style={S.label}>
+                                                Fin *
+                                                <input type="datetime-local" value={session.end}
+                                                    min={session.start || undefined}
+                                                    onChange={(e) => updateSession(index, "end", e.target.value)} style={S.input} required />
+                                            </label>
+                                            <button type="button" onClick={() => removeSession(index)}
+                                                disabled={normalizeTrainingSessions(formState.sessions, formState.dateDebut, formState.dateFin, formState.duree).length <= 1}
+                                                style={{ ...S.btnSecondary, width: "40px", height: "40px", padding: 0, borderRadius: "14px", display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: normalizeTrainingSessions(formState.sessions, formState.dateDebut, formState.dateFin, formState.duree).length <= 1 ? 0.45 : 1 }}
+                                                aria-label="Supprimer la session">
+                                                <IconTrash />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
                                     <label style={S.label}>
-                                        Date de fin *
-                                        <input
-                                            type="datetime-local"
-                                            value={formState.dateFin}
-                                            min={formState.dateDebut || undefined}
-                                            onChange={set("dateFin")}
-                                            style={S.input}
-                                            required
-                                        />
+                                        Date de début *
+                                        <input type="datetime-local" value={formState.dateDebut}
+                                            min={!editingEvent ? new Date(Date.now() + 60000).toISOString().slice(0, 16) : undefined}
+                                            onChange={setDateDebut} style={S.input} required />
                                     </label>
-                                ) : (
                                     <label style={S.label}>
                                         Durée *
                                         <select value={formState.duree} onChange={set("duree")} style={S.select} required>
@@ -274,12 +401,7 @@ function EventForm({ editingEvent, formState, setFormState, onSubmit, onCancel, 
                                             <option value="480">8h (journée)</option>
                                         </select>
                                     </label>
-                                )}
-                            </div>
-                            {usesExplicitEndDate && (
-                                <p style={{ margin: "-0.35rem 0 1rem", color: "var(--text-muted)", fontSize: "0.8rem", lineHeight: 1.5 }}>
-                                    Une formation peut se dérouler sur plusieurs jours : choisissez simplement une date de fin après la date de début.
-                                </p>
+                                </div>
                             )}
                             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "1rem" }}>
                                 <div style={S.label}>
@@ -421,7 +543,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
     const [editingEvent, setEditingEvent] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
     const [localError, setLocalError] = useState("");
-    const [formState, setFormState] = useState({ ...EMPTY_FORM });
+    const [formState, setFormState] = useState(createEmptyFormState);
 
     const [participantsOpen, setParticipantsOpen] = useState(false);
     const [participantsEvent, setParticipantsEvent] = useState(null);
@@ -434,11 +556,14 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
     const [publishModalOpen, setPublishModalOpen] = useState(false);
     const [eventToPublish, setEventToPublish] = useState(null);
 
-    const detectConflict = (startDate, endDate, excludeId) =>
+    const detectConflict = (ranges, excludeId) =>
         events.find(e => {
             if (e.id === excludeId) return false;
             if (e.validationStatus !== "approved") return false;
-            return startDate < new Date(e.dateFin) && endDate > new Date(e.dateDebut);
+            const eventRanges = getEventScheduleRanges(e);
+            return ranges.some((range) => eventRanges.some((eventRange) => (
+                range.startDate < eventRange.endDate && range.endDate > eventRange.startDate
+            )));
         });
 
     const filteredEvents = events.filter(e => {
@@ -452,7 +577,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
 
     const resetForm = () => {
         setEditingEvent(null);
-        setFormState({ ...EMPTY_FORM });
+        setFormState(createEmptyFormState());
         setLocalError("");
     };
 
@@ -465,6 +590,12 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
             dateDebut: toDateTimeInputValue(item.dateDebut),
             dateFin: toDateTimeInputValue(item.dateFin),
             duree: nearestDuration(item.dateFin, item.dateDebut),
+            sessions: normalizeTrainingSessions(
+                (item.sessions || []).map((session) => ({ start: session.start, end: session.end })),
+                item.dateDebut,
+                item.dateFin,
+                nearestDuration(item.dateFin, item.dateDebut),
+            ),
             adresse: parts[0] || "", codePostal: "", ville: parts[1] || "", pays: parts[2] || "France",
             capaciteMax: item.capaciteMax == null ? (item.capacite == null ? "" : String(item.capacite)) : String(item.capaciteMax),
             status: item.status || "brouillon", imageUrl: item.imageUrl || "",
@@ -479,17 +610,31 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
         setLocalError("");
         const f = formState;
         if (!f.name.trim()) { setLocalError("Le nom est requis."); return; }
-        if (!f.dateDebut) { setLocalError("La date de début est obligatoire."); return; }
-        const startDate = new Date(f.dateDebut);
-        if (Number.isNaN(startDate.getTime())) { setLocalError("Format de date invalide."); return; }
-        if (isMultiDayEventType(f.type) && !f.dateFin) { setLocalError("La date de fin est obligatoire pour une formation."); return; }
-        const endDate = isMultiDayEventType(f.type)
-            ? new Date(f.dateFin)
-            : new Date(startDate.getTime() + Number(f.duree) * 60000);
-        if (Number.isNaN(endDate.getTime())) { setLocalError("Format de date de fin invalide."); return; }
-        if (endDate <= startDate) { setLocalError("La date de fin doit être après la date de début."); return; }
+        let startDate;
+        let endDate;
+        let scheduleRanges = [];
+        let sessionsPayload = [];
+        if (isMultiDayEventType(f.type)) {
+            const validated = validateTrainingSessions(f.sessions);
+            if (validated.error) { setLocalError(validated.error); return; }
+            scheduleRanges = validated.sessions;
+            startDate = scheduleRanges[0].startDate;
+            endDate = scheduleRanges[scheduleRanges.length - 1].endDate;
+            sessionsPayload = scheduleRanges.map((session) => ({
+                start: session.startDate.toISOString(),
+                end: session.endDate.toISOString(),
+            }));
+        } else {
+            if (!f.dateDebut) { setLocalError("La date de début est obligatoire."); return; }
+            startDate = new Date(f.dateDebut);
+            if (Number.isNaN(startDate.getTime())) { setLocalError("Format de date invalide."); return; }
+            endDate = new Date(startDate.getTime() + Number(f.duree) * 60000);
+            if (Number.isNaN(endDate.getTime())) { setLocalError("Format de date de fin invalide."); return; }
+            if (endDate <= startDate) { setLocalError("La date de fin doit être après la date de début."); return; }
+            scheduleRanges = [{ startDate, endDate }];
+        }
         if (!editingEvent && startDate <= new Date()) { setLocalError("La date de début doit être dans le futur."); return; }
-        const conflict = detectConflict(startDate, endDate, editingEvent && editingEvent.id);
+        const conflict = detectConflict(scheduleRanges, editingEvent && editingEvent.id);
         if (conflict) { setLocalError(`Conflit horaire avec "${conflict.name}"`); return; }
         setIsSaving(true);
         try {
@@ -497,6 +642,7 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                 name: f.name.trim(), description: f.description.trim(),
                 type: f.type,
                 dateDebut: startDate.toISOString(), dateFin: endDate.toISOString(),
+                sessions: sessionsPayload,
                 lieu: [f.adresse, [f.codePostal, f.ville].filter(Boolean).join(" "), f.pays].filter(Boolean).join(", "),
                 capacite: f.capaciteMax.trim() === "" ? null : Number(f.capaciteMax),
                 capaciteMax: f.capaciteMax.trim() === "" ? null : Number(f.capaciteMax),
@@ -551,6 +697,10 @@ export default function SalarieFormationsView({ events = [], loading, errorMessa
                 type: item.type,
                 dateDebut: item.dateDebut,
                 dateFin: item.dateFin,
+                sessions: Array.isArray(item.sessions) ? item.sessions.map((session) => ({
+                    start: session.start,
+                    end: session.end,
+                })) : [],
                 lieu: item.lieu || "",
                 capacite: item.capacite ?? item.capaciteMax ?? null,
                 capaciteMax: item.capacite ?? item.capaciteMax ?? null,

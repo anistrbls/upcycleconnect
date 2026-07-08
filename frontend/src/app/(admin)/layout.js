@@ -7,6 +7,7 @@ import { NAV_MODULES, PRO_MODULES, PARTICULIER_MODULES, SALARIE_MODULES } from "
 import { Icon } from "../components/admin/Icon";
 import TutorialOverlay from "../components/shared/TutorialOverlay";
 import LanguageSwitcher from "../components/i18n/LanguageSwitcher";
+import SupportFloatingWidget from "../components/support/SupportFloatingWidget";
 
 const navModule = (key) => NAV_MODULES.find((module) => module.key === key);
 
@@ -31,6 +32,9 @@ const MODERATOR_MODULES = [
     cloneModule("forum", {
         subNav: [{ key: "moderation", label: "Signalements", shortLabel: "Forum" }],
     }),
+    cloneModule("assistance", {
+        subNav: [{ key: "conversations", label: "Conversations", shortLabel: "Support" }],
+    }),
     cloneModule("mon-compte"),
 ].filter(Boolean);
 
@@ -39,6 +43,7 @@ const MODERATOR_ALLOWED_SUBROUTES = {
     utilisateurs: new Set(["tous-utilisateurs"]),
     projets: new Set(["moderation"]),
     forum: new Set(["moderation"]),
+    assistance: new Set(["conversations"]),
     "mon-compte": new Set([""]),
 };
 
@@ -687,6 +692,7 @@ export default function AdminLayout({ children }) {
         : isParticulier
         ? PARTICULIER_MODULES
         : NAV_MODULES.filter(m => allowedModulesForUsers.includes(m.key));
+    const showSupportWidget = isParticulier || isPro;
 
     return (
         <div className="app-wrapper">
@@ -1115,6 +1121,8 @@ export default function AdminLayout({ children }) {
                     )}
                 </div>
             </div>
+
+            {showSupportWidget && <SupportFloatingWidget user={user} />}
         </div>
     );
 }

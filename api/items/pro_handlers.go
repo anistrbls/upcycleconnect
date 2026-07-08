@@ -929,12 +929,7 @@ func handleStripeEvent(r *http.Request, repo *Repository, event stripeWebhookEve
 					return false, err
 				}
 
-				// NOTIFICATIONS: Subscription Active (Pro)
-				var appSubscriptionActive bool
-				_ = repo.db.QueryRowContext(ctx, `SELECT app_finance_subscription_active FROM user_notification_settings WHERE user_id = $1`, userID).Scan(&appSubscriptionActive)
-				if appSubscriptionActive {
-					_ = CreateNotification(ctx, repo.db, userID, "Abonnement activé", "Votre abonnement Pro a été activé avec succès.", "finance_subscription_active")
-				}
+				_ = CreateNotification(ctx, repo.db, userID, "Abonnement activé", "Votre abonnement Pro a été activé avec succès.", "finance_subscription_active")
 			}
 			return true, nil
 		}

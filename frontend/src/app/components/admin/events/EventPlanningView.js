@@ -56,9 +56,29 @@ const getDayBounds = (date) => {
     return { start, end };
 };
 
+const getEventOccurrences = (item) => {
+    const sessions = item?.type === "formation" && Array.isArray(item.sessions) && item.sessions.length > 0
+        ? item.sessions.map((session) => ({ start: session.start, end: session.end }))
+        : [{ start: item.dateDebut, end: item.dateFin || item.dateDebut }];
+    return sessions
+        .map((session, index) => ({
+            ...item,
+            _occurrenceKey: `${item.id}-${index}`,
+            _eventStart: session.start,
+            _eventEnd: session.end || session.start,
+            _sessionIndex: index,
+            _sessionCount: sessions.length,
+        }))
+        .filter((occurrence) => {
+            const start = new Date(occurrence._eventStart);
+            const end = new Date(occurrence._eventEnd);
+            return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start;
+        });
+};
+
 const getEventRangeForDay = (item, dayDate) => {
-    const start = new Date(item.dateDebut);
-    const end = new Date(item.dateFin || item.dateDebut);
+    const start = new Date(item._eventStart || item.dateDebut);
+    const end = new Date(item._eventEnd || item.dateFin || item.dateDebut);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
         return null;
     }
@@ -113,28 +133,27 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
             if (item.validationStatus === "pending" || item.validationStatus === "rejected") {
                 return;
             }
-            const start = new Date(item.dateDebut);
-            const end = new Date(item.dateFin || item.dateDebut);
-            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
-                return;
-            }
-            const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-            const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-            while (cursor <= last) {
-                const range = getEventRangeForDay(item, cursor);
-                if (range) {
-                    const key = toDayKey(cursor);
-                    if (!map.has(key)) {
-                        map.set(key, []);
+            getEventOccurrences(item).forEach((occurrence) => {
+                const start = new Date(occurrence._eventStart);
+                const end = new Date(occurrence._eventEnd || occurrence._eventStart);
+                const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+                const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+                while (cursor <= last) {
+                    const range = getEventRangeForDay(occurrence, cursor);
+                    if (range) {
+                        const key = toDayKey(cursor);
+                        if (!map.has(key)) {
+                            map.set(key, []);
+                        }
+                        map.get(key).push(occurrence);
                     }
-                    map.get(key).push(item);
+                    cursor.setDate(cursor.getDate() + 1);
                 }
-                cursor.setDate(cursor.getDate() + 1);
-            }
+            });
         });
 
         for (const dayEvents of map.values()) {
-            dayEvents.sort((a, b) => new Date(a.dateDebut) - new Date(b.dateDebut));
+            dayEvents.sort((a, b) => new Date(a._eventStart || a.dateDebut) - new Date(b._eventStart || b.dateDebut));
         }
 
         return map;
@@ -164,7 +183,6 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
             return days;
         }
     }, [currentDate, viewMode]);
-
     const selectedDayKey = toDayKey(selectedDate);
     const selectedDayEvents = eventsByDay.get(selectedDayKey) || [];
     const dateLocale = getDateLocale(locale);
@@ -405,7 +423,7 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
 
                                             return (
                                                 <span
-                                                    key={item.id}
+                                                    key={item._occurrenceKey || item.id}
                                                     onClick={(event) => {
                                                         event.stopPropagation();
                                                         if (onOpenEvent) {
@@ -460,7 +478,7 @@ export default function EventPlanningView({ events = [], title = "Planning des Ã
 
                                 return (
                                     <button
-                                        key={item.id}
+                                        key={item._occurrenceKey || item.id}
                                         type="button"
                                         onClick={() => {
                                             if (onOpenEvent) {

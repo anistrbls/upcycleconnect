@@ -194,11 +194,8 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		rows, err := db.Query(`
 			SELECT u.id
 			FROM users u
-			LEFT JOIN user_notification_settings s ON s.user_id = u.id
 			WHERE u.role = 'admin'
 			  AND COALESCE(u.status, 'active') = 'active'
-			  AND COALESCE(s.app_enabled, true) = true
-			  AND COALESCE(s.app_moderation, true) = true
 		`)
 		if err != nil {
 			return

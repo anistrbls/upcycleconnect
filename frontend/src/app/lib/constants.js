@@ -149,6 +149,15 @@ export const NAV_MODULES = [
         ],
     },
     {
+        key: "assistance",
+        label: "Assistance",
+        shortLabel: "Support",
+        icon: "M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5",
+        subNav: [
+            { key: "conversations", label: "Conversations", shortLabel: "Conversations" },
+        ],
+    },
+    {
         key: "parametres",
         label: "Paramètres",
         shortLabel: "Paramètres",

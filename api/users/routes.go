@@ -173,6 +173,24 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 		h.UpdatePasswordHandler(w, r, userID)
 	})))
 
+	// GET/PUT /api/user/notification-settings — préférences de notification de l'utilisateur courant
+	mux.Handle("/api/user/notification-settings", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := int64(claims["userId"].(float64))
+		switch r.Method {
+		case http.MethodGet:
+			h.GetNotificationSettingsHandler(w, r, userID)
+		case http.MethodPut:
+			h.PutNotificationSettingsHandler(w, r, userID)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})))
+
 	mux.Handle("/api/pro/export-data", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
 		if !ok {

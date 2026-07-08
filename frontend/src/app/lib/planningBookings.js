@@ -16,7 +16,10 @@ export function mapBookingsForPlanning(bookings = [], services = []) {
 }
 
 export function getPlanningItemLabel(item) {
-    if (item._type === "event") return item.titre || item.name || "Événement";
+    if (item._type === "event") {
+        const label = item.titre || item.name || "Événement";
+        return item._sessionCount > 1 ? `${label} · Session ${item._sessionIndex + 1}/${item._sessionCount}` : label;
+    }
     if (item._type === "unavail") return item.reason || "Indisponibilité";
     if (item._type === "booking") {
         const name = item.serviceName || "Prestation";
@@ -26,12 +29,12 @@ export function getPlanningItemLabel(item) {
 }
 
 export function getPlanningItemStart(item) {
-    if (item._type === "event") return new Date(item.dateDebut);
+    if (item._type === "event") return new Date(item._planningStart || item.dateDebut);
     return new Date(item.startTime);
 }
 
 export function getPlanningItemEnd(item) {
-    if (item._type === "event") return new Date(item.dateFin);
+    if (item._type === "event") return new Date(item._planningEnd || item.dateFin);
     return new Date(item.endTime);
 }
 

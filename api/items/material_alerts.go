@@ -9,7 +9,7 @@ import (
 
 type MaterialAlertSubscription struct {
 	MaterialLabel string    `json:"materialLabel"`
-	CreatedAt      time.Time `json:"createdAt"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 func normalizeMaterialAlertLabel(label string) string {
@@ -93,11 +93,8 @@ func (r *Repository) notifyMaterialAlertSubscribers(ctx context.Context, itemTit
 		SELECT s.user_id, s.material_label
 		FROM material_alert_subscriptions s
 		JOIN users u ON u.id = s.user_id
-		LEFT JOIN user_notification_settings ns ON ns.user_id = u.id
 		WHERE u.id <> $1
 		  AND COALESCE(u.status, 'active') = 'active'
-		  AND COALESCE(ns.app_enabled, true) = true
-		  AND COALESCE(ns.app_material_alerts, true) = true
 		  AND (
 			   s.material_label_normalized = $2
 			OR $2 LIKE '%' || s.material_label_normalized || '%'

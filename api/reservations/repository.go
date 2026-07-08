@@ -25,39 +25,10 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func financeNotificationColumn(notifType string) string {
-	switch strings.TrimSpace(notifType) {
-	case "finance_payment_confirmed":
-		return "app_finance_payment_confirmed"
-	case "finance_payment_received":
-		return "app_finance_payment_received"
-	case "finance_payment_failed":
-		return "app_finance_payment_failed"
-	case "finance_refund_issued":
-		return "app_finance_refund_issued"
-	case "finance_subscription_active":
-		return "app_finance_subscription_active"
-	default:
-		return ""
-	}
-}
-
 func (r *Repository) createFinanceNotification(ctx context.Context, userID int64, title, message, notifType string) {
 	if userID <= 0 {
 		return
 	}
-	column := financeNotificationColumn(notifType)
-	if column == "" {
-		return
-	}
-
-	var enabled bool
-	query := fmt.Sprintf(`SELECT COALESCE(app_enabled, true) AND COALESCE(%s, true) FROM user_notification_settings WHERE user_id = $1`, column)
-	err := r.db.QueryRowContext(ctx, query, userID).Scan(&enabled)
-	if err == nil && !enabled {
-		return
-	}
-
 	_ = items.CreateNotification(ctx, r.db, userID, title, message, notifType)
 }
 
@@ -119,6 +90,9 @@ func (r *Repository) EnsureSchema() error {
 			app_deposit_reminder BOOLEAN NOT NULL DEFAULT true,
 			email_deposit_reminder BOOLEAN NOT NULL DEFAULT true,
 			app_material_alerts BOOLEAN NOT NULL DEFAULT true,
+			email_material_alerts BOOLEAN NOT NULL DEFAULT true,
+			app_new_message_received BOOLEAN NOT NULL DEFAULT true,
+			email_new_message_received BOOLEAN NOT NULL DEFAULT true,
 			display_mode TEXT NOT NULL DEFAULT 'light',
 			language TEXT NOT NULL DEFAULT 'fr',
 			map_type TEXT NOT NULL DEFAULT 'plan',
@@ -130,7 +104,9 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_conseil_engagement BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_conseil_engagement BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_project_engagement BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_project_engagement BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_admin_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_admin_new_conseil BOOLEAN NOT NULL DEFAULT true`,
 		// Prestations — notification de prestation terminée
@@ -174,6 +150,9 @@ func (r *Repository) EnsureSchema() error {
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_finance_subscription_active BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_finance_subscription_active BOOLEAN NOT NULL DEFAULT true`,
 		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_material_alerts BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_material_alerts BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS app_new_message_received BOOLEAN NOT NULL DEFAULT true`,
+		`ALTER TABLE user_notification_settings ADD COLUMN IF NOT EXISTS email_new_message_received BOOLEAN NOT NULL DEFAULT true`,
 		// Réservations payées mais encore « pending » (ancien comportement) → confirmées
 		`UPDATE service_bookings
 		 SET status = 'confirmed'
@@ -396,25 +375,13 @@ func (r *Repository) UpdateStatus(id int64, p UpdateStatusPayload) (Booking, err
 			_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation confirmée", msg, "booking_confirmed")
 		} else if p.Status == BookingCancelled {
 			msg := fmt.Sprintf("Votre réservation pour \"%s\" le %s a été annulée. Un remboursement a été initié le cas échéant.", booking.ServiceName, dateStr)
-			_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation annulée", msg, "booking_cancelled")
+			_ = items.CreateNotification(ctx, r.db, booking.UserID, "Réservation annulée", msg, "prestation_booking_cancelled")
 		} else if p.Status == BookingCompleted {
-			// Vérifier que le client a activé cette notification
-			var enabled bool
-			err := r.db.QueryRowContext(ctx,
-				`SELECT COALESCE(app_service_completed, true) FROM user_notification_settings WHERE user_id = $1`,
-				booking.UserID,
-			).Scan(&enabled)
-			if err != nil {
-				// Ligne absente = préférence par défaut = activé
-				enabled = true
-			}
-			if enabled {
-				msg := fmt.Sprintf(
-					"Votre prestation \"%s\" du %s est terminée. Merci de votre confiance !",
-					booking.ServiceName, dateStr,
-				)
-				_ = items.CreateNotification(ctx, r.db, booking.UserID, "Prestation terminée", msg, "service_completed")
-			}
+			msg := fmt.Sprintf(
+				"Votre prestation \"%s\" du %s est terminée. Merci de votre confiance !",
+				booking.ServiceName, dateStr,
+			)
+			_ = items.CreateNotification(ctx, r.db, booking.UserID, "Prestation terminée", msg, "service_completed")
 		}
 
 		if p.PaymentStatus == PaymentPaid {
@@ -626,89 +593,96 @@ func (r *Repository) GetAdminIDs(ctx context.Context) ([]int64, error) {
 
 // NotificationSettings represents user notification preferences.
 type NotificationSettings struct {
-    UserID                int64 `json:"user_id"`
-    AppEnabled            bool  `json:"appEnabled"`
-    EmailEnabled          bool  `json:"emailEnabled"`
-    AppModeration         bool  `json:"app_moderation"`
-    EmailModeration       bool  `json:"email_moderation"`
-    AppBookingReceived    bool  `json:"app_booking_received"`
-    EmailBookingReceived  bool  `json:"email_booking_received"`
-    AppPointAssigned      bool  `json:"app_point_assigned"`
-    EmailPointAssigned    bool  `json:"email_point_assigned"`
-    AppMaterialDeposited  bool  `json:"app_material_deposited"`
-    EmailMaterialDeposited bool `json:"email_material_deposited"`
-    AppMaterialRecovered  bool  `json:"app_material_recovered"`
-    EmailMaterialRecovered bool `json:"email_material_recovered"`
-    AppRatingReceived     bool  `json:"app_rating_received"`
-    EmailRatingReceived   bool  `json:"email_rating_received"`
-    AppBookingCancelled   bool  `json:"app_booking_cancelled"`
-    EmailBookingCancelled bool  `json:"email_booking_cancelled"`
-    AppBookingExpired     bool  `json:"app_booking_expired"`
-    EmailBookingExpired   bool  `json:"email_booking_expired"`
-    AppDepositReminder    bool  `json:"app_deposit_reminder"`
-    EmailDepositReminder  bool  `json:"email_deposit_reminder"`
-    AppConseilModeration  bool  `json:"app_conseil_moderation"`
-    EmailConseilModeration bool `json:"email_conseil_moderation"`
-    AppNewConseil         bool  `json:"app_new_conseil"`
-    EmailNewConseil       bool  `json:"email_new_conseil"`
-    AppConseilEngagement  bool  `json:"app_conseil_engagement"`
-    AppProjectEngagement  bool  `json:"app_project_engagement"`
-    AppAdminNewConseil    bool  `json:"app_admin_new_conseil"`
-    EmailAdminNewConseil  bool  `json:"email_admin_new_conseil"`
-    AppServiceCompleted              bool  `json:"app_service_completed"`
-    EmailServiceCompleted            bool  `json:"email_service_completed"`
-    AppBookingConfirmed              bool  `json:"app_booking_confirmed"`
-    EmailBookingConfirmed            bool  `json:"email_booking_confirmed"`
-    AppBookingRequestReceived        bool  `json:"app_booking_request_received"`
-    EmailBookingRequestReceived      bool  `json:"email_booking_request_received"`
-    AppPrestationBookingCancelled    bool  `json:"app_prestation_booking_cancelled"`
-    EmailPrestationBookingCancelled  bool  `json:"email_prestation_booking_cancelled"`
-    AppServiceReminder               bool  `json:"app_service_reminder"`
-    EmailServiceReminder             bool  `json:"email_service_reminder"`
-    AppEventRegistration             bool  `json:"app_event_registration"`
-    EmailEventRegistration           bool  `json:"email_event_registration"`
-    AppEventCancellation             bool  `json:"app_event_cancellation"`
-    EmailEventCancellation           bool  `json:"email_event_cancellation"`
-    AppEventReminder                 bool  `json:"app_event_reminder"`
-    EmailEventReminder               bool  `json:"email_event_reminder"`
-    AppEventModeration               bool  `json:"app_event_moderation"`
-    EmailEventModeration             bool  `json:"email_event_moderation"`
-    AppForumNewReply                 bool  `json:"app_forum_new_reply"`
-    EmailForumNewReply               bool  `json:"email_forum_new_reply"`
-    AppForumMention                  bool  `json:"app_forum_mention"`
-    EmailForumMention                bool  `json:"email_forum_mention"`
-    AppForumModeration               bool  `json:"app_forum_moderation"`
-    EmailForumModeration             bool  `json:"email_forum_moderation"`
-    AppAdminForumReport              bool  `json:"app_admin_forum_report"`
-    EmailAdminForumReport            bool  `json:"email_admin_forum_report"`
-    AppFinancePaymentConfirmed       bool  `json:"app_finance_payment_confirmed"`
-    EmailFinancePaymentConfirmed     bool  `json:"email_finance_payment_confirmed"`
-    AppFinancePaymentReceived        bool  `json:"app_finance_payment_received"`
-    EmailFinancePaymentReceived      bool  `json:"email_finance_payment_received"`
-    AppFinancePaymentFailed          bool  `json:"app_finance_payment_failed"`
-    EmailFinancePaymentFailed        bool  `json:"email_finance_payment_failed"`
-    AppFinanceRefundIssued           bool  `json:"app_finance_refund_issued"`
-    EmailFinanceRefundIssued         bool  `json:"email_finance_refund_issued"`
-	AppFinanceSubscriptionActive     bool  `json:"app_finance_subscription_active"`
-	EmailFinanceSubscriptionActive   bool  `json:"email_finance_subscription_active"`
-	AppMaterialAlerts                bool  `json:"app_material_alerts"`
-    DisplayMode           string `json:"displayMode"`
-    Language              string `json:"language"`
-    MapType               string `json:"mapType"`
-    ShowPhonePublicly     bool   `json:"showPhonePublicly"`
-    ShowEmailPublicly     bool   `json:"showEmailPublicly"`
+	UserID                          int64  `json:"user_id"`
+	AppEnabled                      bool   `json:"appEnabled"`
+	EmailEnabled                    bool   `json:"emailEnabled"`
+	AppModeration                   bool   `json:"app_moderation"`
+	EmailModeration                 bool   `json:"email_moderation"`
+	AppBookingReceived              bool   `json:"app_booking_received"`
+	EmailBookingReceived            bool   `json:"email_booking_received"`
+	AppPointAssigned                bool   `json:"app_point_assigned"`
+	EmailPointAssigned              bool   `json:"email_point_assigned"`
+	AppMaterialDeposited            bool   `json:"app_material_deposited"`
+	EmailMaterialDeposited          bool   `json:"email_material_deposited"`
+	AppMaterialRecovered            bool   `json:"app_material_recovered"`
+	EmailMaterialRecovered          bool   `json:"email_material_recovered"`
+	AppRatingReceived               bool   `json:"app_rating_received"`
+	EmailRatingReceived             bool   `json:"email_rating_received"`
+	AppBookingCancelled             bool   `json:"app_booking_cancelled"`
+	EmailBookingCancelled           bool   `json:"email_booking_cancelled"`
+	AppBookingExpired               bool   `json:"app_booking_expired"`
+	EmailBookingExpired             bool   `json:"email_booking_expired"`
+	AppDepositReminder              bool   `json:"app_deposit_reminder"`
+	EmailDepositReminder            bool   `json:"email_deposit_reminder"`
+	AppConseilModeration            bool   `json:"app_conseil_moderation"`
+	EmailConseilModeration          bool   `json:"email_conseil_moderation"`
+	AppNewConseil                   bool   `json:"app_new_conseil"`
+	EmailNewConseil                 bool   `json:"email_new_conseil"`
+	AppConseilEngagement            bool   `json:"app_conseil_engagement"`
+	EmailConseilEngagement          bool   `json:"email_conseil_engagement"`
+	AppProjectEngagement            bool   `json:"app_project_engagement"`
+	EmailProjectEngagement          bool   `json:"email_project_engagement"`
+	AppAdminNewConseil              bool   `json:"app_admin_new_conseil"`
+	EmailAdminNewConseil            bool   `json:"email_admin_new_conseil"`
+	AppServiceCompleted             bool   `json:"app_service_completed"`
+	EmailServiceCompleted           bool   `json:"email_service_completed"`
+	AppBookingConfirmed             bool   `json:"app_booking_confirmed"`
+	EmailBookingConfirmed           bool   `json:"email_booking_confirmed"`
+	AppBookingRequestReceived       bool   `json:"app_booking_request_received"`
+	EmailBookingRequestReceived     bool   `json:"email_booking_request_received"`
+	AppPrestationBookingCancelled   bool   `json:"app_prestation_booking_cancelled"`
+	EmailPrestationBookingCancelled bool   `json:"email_prestation_booking_cancelled"`
+	AppServiceReminder              bool   `json:"app_service_reminder"`
+	EmailServiceReminder            bool   `json:"email_service_reminder"`
+	AppEventRegistration            bool   `json:"app_event_registration"`
+	EmailEventRegistration          bool   `json:"email_event_registration"`
+	AppEventCancellation            bool   `json:"app_event_cancellation"`
+	EmailEventCancellation          bool   `json:"email_event_cancellation"`
+	AppEventReminder                bool   `json:"app_event_reminder"`
+	EmailEventReminder              bool   `json:"email_event_reminder"`
+	AppEventModeration              bool   `json:"app_event_moderation"`
+	EmailEventModeration            bool   `json:"email_event_moderation"`
+	AppForumNewReply                bool   `json:"app_forum_new_reply"`
+	EmailForumNewReply              bool   `json:"email_forum_new_reply"`
+	AppForumMention                 bool   `json:"app_forum_mention"`
+	EmailForumMention               bool   `json:"email_forum_mention"`
+	AppForumModeration              bool   `json:"app_forum_moderation"`
+	EmailForumModeration            bool   `json:"email_forum_moderation"`
+	AppAdminForumReport             bool   `json:"app_admin_forum_report"`
+	EmailAdminForumReport           bool   `json:"email_admin_forum_report"`
+	AppFinancePaymentConfirmed      bool   `json:"app_finance_payment_confirmed"`
+	EmailFinancePaymentConfirmed    bool   `json:"email_finance_payment_confirmed"`
+	AppFinancePaymentReceived       bool   `json:"app_finance_payment_received"`
+	EmailFinancePaymentReceived     bool   `json:"email_finance_payment_received"`
+	AppFinancePaymentFailed         bool   `json:"app_finance_payment_failed"`
+	EmailFinancePaymentFailed       bool   `json:"email_finance_payment_failed"`
+	AppFinanceRefundIssued          bool   `json:"app_finance_refund_issued"`
+	EmailFinanceRefundIssued        bool   `json:"email_finance_refund_issued"`
+	AppFinanceSubscriptionActive    bool   `json:"app_finance_subscription_active"`
+	EmailFinanceSubscriptionActive  bool   `json:"email_finance_subscription_active"`
+	AppMaterialAlerts               bool   `json:"app_material_alerts"`
+	EmailMaterialAlerts             bool   `json:"email_material_alerts"`
+	AppNewMessageReceived           bool   `json:"app_new_message_received"`
+	EmailNewMessageReceived         bool   `json:"email_new_message_received"`
+	DisplayMode                     string `json:"displayMode"`
+	Language                        string `json:"language"`
+	MapType                         string `json:"mapType"`
+	ShowPhonePublicly               bool   `json:"showPhonePublicly"`
+	ShowEmailPublicly               bool   `json:"showEmailPublicly"`
 }
 
 // GetUserNotificationSettings fetches notification settings for a given user.
 func (r *Repository) GetUserNotificationSettings(userID int64) (NotificationSettings, error) {
-    var s NotificationSettings
-    row := r.db.QueryRow(`SELECT user_id, app_enabled, email_enabled, app_moderation, email_moderation,
+	var s NotificationSettings
+	row := r.db.QueryRow(`SELECT user_id, app_enabled, email_enabled, app_moderation, email_moderation,
         app_booking_received, email_booking_received, app_point_assigned, email_point_assigned,
         app_material_deposited, email_material_deposited, app_material_recovered, email_material_recovered,
         app_rating_received, email_rating_received, app_booking_cancelled, email_booking_cancelled,
         app_booking_expired, email_booking_expired, app_deposit_reminder, email_deposit_reminder,
         app_conseil_moderation, email_conseil_moderation, app_new_conseil, email_new_conseil,
-        app_conseil_engagement, app_project_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        app_conseil_engagement, COALESCE(email_conseil_engagement, true),
+        app_project_engagement, COALESCE(email_project_engagement, true),
+        app_admin_new_conseil, email_admin_new_conseil,
         COALESCE(app_service_completed, true), COALESCE(email_service_completed, true),
         COALESCE(app_booking_confirmed, true), COALESCE(email_booking_confirmed, true),
         COALESCE(app_booking_request_received, true), COALESCE(email_booking_request_received, true),
@@ -727,78 +701,96 @@ func (r *Repository) GetUserNotificationSettings(userID int64) (NotificationSett
         COALESCE(app_finance_payment_failed, true), COALESCE(email_finance_payment_failed, true),
 		COALESCE(app_finance_refund_issued, true), COALESCE(email_finance_refund_issued, true),
 		COALESCE(app_finance_subscription_active, true), COALESCE(email_finance_subscription_active, true),
-		COALESCE(app_material_alerts, true),
+		COALESCE(app_material_alerts, true), COALESCE(email_material_alerts, true),
+		COALESCE(app_new_message_received, true), COALESCE(email_new_message_received, true),
         display_mode, language, map_type, show_phone_publicly, show_email_publicly
         FROM user_notification_settings WHERE user_id = $1`, userID)
-    err := row.Scan(&s.UserID, &s.AppEnabled, &s.EmailEnabled, &s.AppModeration, &s.EmailModeration,
-        &s.AppBookingReceived, &s.EmailBookingReceived, &s.AppPointAssigned, &s.EmailPointAssigned,
-        &s.AppMaterialDeposited, &s.EmailMaterialDeposited, &s.AppMaterialRecovered, &s.EmailMaterialRecovered,
-        &s.AppRatingReceived, &s.EmailRatingReceived, &s.AppBookingCancelled, &s.EmailBookingCancelled,
-        &s.AppBookingExpired, &s.EmailBookingExpired, &s.AppDepositReminder, &s.EmailDepositReminder,
-        &s.AppConseilModeration, &s.EmailConseilModeration, &s.AppNewConseil, &s.EmailNewConseil,
-        &s.AppConseilEngagement, &s.AppProjectEngagement, &s.AppAdminNewConseil, &s.EmailAdminNewConseil,
-        &s.AppServiceCompleted, &s.EmailServiceCompleted,
-        &s.AppBookingConfirmed, &s.EmailBookingConfirmed,
-        &s.AppBookingRequestReceived, &s.EmailBookingRequestReceived,
-        &s.AppPrestationBookingCancelled, &s.EmailPrestationBookingCancelled,
-        &s.AppServiceReminder, &s.EmailServiceReminder,
-        &s.AppEventRegistration, &s.EmailEventRegistration,
-        &s.AppEventCancellation, &s.EmailEventCancellation,
-        &s.AppEventReminder, &s.EmailEventReminder,
-        &s.AppEventModeration, &s.EmailEventModeration,
-        &s.AppForumNewReply, &s.EmailForumNewReply,
-        &s.AppForumMention, &s.EmailForumMention,
-        &s.AppForumModeration, &s.EmailForumModeration,
-        &s.AppAdminForumReport, &s.EmailAdminForumReport,
-        &s.AppFinancePaymentConfirmed, &s.EmailFinancePaymentConfirmed,
-        &s.AppFinancePaymentReceived, &s.EmailFinancePaymentReceived,
-        &s.AppFinancePaymentFailed, &s.EmailFinancePaymentFailed,
+	err := row.Scan(&s.UserID, &s.AppEnabled, &s.EmailEnabled, &s.AppModeration, &s.EmailModeration,
+		&s.AppBookingReceived, &s.EmailBookingReceived, &s.AppPointAssigned, &s.EmailPointAssigned,
+		&s.AppMaterialDeposited, &s.EmailMaterialDeposited, &s.AppMaterialRecovered, &s.EmailMaterialRecovered,
+		&s.AppRatingReceived, &s.EmailRatingReceived, &s.AppBookingCancelled, &s.EmailBookingCancelled,
+		&s.AppBookingExpired, &s.EmailBookingExpired, &s.AppDepositReminder, &s.EmailDepositReminder,
+		&s.AppConseilModeration, &s.EmailConseilModeration, &s.AppNewConseil, &s.EmailNewConseil,
+		&s.AppConseilEngagement, &s.EmailConseilEngagement,
+		&s.AppProjectEngagement, &s.EmailProjectEngagement,
+		&s.AppAdminNewConseil, &s.EmailAdminNewConseil,
+		&s.AppServiceCompleted, &s.EmailServiceCompleted,
+		&s.AppBookingConfirmed, &s.EmailBookingConfirmed,
+		&s.AppBookingRequestReceived, &s.EmailBookingRequestReceived,
+		&s.AppPrestationBookingCancelled, &s.EmailPrestationBookingCancelled,
+		&s.AppServiceReminder, &s.EmailServiceReminder,
+		&s.AppEventRegistration, &s.EmailEventRegistration,
+		&s.AppEventCancellation, &s.EmailEventCancellation,
+		&s.AppEventReminder, &s.EmailEventReminder,
+		&s.AppEventModeration, &s.EmailEventModeration,
+		&s.AppForumNewReply, &s.EmailForumNewReply,
+		&s.AppForumMention, &s.EmailForumMention,
+		&s.AppForumModeration, &s.EmailForumModeration,
+		&s.AppAdminForumReport, &s.EmailAdminForumReport,
+		&s.AppFinancePaymentConfirmed, &s.EmailFinancePaymentConfirmed,
+		&s.AppFinancePaymentReceived, &s.EmailFinancePaymentReceived,
+		&s.AppFinancePaymentFailed, &s.EmailFinancePaymentFailed,
 		&s.AppFinanceRefundIssued, &s.EmailFinanceRefundIssued,
 		&s.AppFinanceSubscriptionActive, &s.EmailFinanceSubscriptionActive,
-		&s.AppMaterialAlerts,
-        &s.DisplayMode, &s.Language, &s.MapType, &s.ShowPhonePublicly, &s.ShowEmailPublicly)
-    if err != nil {
-        if err == sql.ErrNoRows {
-            return NotificationSettings{
-                UserID: userID, AppEnabled: true, EmailEnabled: true, DisplayMode: "light", Language: "fr", MapType: "plan",
-                AppConseilModeration: true, EmailConseilModeration: true, AppNewConseil: true, EmailNewConseil: true,
-                AppConseilEngagement: true, AppProjectEngagement: true, AppAdminNewConseil: true, EmailAdminNewConseil: true,
-                AppServiceCompleted: true, EmailServiceCompleted: true,
-                AppBookingConfirmed: true, EmailBookingConfirmed: true,
-                AppBookingRequestReceived: true, EmailBookingRequestReceived: true,
-                AppPrestationBookingCancelled: true, EmailPrestationBookingCancelled: true,
-                AppServiceReminder: true, EmailServiceReminder: true,
-                AppEventRegistration: true, EmailEventRegistration: true,
-                AppEventCancellation: true, EmailEventCancellation: true,
-                AppEventReminder: true, EmailEventReminder: true,
-                AppEventModeration: true, EmailEventModeration: true,
-                AppForumNewReply: true, EmailForumNewReply: true,
-                AppForumMention: true, EmailForumMention: true,
-                AppForumModeration: true, EmailForumModeration: true,
-                AppAdminForumReport: true, EmailAdminForumReport: true,
-                AppFinancePaymentConfirmed: true, EmailFinancePaymentConfirmed: true,
-                AppFinancePaymentReceived: true, EmailFinancePaymentReceived: true,
-                AppFinancePaymentFailed: true, EmailFinancePaymentFailed: true,
-                AppFinanceRefundIssued: true, EmailFinanceRefundIssued: true,
+		&s.AppMaterialAlerts, &s.EmailMaterialAlerts,
+		&s.AppNewMessageReceived, &s.EmailNewMessageReceived,
+		&s.DisplayMode, &s.Language, &s.MapType, &s.ShowPhonePublicly, &s.ShowEmailPublicly)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return NotificationSettings{
+				UserID: userID, AppEnabled: true, EmailEnabled: true, DisplayMode: "light", Language: "fr", MapType: "plan",
+				AppModeration: true, EmailModeration: true,
+				AppBookingReceived: true, EmailBookingReceived: true,
+				AppPointAssigned: true, EmailPointAssigned: true,
+				AppMaterialDeposited: true, EmailMaterialDeposited: true,
+				AppMaterialRecovered: true, EmailMaterialRecovered: true,
+				AppRatingReceived: true, EmailRatingReceived: true,
+				AppBookingCancelled: true, EmailBookingCancelled: true,
+				AppBookingExpired: true, EmailBookingExpired: true,
+				AppDepositReminder: true, EmailDepositReminder: true,
+				AppConseilModeration: true, EmailConseilModeration: true, AppNewConseil: true, EmailNewConseil: true,
+				AppConseilEngagement: true, EmailConseilEngagement: true,
+				AppProjectEngagement: true, EmailProjectEngagement: true,
+				AppAdminNewConseil: true, EmailAdminNewConseil: true,
+				AppServiceCompleted: true, EmailServiceCompleted: true,
+				AppBookingConfirmed: true, EmailBookingConfirmed: true,
+				AppBookingRequestReceived: true, EmailBookingRequestReceived: true,
+				AppPrestationBookingCancelled: true, EmailPrestationBookingCancelled: true,
+				AppServiceReminder: true, EmailServiceReminder: true,
+				AppEventRegistration: true, EmailEventRegistration: true,
+				AppEventCancellation: true, EmailEventCancellation: true,
+				AppEventReminder: true, EmailEventReminder: true,
+				AppEventModeration: true, EmailEventModeration: true,
+				AppForumNewReply: true, EmailForumNewReply: true,
+				AppForumMention: true, EmailForumMention: true,
+				AppForumModeration: true, EmailForumModeration: true,
+				AppAdminForumReport: true, EmailAdminForumReport: true,
+				AppFinancePaymentConfirmed: true, EmailFinancePaymentConfirmed: true,
+				AppFinancePaymentReceived: true, EmailFinancePaymentReceived: true,
+				AppFinancePaymentFailed: true, EmailFinancePaymentFailed: true,
+				AppFinanceRefundIssued: true, EmailFinanceRefundIssued: true,
 				AppFinanceSubscriptionActive: true, EmailFinanceSubscriptionActive: true,
-				AppMaterialAlerts: true,
-            }, nil
-        }
-        return NotificationSettings{}, err
-    }
-    return s, nil
+				AppMaterialAlerts: true, EmailMaterialAlerts: true,
+				AppNewMessageReceived: true, EmailNewMessageReceived: true,
+			}, nil
+		}
+		return NotificationSettings{}, err
+	}
+	return s, nil
 }
 
 // UpsertUserNotificationSettings inserts or updates a user's notification settings.
 func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) error {
-    _, err := r.db.Exec(`INSERT INTO user_notification_settings (
+	_, err := r.db.Exec(`INSERT INTO user_notification_settings (
         user_id, app_enabled, email_enabled, app_moderation, email_moderation,
         app_booking_received, email_booking_received, app_point_assigned, email_point_assigned,
         app_material_deposited, email_material_deposited, app_material_recovered, email_material_recovered,
         app_rating_received, email_rating_received, app_booking_cancelled, email_booking_cancelled,
         app_booking_expired, email_booking_expired, app_deposit_reminder, email_deposit_reminder,
         app_conseil_moderation, email_conseil_moderation, app_new_conseil, email_new_conseil,
-        app_conseil_engagement, app_project_engagement, app_admin_new_conseil, email_admin_new_conseil,
+        app_conseil_engagement, email_conseil_engagement,
+        app_project_engagement, email_project_engagement,
+        app_admin_new_conseil, email_admin_new_conseil,
         app_service_completed, email_service_completed,
         app_booking_confirmed, email_booking_confirmed,
         app_booking_request_received, email_booking_request_received,
@@ -817,13 +809,14 @@ func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) erro
         app_finance_payment_failed, email_finance_payment_failed,
         app_finance_refund_issued, email_finance_refund_issued,
         app_finance_subscription_active, email_finance_subscription_active,
-		app_material_alerts,
+		app_material_alerts, email_material_alerts,
+        app_new_message_received, email_new_message_received,
         display_mode, language, map_type, show_phone_publicly, show_email_publicly
     ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
         $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
         $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
-		$61,$62,$63,$64,$65,$66,$67,$68,$69,$70,$71
+		$61,$62,$63,$64,$65,$66,$67,$68,$69,$70,$71,$72,$73,$74,$75,$76
     ) ON CONFLICT (user_id) DO UPDATE SET
         app_enabled = EXCLUDED.app_enabled,
         email_enabled = EXCLUDED.email_enabled,
@@ -850,7 +843,9 @@ func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) erro
         app_new_conseil = EXCLUDED.app_new_conseil,
         email_new_conseil = EXCLUDED.email_new_conseil,
         app_conseil_engagement = EXCLUDED.app_conseil_engagement,
+        email_conseil_engagement = EXCLUDED.email_conseil_engagement,
         app_project_engagement = EXCLUDED.app_project_engagement,
+        email_project_engagement = EXCLUDED.email_project_engagement,
         app_admin_new_conseil = EXCLUDED.app_admin_new_conseil,
         email_admin_new_conseil = EXCLUDED.email_admin_new_conseil,
         app_service_completed = EXCLUDED.app_service_completed,
@@ -890,38 +885,44 @@ func (r *Repository) UpsertUserNotificationSettings(s NotificationSettings) erro
         app_finance_subscription_active = EXCLUDED.app_finance_subscription_active,
         email_finance_subscription_active = EXCLUDED.email_finance_subscription_active,
 		app_material_alerts = EXCLUDED.app_material_alerts,
+        email_material_alerts = EXCLUDED.email_material_alerts,
+        app_new_message_received = EXCLUDED.app_new_message_received,
+        email_new_message_received = EXCLUDED.email_new_message_received,
         display_mode = EXCLUDED.display_mode,
         language = EXCLUDED.language,
         map_type = EXCLUDED.map_type,
         show_phone_publicly = EXCLUDED.show_phone_publicly,
         show_email_publicly = EXCLUDED.show_email_publicly
     `,
-        s.UserID, s.AppEnabled, s.EmailEnabled, s.AppModeration, s.EmailModeration,
-        s.AppBookingReceived, s.EmailBookingReceived, s.AppPointAssigned, s.EmailPointAssigned,
-        s.AppMaterialDeposited, s.EmailMaterialDeposited, s.AppMaterialRecovered, s.EmailMaterialRecovered,
-        s.AppRatingReceived, s.EmailRatingReceived, s.AppBookingCancelled, s.EmailBookingCancelled,
-        s.AppBookingExpired, s.EmailBookingExpired, s.AppDepositReminder, s.EmailDepositReminder,
-        s.AppConseilModeration, s.EmailConseilModeration, s.AppNewConseil, s.EmailNewConseil,
-        s.AppConseilEngagement, s.AppProjectEngagement, s.AppAdminNewConseil, s.EmailAdminNewConseil,
-        s.AppServiceCompleted, s.EmailServiceCompleted,
-        s.AppBookingConfirmed, s.EmailBookingConfirmed,
-        s.AppBookingRequestReceived, s.EmailBookingRequestReceived,
-        s.AppPrestationBookingCancelled, s.EmailPrestationBookingCancelled,
-        s.AppServiceReminder, s.EmailServiceReminder,
-        s.AppEventRegistration, s.EmailEventRegistration,
-        s.AppEventCancellation, s.EmailEventCancellation,
-        s.AppEventReminder, s.EmailEventReminder,
-        s.AppEventModeration, s.EmailEventModeration,
-        s.AppForumNewReply, s.EmailForumNewReply,
-        s.AppForumMention, s.EmailForumMention,
-        s.AppForumModeration, s.EmailForumModeration,
-        s.AppAdminForumReport, s.EmailAdminForumReport,
-        s.AppFinancePaymentConfirmed, s.EmailFinancePaymentConfirmed,
-        s.AppFinancePaymentReceived, s.EmailFinancePaymentReceived,
-        s.AppFinancePaymentFailed, s.EmailFinancePaymentFailed,
-        s.AppFinanceRefundIssued, s.EmailFinanceRefundIssued,
-        s.AppFinanceSubscriptionActive, s.EmailFinanceSubscriptionActive,
-		s.AppMaterialAlerts,
-        s.DisplayMode, s.Language, s.MapType, s.ShowPhonePublicly, s.ShowEmailPublicly)
-    return err
+		s.UserID, s.AppEnabled, s.EmailEnabled, s.AppModeration, s.EmailModeration,
+		s.AppBookingReceived, s.EmailBookingReceived, s.AppPointAssigned, s.EmailPointAssigned,
+		s.AppMaterialDeposited, s.EmailMaterialDeposited, s.AppMaterialRecovered, s.EmailMaterialRecovered,
+		s.AppRatingReceived, s.EmailRatingReceived, s.AppBookingCancelled, s.EmailBookingCancelled,
+		s.AppBookingExpired, s.EmailBookingExpired, s.AppDepositReminder, s.EmailDepositReminder,
+		s.AppConseilModeration, s.EmailConseilModeration, s.AppNewConseil, s.EmailNewConseil,
+		s.AppConseilEngagement, s.EmailConseilEngagement,
+		s.AppProjectEngagement, s.EmailProjectEngagement,
+		s.AppAdminNewConseil, s.EmailAdminNewConseil,
+		s.AppServiceCompleted, s.EmailServiceCompleted,
+		s.AppBookingConfirmed, s.EmailBookingConfirmed,
+		s.AppBookingRequestReceived, s.EmailBookingRequestReceived,
+		s.AppPrestationBookingCancelled, s.EmailPrestationBookingCancelled,
+		s.AppServiceReminder, s.EmailServiceReminder,
+		s.AppEventRegistration, s.EmailEventRegistration,
+		s.AppEventCancellation, s.EmailEventCancellation,
+		s.AppEventReminder, s.EmailEventReminder,
+		s.AppEventModeration, s.EmailEventModeration,
+		s.AppForumNewReply, s.EmailForumNewReply,
+		s.AppForumMention, s.EmailForumMention,
+		s.AppForumModeration, s.EmailForumModeration,
+		s.AppAdminForumReport, s.EmailAdminForumReport,
+		s.AppFinancePaymentConfirmed, s.EmailFinancePaymentConfirmed,
+		s.AppFinancePaymentReceived, s.EmailFinancePaymentReceived,
+		s.AppFinancePaymentFailed, s.EmailFinancePaymentFailed,
+		s.AppFinanceRefundIssued, s.EmailFinanceRefundIssued,
+		s.AppFinanceSubscriptionActive, s.EmailFinanceSubscriptionActive,
+		s.AppMaterialAlerts, s.EmailMaterialAlerts,
+		s.AppNewMessageReceived, s.EmailNewMessageReceived,
+		s.DisplayMode, s.Language, s.MapType, s.ShowPhonePublicly, s.ShowEmailPublicly)
+	return err
 }

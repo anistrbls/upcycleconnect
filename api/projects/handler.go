@@ -46,11 +46,8 @@ func (h *Handler) notifyAdminsModerationRequired(title, message string) {
 	rows, err := h.repo.db.Query(`
 		SELECT u.id
 		FROM users u
-		LEFT JOIN user_notification_settings s ON s.user_id = u.id
 		WHERE u.role = 'admin'
 		  AND COALESCE(u.status, 'active') = 'active'
-		  AND COALESCE(s.app_enabled, true) = true
-		  AND COALESCE(s.app_moderation, true) = true
 	`)
 	if err != nil {
 		return
@@ -982,17 +979,6 @@ func (h *Handler) notifyProjectEngagement(projectID, engagerID int64, engType st
 			return
 		}
 
-		// Check notification settings
-		var enabled bool
-		errSet := h.repo.db.QueryRow(`SELECT app_project_engagement FROM user_notification_settings WHERE user_id = $1`, authorID).Scan(&enabled)
-		if errSet == nil && !enabled {
-			fmt.Printf("notifyProjectEngagement: setting disabled for user %d\n", authorID)
-			return
-		}
-		if errSet != nil {
-			fmt.Printf("notifyProjectEngagement: setting not found, assuming enabled (%v)\n", errSet)
-		}
-		
 		var fname, lname string
 		errUser := h.repo.db.QueryRow(`SELECT firstname, lastname FROM users WHERE id = $1`, engagerID).Scan(&fname, &lname)
 		if errUser != nil {
@@ -1001,7 +987,7 @@ func (h *Handler) notifyProjectEngagement(projectID, engagerID int64, engType st
 		}
 
 		engagerName := strings.TrimSpace(fname + " " + lname)
-		
+
 		var action string
 		if engType == "like" {
 			action = "aimé"
@@ -1009,7 +995,7 @@ func (h *Handler) notifyProjectEngagement(projectID, engagerID int64, engType st
 			action = "ajouté aux favoris"
 		}
 		msg := fmt.Sprintf("%s a %s votre projet %q.", engagerName, action, title)
-		
+
 		errNotif := items.CreateNotification(context.Background(), h.repo.db, authorID, "Interaction sur votre projet", msg, "project_engagement")
 		if errNotif != nil {
 			fmt.Printf("notifyProjectEngagement error creating notif: %v\n", errNotif)
