@@ -3076,7 +3076,7 @@ input::-ms-clear {
     overflow-y: visible !important;
   }
 
-  /* Make sidebar horizontal and place it at the bottom */
+  /* Make sidebar horizontal, fixed at bottom, and touch scrollable */
   .sidebar {
     width: 100% !important;
     height: 60px !important;
@@ -3084,19 +3084,33 @@ input::-ms-clear {
     bottom: 0 !important;
     left: 0 !important;
     background-color: var(--black) !important;
+    display: flex !important;
     flex-direction: row !important;
-    justify-content: space-around !important;
+    justify-content: flex-start !important; /* Align start to allow scroll */
     padding: 0.5rem 1rem !important;
     z-index: 9999 !important;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15) !important;
     border-radius: 20px 20px 0 0 !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important; /* Firefox hide */
+    -webkit-overflow-scrolling: touch !important; /* Inertial scroll */
+  }
+
+  .sidebar::-webkit-scrollbar {
+    display: none !important; /* Chrome/Safari hide */
   }
 
   .sidebar-nav {
+    display: flex !important;
     flex-direction: row !important;
-    width: 100% !important;
-    justify-content: space-around !important;
-    gap: 0.5rem !important;
+    flex-wrap: nowrap !important; /* No wrap */
+    gap: 1.25rem !important; /* Good spacing between icons */
+    padding: 0 0.5rem !important;
+    align-items: center !important;
+  }
+
+  .sidebar-item {
+    flex: 0 0 auto !important; /* Do not shrink icons */
   }
 
   .sidebar-icon {
