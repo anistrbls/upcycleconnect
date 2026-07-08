@@ -172,6 +172,21 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 
 		h.UpdatePasswordHandler(w, r, userID)
 	})))
+
+	mux.Handle("/api/pro/export-data", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := r.Context().Value("authClaims").(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := int64(claims["userId"].(float64))
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.ExportCSVHandler(w, r, userID)
+	})))
 }
 
 // hasSuffix vérifie si le path se termine par le suffixe donné

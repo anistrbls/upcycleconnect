@@ -40,6 +40,7 @@ type Project struct {
 	BookmarkCount     int       `json:"bookmarkCount"`
 	IsLiked           bool      `json:"isLiked"`
 	IsBookmarked      bool      `json:"isBookmarked"`
+	IsFeatured        bool      `json:"isFeatured"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 	Featured          bool       `json:"featured"`

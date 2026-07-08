@@ -114,6 +114,12 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 			return
 		}
 
+		// POST /api/pro/projects/{id}/featured
+		if strings.HasSuffix(path, "/featured") && r.Method == http.MethodPost {
+			h.ToggleFeaturedHandler(w, r)
+			return
+		}
+
 		// POST /api/pro/projects/{id}/archive
 		if strings.HasSuffix(path, "/archive") && r.Method == http.MethodPost {
 			h.ArchiveHandler(w, r)
@@ -209,6 +215,9 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, authMiddleware func(http.Han
 
 	// GET /api/mes-projets — projets auxquels l'utilisateur a participé
 	mux.Handle("GET /api/mes-projets", particulierOrPro(h.ParticulierListParticipatedHandler))
+
+	// GET /api/projets/impact-details — détails de l'impact écologique d'un pro
+	mux.Handle("GET /api/projets/impact-details", particulierOrPro(h.EcologicalImpactDetailsHandler))
 
 	// Routes avec ID de projet pour Particulier / Pro (détail, like, bookmark)
 	mux.Handle("/api/part/projects/", particulierOrPro(func(w http.ResponseWriter, r *http.Request) {

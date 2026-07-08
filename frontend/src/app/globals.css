@@ -386,17 +386,7 @@ body {
   }
 }
 
-@media (max-width: 760px) {
-  .topbar-left .slash,
-  .topbar-left span:last-child {
-    display: none;
-  }
 
-  .topbar-right {
-    gap: 0.5rem;
-  }
-
-}
 
 
 
@@ -919,13 +909,18 @@ body {
 .kpi-up     { color: #2F7D93; }
 .kpi-down   { color: var(--state-low); }
 .kpi-neutral{ color: var(--text-muted); }
-
-
 .stats-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
   margin-bottom: 0;
+}
+
+.activity-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
 }
 
 .stats-panel { padding: 1.5rem; }
@@ -3070,3 +3065,310 @@ input::-ms-clear {
 @keyframes tutorialSpin {
   to { transform: rotate(360deg); }
 }
+
+/* ==========================================
+   MOBILE & RESPONSIVE ADAPTATIONS
+   ========================================== */
+@media (max-width: 1100px) {
+  /* Layout changes */
+  body {
+    overflow-y: auto !important;
+    height: auto !important;
+  }
+
+  .app-wrapper {
+    padding: 0 0.5rem 0 0.5rem !important;
+    overflow-y: visible !important;
+  }
+
+  /* Make sidebar horizontal, fixed at bottom, and touch scrollable */
+  .sidebar {
+    width: 100% !important;
+    height: 60px !important;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    background-color: var(--black) !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: flex-start !important; /* Align start to allow scroll */
+    padding: 0.5rem 1rem !important;
+    z-index: 9999 !important;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15) !important;
+    border-radius: 20px 20px 0 0 !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important; /* Firefox hide */
+    -webkit-overflow-scrolling: touch !important; /* Inertial scroll */
+  }
+
+  .sidebar::-webkit-scrollbar {
+    display: none !important; /* Chrome/Safari hide */
+  }
+
+  .sidebar-nav {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important; /* No wrap */
+    gap: 1.25rem !important; /* Good spacing between icons */
+    padding: 0 0.5rem !important;
+    align-items: center !important;
+  }
+
+  .sidebar-item {
+    flex: 0 0 auto !important; /* Do not shrink icons */
+  }
+
+  .sidebar-icon {
+    width: 42px !important;
+    height: 42px !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .sidebar-icon.active {
+    background-color: #ffffff !important;
+    color: var(--black) !important;
+  }
+
+  .sidebar-item[data-tooltip]::after {
+    display: none !important; /* Hide tooltips on mobile */
+  }
+
+  /* Main content offset for fixed bottom bar */
+  .main-content {
+    padding: 1rem 0.5rem 80px 0.5rem !important;
+    overflow-y: visible !important;
+    height: auto !important;
+  }
+
+  /* Compact & structured topbar for mobile */
+  .topbar {
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    padding: 0.75rem 0.5rem !important;
+    gap: 0.65rem !important;
+    border-bottom: 1px solid var(--border) !important;
+  }
+
+  .topbar-left {
+    display: flex !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    align-items: center !important;
+  }
+  
+  .topbar-left .brand-dot {
+    display: none !important;
+  }
+
+  .topbar-center {
+    width: 100% !important;
+    overflow-x: auto !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    padding: 0.35rem !important;
+    border-radius: 12px !important;
+    background-color: var(--black) !important;
+    scrollbar-width: none !important;
+    gap: 0.2rem !important;
+  }
+
+  .topbar-center::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .topbar-center .action-btn {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.75rem !important;
+    border-radius: 8px !important;
+  }
+
+  .topbar-right {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    border-top: 1px dashed var(--border) !important;
+    padding-top: 0.5rem !important;
+    margin-top: 0.1rem !important;
+  }
+
+  .topbar-right > div {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-right: 0 !important;
+  }
+
+  .topbar-right .language-switcher {
+    margin-right: auto !important;
+  }
+
+  /* Typography */
+  .title-area h1 {
+    font-size: 1.6rem !important;
+    margin: 0.5rem 0 1rem 0 !important;
+  }
+
+  /* Grids and Panels responsive default */
+  .panel {
+    padding: 1rem !important;
+    border-radius: 16px !important;
+  }
+
+  /* Make arbitrary grids 1 column */
+  div[style*="grid-template-columns"],
+  div[style*="gridTemplateColumns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Header actions/meta items wrap */
+  .header-meta {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 1rem !important;
+    margin-left: 0 !important;
+  }
+
+  .header-section {
+    flex-direction: column !important;
+    gap: 1rem !important;
+  }
+
+  /* Tabs responsive */
+  .tabs {
+    gap: 1rem !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+    white-space: nowrap !important;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .tab {
+    font-size: 0.95rem !important;
+  }
+
+  /* Action buttons */
+  .action-btn {
+    padding: 0.5rem 0.8rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* Tables responsiveness (Make them scrollable) */
+  table {
+    display: block !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+  }
+
+  /* Forms and inputs */
+  input, select, textarea, button {
+    font-size: 16px !important; /* Prevents iOS auto-zoom */
+  }
+
+  /* Flex wrap defaults */
+  div[style*="display: flex"],
+  div[style*="display:flex"] {
+    flex-wrap: wrap;
+  }
+
+  /* Avoid wraps on specific elements like switcher or profile badge */
+  .topbar-right > div,
+  .language-switcher {
+    flex-wrap: nowrap !important;
+  }
+
+  /* Notification curtain panel width */
+  div[style*="width: 25vw"] {
+    width: 85vw !important;
+    right: -85vw !important;
+  }
+  div[style*="right: 0"] {
+    right: 0 !important;
+  }
+
+  /* Specific Dashboard View mobile overrides */
+  .stats-row {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem !important;
+  }
+
+  .kpi-grid {
+    overflow-x: auto !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none !important;
+    padding-bottom: 0.5rem !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .kpi-grid::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .kpi-card {
+    flex: 0 0 250px !important;
+    width: auto !important;
+  }
+
+  .finance-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+  }
+
+  /* Make links or cards in kpi-grid display block/flex vertical */
+  .kpi-grid > a {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 0 0 250px !important;
+    width: auto !important;
+  }
+
+  /* Realtime & operations dashboard overrides */
+  .realtime-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1.5rem !important;
+  }
+
+  .realtime-right {
+    width: 100% !important;
+  }
+
+  .ops-grid {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important;
+    gap: 0.5rem !important;
+  }
+
+  /* Alerts grid overrides */
+  .alerts-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem !important;
+  }
+
+  .alert-panel {
+    width: 100% !important;
+  }
+
+  .activity-grid {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+  }
+}
+
+

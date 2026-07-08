@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Leaf, Box, BarChart3, Heart, Bookmark } from "lucide-react";
+import { Search, Leaf, Box, BarChart3, Heart, Bookmark, Award } from "lucide-react";
 import { apiUrl, buildAuthHeaders, getRoleFromToken } from "../../../lib/api";
 
 const styles = {
@@ -352,6 +352,215 @@ function ProjetsPostesContent() {
 
     const totalScore = filtered.reduce((acc, p) => acc + Number(p.upcyclingScore || 0), 0);
 
+    const handleToggleLike = async (e, p) => {
+        e.stopPropagation();
+        try {
+            const resp = await fetch(apiUrl(`/part/projects/${p.id}/like`), {
+                method: "POST",
+                headers: buildAuthHeaders(),
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                setProjects(prev => prev.map(proj => proj.id === p.id ? { ...proj, isLiked: data.isLiked, likeCount: data.likeCount } : proj));
+            }
+        } catch (err) { console.error(err); }
+    };
+
+    const handleToggleBookmark = async (e, p) => {
+        e.stopPropagation();
+        try {
+            const resp = await fetch(apiUrl(`/part/projects/${p.id}/bookmark`), {
+                method: "POST",
+                headers: buildAuthHeaders(),
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                setProjects(prev => prev.map(proj => proj.id === p.id ? { ...proj, isBookmarked: data.isBookmarked, bookmarkCount: data.bookmarkCount } : proj));
+            }
+        } catch (err) { console.error(err); }
+    };
+
+    const featuredProjects = useMemo(() => {
+        return filtered.filter((p) => p.isFeatured);
+    }, [filtered]);
+
+    const otherProjects = useMemo(() => {
+        return filtered.filter((p) => !p.isFeatured);
+    }, [filtered]);
+
+    const renderProjectCard = (project) => {
+        const beforeSrc = project.beforeImage || "";
+        const afterSrc = project.afterImage || "";
+        const hasAnyImage = Boolean(beforeSrc || afterSrc);
+        const joinedLabel = project.proJoinedAt
+            ? new Date(project.proJoinedAt).toLocaleDateString("fr-FR")
+            : "N/A";
+        const proName = (project.proDisplayName || "N/A").trim();
+        const proInitials = proName === "N/A"
+            ? "NA"
+            : proName
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((part) => part[0]?.toUpperCase() || "")
+                .join("");
+        const proAvatarUrl = project.proAvatarUrl || "";
+
+        return (
+            <article
+                key={project.id}
+                style={styles.card}
+                onClick={() => router.push(`/projets/voir/${project.id}?from=postes`)}
+            >
+                {/* Social Buttons */}
+                <div style={{ position: "absolute", top: "1.2rem", right: "1.2rem", zIndex: 10, display: "flex", gap: "0.6rem" }}>
+                    {project.isFeatured && (
+                        <div style={{
+                            background: "#ca8a04",
+                            borderRadius: "50px",
+                            padding: "0.5rem 0.8rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.35rem",
+                            color: "white",
+                            fontSize: "0.75rem",
+                            fontWeight: "700",
+                            boxShadow: "0 4px 10px rgba(0,0,0,0.15)",
+                            border: "none",
+                        }}>
+                            <Award size={14} fill="white" />
+                            Mis en avant
+                        </div>
+                    )}
+                    <button
+                        onClick={(e) => handleToggleLike(e, project)}
+                        style={{
+                            background: "rgba(0,0,0,0.45)",
+                            backdropFilter: "blur(8px)",
+                            border: "1px solid rgba(255,255,255,0.15)",
+                            borderRadius: "50px",
+                            padding: "0.5rem 0.8rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.4rem",
+                            color: project.isLiked ? "#ff4d4d" : "white",
+                            cursor: "pointer",
+                            transition: "all 0.2s ease"
+                        }}
+                    >
+                        <Heart size={16} fill={project.isLiked ? "#ff4d4d" : "transparent"} />
+                        <span style={{ fontSize: "0.8rem", fontWeight: "700" }}>{project.likeCount || 0}</span>
+                    </button>
+                    <button
+                        onClick={(e) => handleToggleBookmark(e, project)}
+                        style={{
+                            background: "rgba(0,0,0,0.45)",
+                            backdropFilter: "blur(8px)",
+                            border: "1px solid rgba(255,255,255,0.15)",
+                            borderRadius: "50px",
+                            padding: "0.5rem 0.8rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.4rem",
+                            color: project.isBookmarked ? "#4ade80" : "white",
+                            cursor: "pointer",
+                            transition: "all 0.2s ease"
+                        }}
+                    >
+                        <Bookmark size={16} fill={project.isBookmarked ? "#4ade80" : "transparent"} />
+                        <span style={{ fontSize: "0.8rem", fontWeight: "700" }}>{project.bookmarkCount || 0}</span>
+                    </button>
+                </div>
+                {hasAnyImage ? (
+                    <>
+                        <div style={styles.mediaSplit}>
+                            <div style={styles.mediaPane}>
+                                {beforeSrc ? (
+                                    <img src={beforeSrc} alt={`Avant - ${project.title || "Projet"}`} style={styles.paneImage} data-i18n-user-content="true" />
+                                ) : (
+                                    <div style={styles.paneFallback}>Avant</div>
+                                )}
+                                <div style={styles.paneLabel}>Avant</div>
+                            </div>
+                            <div style={styles.mediaPane}>
+                                {afterSrc ? (
+                                    <img src={afterSrc} alt={`Après - ${project.title || "Projet"}`} style={styles.paneImage} data-i18n-user-content="true" />
+                                ) : (
+                                    <div style={styles.paneFallback}>Apres</div>
+                                )}
+                                <div style={styles.paneLabel}>Apres</div>
+                            </div>
+                        </div>
+                        <div style={styles.mediaDivider} />
+                    </>
+                ) : (
+                    <div style={styles.cardFallback}>UpcycleConnect</div>
+                )}
+                <div style={styles.gradientSideLeft} />
+                <div style={styles.gradientSideRight} />
+                <div style={styles.gradientLayer} />
+
+                <div style={styles.cardOverlay}>
+                    <div style={styles.contentGrid} className="card-content-grid">
+                        <div style={styles.descriptionWrap}>
+                            <h3 style={styles.cardTitle}>
+                                {project.title ? <span data-i18n-user-content="true">{project.title}</span> : <>Projet #{project.id}</>}
+                            </h3>
+                            <p style={styles.meta}>
+                                {project.category ? <span data-i18n-user-content="true">{project.category}</span> : "Catégorie non définie"} · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
+                            </p>
+                            <p style={styles.description}>
+                                {project.description ? <span data-i18n-user-content="true">{project.description}</span> : "Description non renseignée."}
+                            </p>
+                            <div style={styles.tagsRow}>
+                                {project.category ? <span style={styles.tag} data-i18n-user-content="true">{project.category}</span> : null}
+                                <span style={styles.tag}>{project.itemCount || 0} objet(s)</span>
+                                <span style={styles.tag}>{Number(project.upcyclingScore || 0).toFixed(1)} points UC</span>
+                                <span style={styles.tag}>{Number(project.totalWeightKg || 0).toFixed(1)} kg revalorisés</span>
+                            </div>
+                        </div>
+
+                        <aside style={styles.proPanel}>
+                            <div style={styles.proHeader}>
+                                <div style={styles.proAvatar}>
+                                    {proAvatarUrl ? (
+                                        <img src={proAvatarUrl} alt={proName} style={{ width: "100%", height: "100%", objectFit: "cover" }} data-i18n-user-content="true" />
+                                    ) : (
+                                        <span>{proInitials}</span>
+                                    )}
+                                </div>
+                                <div>
+                                    <p style={styles.proHeading}>Professionnel</p>
+                                    <p style={styles.proName} data-i18n-user-content="true">{proName}</p>
+                                </div>
+                            </div>
+                            <div style={styles.proStatsRow}>
+                                <div style={styles.proStat}>
+                                    <span style={styles.proStatLabel}>Inscription</span>
+                                    <span style={styles.proStatValue}>{joinedLabel}</span>
+                                </div>
+                                <div style={styles.proStat}>
+                                    <span style={styles.proStatLabel}>Projets</span>
+                                    <span style={styles.proStatValue}>{Number(project.proProjectsSinceSignup || 0)}</span>
+                                </div>
+                            </div>
+                            <div style={styles.proStatsRow}>
+                                <div style={styles.proStat}>
+                                    <span style={styles.proStatLabel}>Score Total</span>
+                                    <span style={styles.proStatValue}>{Number(project.proTotalUCScore || 0).toFixed(1)}</span>
+                                </div>
+                                <div style={{ ...styles.proStat, borderLeft: "1px solid rgba(255,255,255,0.15)", paddingLeft: "1rem" }}>
+                                    <span style={styles.proStatLabel}>Score Projet</span>
+                                    <span style={styles.proStatValue}>{Number(project.upcyclingScore || 0).toFixed(1)}</span>
+                                </div>
+                            </div>
+                        </aside>
+                    </div>
+                </div>
+            </article>
+        );
+    };
+
     return (
         <div style={styles.container}>
             <header style={styles.header}>
@@ -379,188 +588,53 @@ function ProjetsPostesContent() {
             </div>
 
             <div style={styles.feed}>
-                {filtered.map((project) => {
-                    const beforeSrc = project.beforeImage || "";
-                    const afterSrc = project.afterImage || "";
-                    const hasAnyImage = Boolean(beforeSrc || afterSrc);
-                    const joinedLabel = project.proJoinedAt
-                        ? new Date(project.proJoinedAt).toLocaleDateString("fr-FR")
-                        : "N/A";
-                    const proName = (project.proDisplayName || "N/A").trim();
-                    const proInitials = proName === "N/A"
-                        ? "NA"
-                        : proName
-                            .split(/\s+/)
-                            .filter(Boolean)
-                            .slice(0, 2)
-                            .map((part) => part[0]?.toUpperCase() || "")
-                            .join("");
-                    const proAvatarUrl = project.proAvatarUrl || "";
-
-                    const handleToggleLike = async (e, p) => {
-                        e.stopPropagation();
-                        try {
-                            const resp = await fetch(apiUrl(`/part/projects/${p.id}/like`), {
-                                method: "POST",
-                                headers: buildAuthHeaders(),
-                            });
-                            const data = await resp.json();
-                            if (resp.ok) {
-                                setProjects(prev => prev.map(proj => proj.id === p.id ? { ...proj, isLiked: data.isLiked, likeCount: data.likeCount } : proj));
-                            }
-                        } catch (err) { console.error(err); }
-                    };
-
-                    const handleToggleBookmark = async (e, p) => {
-                        e.stopPropagation();
-                        try {
-                            const resp = await fetch(apiUrl(`/part/projects/${p.id}/bookmark`), {
-                                method: "POST",
-                                headers: buildAuthHeaders(),
-                            });
-                            const data = await resp.json();
-                            if (resp.ok) {
-                                setProjects(prev => prev.map(proj => proj.id === p.id ? { ...proj, isBookmarked: data.isBookmarked, bookmarkCount: data.bookmarkCount } : proj));
-                            }
-                        } catch (err) { console.error(err); }
-                    };
-
-                    return (
-                    <article
-                        key={project.id}
-                        style={styles.card}
-                        onClick={() => router.push(`/projets/voir/${project.id}?from=postes`)}
-                    >
-                        {/* Social Buttons */}
-                        <div style={{ position: "absolute", top: "1.2rem", right: "1.2rem", zIndex: 10, display: "flex", gap: "0.6rem" }}>
-                            <button
-                                onClick={(e) => handleToggleLike(e, project)}
-                                style={{
-                                    background: "rgba(0,0,0,0.45)",
-                                    backdropFilter: "blur(8px)",
-                                    border: "1px solid rgba(255,255,255,0.15)",
-                                    borderRadius: "50px",
-                                    padding: "0.5rem 0.8rem",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "0.4rem",
-                                    color: project.isLiked ? "#ff4d4d" : "white",
-                                    cursor: "pointer",
-                                    transition: "all 0.2s ease"
-                                }}
-                            >
-                                <Heart size={16} fill={project.isLiked ? "#ff4d4d" : "transparent"} />
-                                <span style={{ fontSize: "0.8rem", fontWeight: "700" }}>{project.likeCount || 0}</span>
-                            </button>
-                            <button
-                                onClick={(e) => handleToggleBookmark(e, project)}
-                                style={{
-                                    background: "rgba(0,0,0,0.45)",
-                                    backdropFilter: "blur(8px)",
-                                    border: "1px solid rgba(255,255,255,0.15)",
-                                    borderRadius: "50px",
-                                    padding: "0.5rem 0.8rem",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "0.4rem",
-                                    color: project.isBookmarked ? "#4ade80" : "white",
-                                    cursor: "pointer",
-                                    transition: "all 0.2s ease"
-                                }}
-                            >
-                                <Bookmark size={16} fill={project.isBookmarked ? "#4ade80" : "transparent"} />
-                                <span style={{ fontSize: "0.8rem", fontWeight: "700" }}>{project.bookmarkCount || 0}</span>
-                            </button>
+                {featuredProjects.length > 0 && (
+                    <div style={{ marginBottom: "2rem" }}>
+                        <div style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.5rem",
+                            fontSize: "1.15rem",
+                            fontWeight: "700",
+                            color: "#ca8a04",
+                            marginBottom: "1rem",
+                            borderBottom: "2px solid #ca8a04",
+                            paddingBottom: "0.5rem",
+                        }}>
+                            <Award size={18} fill="#ca8a04" />
+                            Projets mis en avant
                         </div>
-                        {hasAnyImage ? (
-                            <>
-                                <div style={styles.mediaSplit}>
-                                    <div style={styles.mediaPane}>
-                                        {beforeSrc ? (
-                                            <img src={beforeSrc} alt={`Avant - ${project.title || "Projet"}`} style={styles.paneImage} data-i18n-user-content="true" />
-                                        ) : (
-                                            <div style={styles.paneFallback}>Avant</div>
-                                        )}
-                                        <div style={styles.paneLabel}>Avant</div>
-                                    </div>
-                                    <div style={styles.mediaPane}>
-                                        {afterSrc ? (
-                                            <img src={afterSrc} alt={`Après - ${project.title || "Projet"}`} style={styles.paneImage} data-i18n-user-content="true" />
-                                        ) : (
-                                            <div style={styles.paneFallback}>Apres</div>
-                                        )}
-                                        <div style={styles.paneLabel}>Apres</div>
-                                    </div>
-                                </div>
-                                <div style={styles.mediaDivider} />
-                            </>
-                        ) : (
-                            <div style={styles.cardFallback}>UpcycleConnect</div>
-                        )}
-                        <div style={styles.gradientSideLeft} />
-                        <div style={styles.gradientSideRight} />
-                        <div style={styles.gradientLayer} />
+                        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                            {featuredProjects.map((project) => renderProjectCard(project))}
+                        </div>
+                    </div>
+                )}
 
-
-                        <div style={styles.cardOverlay}>
-                            <div style={styles.contentGrid} className="card-content-grid">
-                                <div style={styles.descriptionWrap}>
-                                    <h3 style={styles.cardTitle}>
-                                        {project.title ? <span data-i18n-user-content="true">{project.title}</span> : <>Projet #{project.id}</>}
-                                    </h3>
-                                    <p style={styles.meta}>
-                                        {project.category ? <span data-i18n-user-content="true">{project.category}</span> : "Catégorie non définie"} · Mis à jour le {new Date(project.updatedAt).toLocaleDateString("fr-FR")}
-                                    </p>
-                                    <p style={styles.description}>
-                                        {project.description ? <span data-i18n-user-content="true">{project.description}</span> : "Description non renseignée."}
-                                    </p>
-                                    <div style={styles.tagsRow}>
-                                        {project.category ? <span style={styles.tag} data-i18n-user-content="true">{project.category}</span> : null}
-                                        <span style={styles.tag}>{project.itemCount || 0} objet(s)</span>
-                                        <span style={styles.tag}>{Number(project.upcyclingScore || 0).toFixed(1)} points UC</span>
-                                        <span style={styles.tag}>{Number(project.totalWeightKg || 0).toFixed(1)} kg revalorisés</span>
-                                    </div>
-                                </div>
-
-                                <aside style={styles.proPanel}>
-                                    <div style={styles.proHeader}>
-                                        <div style={styles.proAvatar}>
-                                            {proAvatarUrl ? (
-                                                <img src={proAvatarUrl} alt={proName} style={{ width: "100%", height: "100%", objectFit: "cover" }} data-i18n-user-content="true" />
-                                            ) : (
-                                                <span>{proInitials}</span>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <p style={styles.proHeading}>Professionnel</p>
-                                            <p style={styles.proName} data-i18n-user-content="true">{proName}</p>
-                                        </div>
-                                    </div>
-                                    <div style={styles.proStatsRow}>
-                                        <div style={styles.proStat}>
-                                            <span style={styles.proStatLabel}>Inscription</span>
-                                            <span style={styles.proStatValue}>{joinedLabel}</span>
-                                        </div>
-                                        <div style={styles.proStat}>
-                                            <span style={styles.proStatLabel}>Projets</span>
-                                            <span style={styles.proStatValue}>{Number(project.proProjectsSinceSignup || 0)}</span>
-                                        </div>
-                                    </div>
-                                    <div style={styles.proStatsRow}>
-                                        <div style={styles.proStat}>
-                                            <span style={styles.proStatLabel}>Score Total</span>
-                                            <span style={styles.proStatValue}>{Number(project.proTotalUCScore || 0).toFixed(1)}</span>
-                                        </div>
-                                        <div style={{ ...styles.proStat, borderLeft: "1px solid rgba(255,255,255,0.15)", paddingLeft: "1rem" }}>
-                                            <span style={styles.proStatLabel}>Score Projet</span>
-                                            <span style={styles.proStatValue}>{Number(project.upcyclingScore || 0).toFixed(1)}</span>
-                                        </div>
-                                    </div>
-                                </aside>
+                {otherProjects.length > 0 ? (
+                    <div>
+                        {featuredProjects.length > 0 && (
+                            <div style={{
+                                fontSize: "1.15rem",
+                                fontWeight: "700",
+                                color: "var(--text-main)",
+                                marginBottom: "1rem",
+                                borderBottom: "2px solid var(--border)",
+                                paddingBottom: "0.5rem",
+                            }}>
+                                Tous les projets
                             </div>
+                        )}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                            {otherProjects.map((project) => renderProjectCard(project))}
                         </div>
-                    </article>
-                )})}
+                    </div>
+                ) : (
+                    featuredProjects.length === 0 && (
+                        <p style={{ color: "var(--text-muted)", textAlign: "center", padding: "3rem" }}>
+                            Aucun projet trouvé.
+                        </p>
+                    )
+                )}
             </div>
 
             <style jsx>{`

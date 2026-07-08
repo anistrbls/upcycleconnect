@@ -134,6 +134,36 @@ func systemLogsMiddleware(next http.Handler) http.Handler {
 		source := "HTTP"
 		msg := fmt.Sprintf("%s %s → %d (%s)", r.Method, path, rec.status, duration.Round(time.Millisecond))
 
+		// Extraire IP
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip == "" {
+			ip = r.Header.Get("X-Real-IP")
+		}
+		if ip == "" {
+			ip = r.RemoteAddr
+		}
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+
+		// Extraire User ID / Email du JWT si présent
+		var userID int64
+		var userEmail string
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			tokenString := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+			claims := jwt.MapClaims{}
+			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+				return jwtSecret, nil
+			}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+			if err == nil && token.Valid {
+				if uidVal, ok := claims["userId"].(float64); ok {
+					userID = int64(uidVal)
+				}
+				userEmail, _ = claims["email"].(string)
+			}
+		}
+
 		meta := map[string]any{
 			"method":   r.Method,
 			"path":     path,
@@ -142,6 +172,15 @@ func systemLogsMiddleware(next http.Handler) http.Handler {
 		}
 		if ua := r.Header.Get("User-Agent"); ua != "" {
 			meta["user_agent"] = ua
+		}
+		if ip != "" {
+			meta["ip"] = ip
+		}
+		if userID > 0 {
+			meta["user_id"] = userID
+		}
+		if userEmail != "" {
+			meta["user_email"] = userEmail
 		}
 
 		WriteLog(level, source, msg, meta)
@@ -207,9 +246,9 @@ func systemLogsHandler(w http.ResponseWriter, r *http.Request) {
 		argIdx++
 	}
 	if search != "" {
-		where = append(where, fmt.Sprintf("(message ILIKE $%d OR source ILIKE $%d)", argIdx, argIdx+1))
-		args = append(args, "%"+search+"%", "%"+search+"%")
-		argIdx += 2
+		where = append(where, fmt.Sprintf("(message ILIKE $%d OR source ILIKE $%d OR COALESCE(metadata->>'ip', '') ILIKE $%d OR COALESCE(metadata->>'user_email', '') ILIKE $%d)", argIdx, argIdx+1, argIdx+2, argIdx+3))
+		args = append(args, "%"+search+"%", "%"+search+"%", "%"+search+"%", "%"+search+"%")
+		argIdx += 4
 	}
 	if source != "" {
 		where = append(where, fmt.Sprintf("source = $%d", argIdx))
